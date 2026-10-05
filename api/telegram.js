@@ -1,43 +1,254 @@
 export default async function handler(req, res) {
-  // ------------------------------------------------------------
-  // Telegram webhook
-  // ------------------------------------------------------------
+  // ---------------------------------------------------------
+  // GET
+  // ---------------------------------------------------------
+  if (req.method === "GET") {
+    const setup = req.query?.setup;
+
+    if (setup === "webhook") {
+      return showWebhookSetupPage(req, res);
+    }
+
+    return res.status(200).json({
+      ok: true,
+      service: "Portfolio Agent Telegram Bot"
+    });
+  }
+
+  // ---------------------------------------------------------
+  // POST
+  // ---------------------------------------------------------
   if (req.method === "POST") {
     return handleTelegramWebhook(req, res);
   }
 
-  // ------------------------------------------------------------
-  // Browser-accessible webhook setup
-  // ------------------------------------------------------------
-  if (req.method === "GET" && req.query?.setup === "webhook") {
-    return handleWebhookSetupPage(req, res);
-  }
-
-  return res.status(200).json({
-    ok: true,
-    service: "Portfolio Agent Telegram Bot"
+  return res.status(405).json({
+    ok: false,
+    error: "Method not allowed"
   });
 }
 
 
-// ============================================================
-// Telegram webhook handler
-// ============================================================
+// =========================================================
+// WEBHOOK SETUP PAGE
+// =========================================================
+
+function showWebhookSetupPage(req, res) {
+  const key = req.query?.key;
+
+  // If a key was submitted, perform the setup.
+  if (key !== undefined) {
+    return performWebhookSetup(key, req, res);
+  }
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Portfolio Agent - Webhook Setup</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 60px auto;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 24px;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      margin: 10px 0;
+      box-sizing: border-box;
+      font-size: 16px;
+    }
+
+    button {
+      padding: 12px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+
+<h1>Portfolio Agent Telegram Webhook</h1>
+
+<p>Enter the SETUP_SECRET configured in Vercel.</p>
+
+<form method="GET" action="/api/telegram">
+  <input type="hidden" name="setup" value="webhook">
+
+  <input
+    type="password"
+    name="key"
+    placeholder="SETUP_SECRET"
+    required
+  >
+
+  <button type="submit">
+    Configure Webhook
+  </button>
+</form>
+
+</body>
+</html>
+`;
+
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.status(200).send(html);
+}
+
+
+// =========================================================
+// PERFORM WEBHOOK SETUP
+// =========================================================
+
+async function performWebhookSetup(key, req, res) {
+  try {
+    const setupSecret = process.env.SETUP_SECRET;
+
+    if (!setupSecret) {
+      return sendHtmlResult(
+        res,
+        "Configuration Error",
+        "SETUP_SECRET is not configured in Vercel."
+      );
+    }
+
+    if (key !== setupSecret) {
+      return sendHtmlResult(
+        res,
+        "Authentication Failed",
+        "The SETUP_SECRET is incorrect."
+      );
+    }
+
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+
+    if (!token) {
+      return sendHtmlResult(
+        res,
+        "Configuration Error",
+        "TELEGRAM_BOT_TOKEN is not configured in Vercel."
+      );
+    }
+
+    const host = req.headers.host;
+
+    if (!host) {
+      return sendHtmlResult(
+        res,
+        "Configuration Error",
+        "Unable to determine the Vercel deployment host."
+      );
+    }
+
+    const webhookUrl = `https://${host}/api/telegram`;
+
+    const webhookSecret =
+      process.env.TELEGRAM_WEBHOOK_SECRET;
+
+    const body = {
+      url: webhookUrl
+    };
+
+    if (webhookSecret) {
+      body.secret_token = webhookSecret;
+    }
+
+    console.log("Attempting Telegram webhook setup:", webhookUrl);
+
+    const response = await fetch(
+      `https://api.telegram.org/bot${token}/setWebhook`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      }
+    );
+
+    const result = await response.json();
+
+    console.log("Telegram setWebhook response:", result);
+
+    if (!response.ok || !result.ok) {
+      const description =
+        result?.description ||
+        "Telegram rejected the webhook configuration.";
+
+      return sendHtmlResult(
+        res,
+        "Webhook Setup Failed",
+        description
+      );
+    }
+
+    return sendHtmlResult(
+      res,
+      "Webhook Configured Successfully",
+      `
+Webhook URL:
+
+<strong>${escapeHtml(webhookUrl)}</strong>
+
+<br><br>
+
+Telegram accepted the webhook configuration.
+<br><br>
+
+You can now open your Telegram bot and send:
+<br>
+<strong>/start</strong>
+`
+    );
+
+  } catch (error) {
+    console.error("Webhook setup exception:", error);
+
+    return sendHtmlResult(
+      res,
+      "Server Error",
+      error?.message || "An unexpected error occurred."
+    );
+  }
+}
+
+
+// =========================================================
+// TELEGRAM WEBHOOK HANDLER
+// =========================================================
 
 async function handleTelegramWebhook(req, res) {
-  const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  const webhookSecret =
+    process.env.TELEGRAM_WEBHOOK_SECRET;
+
   const suppliedSecret =
     req.headers["x-telegram-bot-api-secret-token"];
 
-  if (webhookSecret && suppliedSecret !== webhookSecret) {
-    return res.status(401).json({ ok: false });
+  if (
+    webhookSecret &&
+    suppliedSecret !== webhookSecret
+  ) {
+    return res.status(401).json({
+      ok: false
+    });
   }
 
   const update = req.body || {};
   const message = update.message;
 
   if (!message?.chat?.id) {
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({
+      ok: true
+    });
   }
 
   const chatId = message.chat.id;
@@ -57,14 +268,10 @@ async function handleTelegramWebhook(req, res) {
       "/refresh — refresh market data";
   } else if (text === "/status") {
     reply =
-      "Portfolio Agent is connected.\n\n" +
-      "Live portfolio calculations will be enabled after " +
-      "the data-source and market-data layers are configured.";
+      "Portfolio Agent is connected.";
   } else if (text === "/allocation") {
     reply =
-      "Allocation reporting is not configured yet.\n\n" +
-      "The next stage will connect the persistent portfolio " +
-      "configuration and live price layer.";
+      "Allocation reporting is not configured yet.";
   } else {
     reply =
       "Command received.\n\n" +
@@ -80,129 +287,23 @@ async function handleTelegramWebhook(req, res) {
 
   await sendTelegramMessage(chatId, reply);
 
-  return res.status(200).json({ ok: true });
+  return res.status(200).json({
+    ok: true
+  });
 }
 
 
-// ============================================================
-// Browser setup page
-// ============================================================
-
-async function handleWebhookSetupPage(req, res) {
-  if (req.method !== "GET") {
-    return res.status(405).send("Method not allowed");
-  }
-
-  const setupSecret = process.env.SETUP_SECRET;
-
-  if (!setupSecret) {
-    return res.status(500).send("SETUP_SECRET is not configured.");
-  }
-
-  const providedSecret = req.query?.key;
-
-  if (!providedSecret || providedSecret !== setupSecret) {
-    return res.status(401).send(`
-      <!doctype html>
-      <html>
-        <body style="font-family:Arial,sans-serif;padding:40px">
-          <h2>Portfolio Agent</h2>
-          <p>Authorization required.</p>
-          <form method="GET">
-            <input type="hidden" name="setup" value="webhook">
-            <input
-              type="password"
-              name="key"
-              placeholder="Setup secret"
-              style="padding:10px;width:300px"
-            >
-            <button
-              type="submit"
-              style="padding:10px 16px;margin-left:8px"
-            >
-              Configure Webhook
-            </button>
-          </form>
-        </body>
-      </html>
-    `);
-  }
-
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-
-  if (!token) {
-    return res.status(500).send("TELEGRAM_BOT_TOKEN is not configured.");
-  }
-
-  const host = req.headers.host;
-
-  if (!host) {
-    return res.status(500).send("Unable to determine deployment host.");
-  }
-
-  const webhookUrl = `https://${host}/api/telegram`;
-
-  const body = {
-    url: webhookUrl
-  };
-
-  const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
-
-  if (webhookSecret) {
-    body.secret_token = webhookSecret;
-  }
-
-  const response = await fetch(
-    `https://api.telegram.org/bot${token}/setWebhook`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(body)
-    }
-  );
-
-  const result = await response.json();
-
-  if (!response.ok || !result.ok) {
-    console.error("Telegram webhook setup failed");
-    return res.status(500).send(`
-      <!doctype html>
-      <html>
-        <body style="font-family:Arial,sans-serif;padding:40px">
-          <h2>Webhook setup failed</h2>
-          <p>Telegram did not accept the webhook configuration.</p>
-        </body>
-      </html>
-    `);
-  }
-
-  return res.status(200).send(`
-    <!doctype html>
-    <html>
-      <body style="font-family:Arial,sans-serif;padding:40px">
-        <h2>Webhook configured successfully</h2>
-        <p>Telegram is now connected to Portfolio Agent.</p>
-        <p>
-          Webhook endpoint:
-          <code>${webhookUrl}</code>
-        </p>
-      </body>
-    </html>
-  `);
-}
-
-
-// ============================================================
-// Telegram API helper
-// ============================================================
+// =========================================================
+// SEND TELEGRAM MESSAGE
+// =========================================================
 
 async function sendTelegramMessage(chatId, text) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
 
   if (!token) {
-    console.error("TELEGRAM_BOT_TOKEN is not configured");
+    console.error(
+      "TELEGRAM_BOT_TOKEN is not configured"
+    );
     return;
   }
 
@@ -211,7 +312,7 @@ async function sendTelegramMessage(chatId, text) {
     {
       method: "POST",
       headers: {
-        "content-type": "application/json"
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
         chat_id: chatId,
@@ -221,6 +322,83 @@ async function sendTelegramMessage(chatId, text) {
   );
 
   if (!response.ok) {
-    console.error("Telegram API error");
+    console.error(
+      "Telegram API error:",
+      await response.text()
+    );
   }
+}
+
+
+// =========================================================
+// HTML HELPERS
+// =========================================================
+
+function sendHtmlResult(res, title, message) {
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 700px;
+      margin: 60px auto;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 24px;
+    }
+
+    .message {
+      margin-top: 25px;
+      padding: 20px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+
+    a {
+      display: inline-block;
+      margin-top: 25px;
+    }
+  </style>
+</head>
+
+<body>
+
+<h1>${escapeHtml(title)}</h1>
+
+<div class="message">
+  ${message}
+</div>
+
+<a href="/api/telegram?setup=webhook">
+  Back to setup
+</a>
+
+</body>
+</html>
+`;
+
+  res.setHeader(
+    "Content-Type",
+    "text/html; charset=utf-8"
+  );
+
+  return res.status(200).send(html);
+}
+
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
