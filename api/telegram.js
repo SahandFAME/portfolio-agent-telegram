@@ -7,22 +7,16 @@ export default async function handler(req, res) {
   }
 
   // ------------------------------------------------------------
-  // Protected webhook setup
+  // Browser-accessible webhook setup
   // ------------------------------------------------------------
-  if (req.method === "GET") {
-    const setup = req.query?.setup;
-
-    if (setup === "webhook") {
-      return handleWebhookSetup(req, res);
-    }
-
-    return res.status(200).json({
-      ok: true,
-      service: "Portfolio Agent Telegram Bot"
-    });
+  if (req.method === "GET" && req.query?.setup === "webhook") {
+    return handleWebhookSetupPage(req, res);
   }
 
-  return res.status(405).json({ ok: false });
+  return res.status(200).json({
+    ok: true,
+    service: "Portfolio Agent Telegram Bot"
+  });
 }
 
 
@@ -91,43 +85,59 @@ async function handleTelegramWebhook(req, res) {
 
 
 // ============================================================
-// Secure webhook setup
+// Browser setup page
 // ============================================================
 
-async function handleWebhookSetup(req, res) {
+async function handleWebhookSetupPage(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).send("Method not allowed");
+  }
+
   const setupSecret = process.env.SETUP_SECRET;
 
   if (!setupSecret) {
-    console.error("SETUP_SECRET is not configured");
-    return res.status(500).json({
-      ok: false,
-      error: "SETUP_SECRET is not configured"
-    });
+    return res.status(500).send("SETUP_SECRET is not configured.");
   }
 
-  const suppliedSecret = req.headers["x-setup-secret"];
+  const providedSecret = req.query?.key;
 
-  if (suppliedSecret !== setupSecret) {
-    return res.status(401).json({ ok: false });
+  if (!providedSecret || providedSecret !== setupSecret) {
+    return res.status(401).send(`
+      <!doctype html>
+      <html>
+        <body style="font-family:Arial,sans-serif;padding:40px">
+          <h2>Portfolio Agent</h2>
+          <p>Authorization required.</p>
+          <form method="GET">
+            <input type="hidden" name="setup" value="webhook">
+            <input
+              type="password"
+              name="key"
+              placeholder="Setup secret"
+              style="padding:10px;width:300px"
+            >
+            <button
+              type="submit"
+              style="padding:10px 16px;margin-left:8px"
+            >
+              Configure Webhook
+            </button>
+          </form>
+        </body>
+      </html>
+    `);
   }
 
   const token = process.env.TELEGRAM_BOT_TOKEN;
 
   if (!token) {
-    console.error("TELEGRAM_BOT_TOKEN is not configured");
-    return res.status(500).json({
-      ok: false,
-      error: "TELEGRAM_BOT_TOKEN is not configured"
-    });
+    return res.status(500).send("TELEGRAM_BOT_TOKEN is not configured.");
   }
 
   const host = req.headers.host;
 
   if (!host) {
-    return res.status(500).json({
-      ok: false,
-      error: "Unable to determine deployment host"
-    });
+    return res.status(500).send("Unable to determine deployment host.");
   }
 
   const webhookUrl = `https://${host}/api/telegram`;
@@ -157,16 +167,30 @@ async function handleWebhookSetup(req, res) {
 
   if (!response.ok || !result.ok) {
     console.error("Telegram webhook setup failed");
-    return res.status(500).json({
-      ok: false,
-      error: "Telegram webhook setup failed"
-    });
+    return res.status(500).send(`
+      <!doctype html>
+      <html>
+        <body style="font-family:Arial,sans-serif;padding:40px">
+          <h2>Webhook setup failed</h2>
+          <p>Telegram did not accept the webhook configuration.</p>
+        </body>
+      </html>
+    `);
   }
 
-  return res.status(200).json({
-    ok: true,
-    webhook: webhookUrl
-  });
+  return res.status(200).send(`
+    <!doctype html>
+    <html>
+      <body style="font-family:Arial,sans-serif;padding:40px">
+        <h2>Webhook configured successfully</h2>
+        <p>Telegram is now connected to Portfolio Agent.</p>
+        <p>
+          Webhook endpoint:
+          <code>${webhookUrl}</code>
+        </p>
+      </body>
+    </html>
+  `);
 }
 
 
