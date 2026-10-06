@@ -1,3 +1,7 @@
+import { put, get } from "@vercel/blob";
+
+const PORTFOLIO_SNAPSHOT_PATH = "portfolio/latest.json";
+
 export default async function handler(req, res) {
   // ---------------------------------------------------------
   // GET
@@ -20,6 +24,7 @@ export default async function handler(req, res) {
   // ---------------------------------------------------------
 
   if (req.method === "POST" && req.query?.sync === "portfolio") return handlePortfolioSync(req, res);
+  if (req.method === "GET" && req.query?.data === "portfolio") return handlePortfolioData(req, res);
 
   if (req.method === "POST") {
     return handleTelegramWebhook(req, res);
@@ -54,11 +59,74 @@ async function handlePortfolioSync(req, res) {
     assets[name] = n;
   }
 
+  const snapshot = {
+    version: String(body.version),
+    updated_at: String(body.updated_at),
+    workbook_updated_at: body.workbook_updated_at ? String(body.workbook_updated_at) : null,
+    assets
+  };
+
+  try {
+    await put(
+      PORTFOLIO_SNAPSHOT_PATH,
+      JSON.stringify(snapshot, null, 2),
+      {
+        access: "private",
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        contentType: "application/json"
+      }
+    );
+  } catch (error) {
+    console.error("Portfolio snapshot storage error:", error);
+    return res.status(500).json({ ok: false, error: "Unable to store portfolio snapshot" });
+  }
+
   return res.status(200).json({
     ok: true,
     received: Object.keys(assets).length,
-    updated_at: body.updated_at
+    updated_at: snapshot.updated_at,
+    stored: true
   });
+}
+
+async function handlePortfolioData(req, res) {
+  const expected = process.env.PORTFOLIO_SYNC_SECRET;
+  const supplied = req.headers["x-portfolio-sync-secret"];
+
+  if (!expected || supplied !== expected) {
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+
+  try {
+    const result = await get(PORTFOLIO_SNAPSHOT_PATH, {
+      access: "private",
+      useCache: false
+    });
+
+    if (!result) {
+      return res.status(404).json({ ok: false, error: "No portfolio snapshot available" });
+    }
+
+    const chunks = [];
+    const reader = result.stream.getReader();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(Buffer.from(value));
+    }
+
+    const snapshot = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+
+    return res.status(200).json({
+      ok: true,
+      snapshot
+    });
+  } catch (error) {
+    console.error("Portfolio snapshot read error:", error);
+    return res.status(404).json({ ok: false, error: "No portfolio snapshot available" });
+  }
 }
 
 // =========================================================
