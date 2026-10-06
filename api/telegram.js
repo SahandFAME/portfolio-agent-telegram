@@ -18,6 +18,9 @@ export default async function handler(req, res) {
   // ---------------------------------------------------------
   // POST
   // ---------------------------------------------------------
+
+  if (req.method === "POST" && req.query?.sync === "portfolio") return handlePortfolioSync(req, res);
+
   if (req.method === "POST") {
     return handleTelegramWebhook(req, res);
   }
@@ -28,6 +31,35 @@ export default async function handler(req, res) {
   });
 }
 
+
+async function handlePortfolioSync(req, res) {
+  const expected = process.env.PORTFOLIO_SYNC_SECRET;
+  const supplied = req.headers["x-portfolio-sync-secret"];
+
+  if (!expected || supplied !== expected) {
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+
+  const body = req.body || {};
+  if (!body.version || !body.updated_at || typeof body.assets !== "object" || Array.isArray(body.assets)) {
+    return res.status(400).json({ ok: false, error: "Invalid portfolio payload" });
+  }
+
+  const assets = {};
+  for (const [name, value] of Object.entries(body.assets)) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) {
+      return res.status(400).json({ ok: false, error: "Invalid quantity for " + name });
+    }
+    assets[name] = n;
+  }
+
+  return res.status(200).json({
+    ok: true,
+    received: Object.keys(assets).length,
+    updated_at: body.updated_at
+  });
+}
 
 // =========================================================
 // WEBHOOK SETUP PAGE
