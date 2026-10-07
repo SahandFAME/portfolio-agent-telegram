@@ -179,8 +179,8 @@ async function shakhesban(symbol,type){
     try{
       const html=await fetchText("https://www.shakhesban.com/markets/"+t+"/"+slug);
       const plain=normMarketText(html
-        .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
-        .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+        .replace(/<script[\s\S]*?<\/script>/gi," ")
+        .replace(/<style[\s\S]*?<\/style>/gi," ")
         .replace(/<[^>]+>/g," ")
         .replace(/&nbsp;/gi," "));
       const marker=plain.indexOf("آخرین قیمت");
