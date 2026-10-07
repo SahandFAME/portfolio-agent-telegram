@@ -11,7 +11,7 @@ const ASSETS = [
 const MANUAL = {"سکه تمام":3,"ربع سکه غیره":3,"ربع سکه بانکی":1,"آبشده (طلب)":1.37,"آبشده (شمش زربد)":20,"دلار":3030};
 
 const LISTED = {
-  "طلا":"طلا","عیار":"عیار","گوهر":"گوهر","آلتون":"آلتون","امرالد":"امرالد",
+"عیار":"عیار","گوهر":"گوهر","آلتون":"آلتون","امرالد":"امرالد",
   "زرفام":"زرفام","نهال":"نهال","طعام":"طعام","استیل":"استیل",
   "فلز فارابی":"فلزفارابی","پتروآگاه":"پتروآگاه","خودران":"خودران",
   "سجام":"سجام","فملی":"فملی"
@@ -137,21 +137,31 @@ async function tsetmc(symbol){
   return {priceRial,source:"TSETMC",symbol:hit.lVal18AFC,retrievedAt:new Date().toISOString()};
 }
 
-async function fundFromTgju(symbol){
-  const html=await fetchText("https://www.tgju.org/markets/fund");
-  const marker=html.indexOf(">"+symbol+"<");
-  if(marker<0)throw new Error("TGJU fund not found");
-  const tail=html.slice(marker,marker+12000);
-  const nums=[...tail.matchAll(/>([0-9][0-9,٬،]*)</g)].map(m=>parseNum(m[1])).filter(x=>x!==null);
-  if(!nums.length)throw new Error("TGJU fund price not found");
-  return {priceRial:nums[0],source:"TGJU funds",retrievedAt:new Date().toISOString()};
+async function tgjuMarket(symbol){
+  const html=await fetchText("https://www.tgju.org/markets/all");
+  const plain=html
+    .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
+    .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+    .replace(/<[^>]+>/g," ")
+    .replace(/&nbsp;/gi," ")
+    .replace(/\\s+/g," ")
+    .trim();
+  const marker=plain.indexOf(" "+symbol+" ");
+  if(marker<0)throw new Error("TGJU market symbol not found");
+  const tail=plain.slice(marker+symbol.length,marker+symbol.length+500);
+  const nums=[...tail.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*(?:\\.[۰-۹٠-٩0-9]+)?/g)]
+    .map(m=>parseNum(m[0])).filter(x=>x!==null);
+  if(!nums.length)throw new Error("TGJU market price not found");
+  const priceRial=nums[0];
+  if(!Number.isFinite(priceRial)||priceRial<=0)throw new Error("TGJU market price invalid");
+  return {priceRial,source:"TGJU markets/all",symbol,retrievedAt:new Date().toISOString()};
 }
 
 async function getListedPrice(asset){
   const symbol=LISTED[asset];
-  try{return await tsetmc(symbol);}
+  try{return await tgjuMarket(symbol);}
   catch(e){
-    try{return await fundFromTgju(symbol);}
+    try{return await tsetmc(symbol);}
     catch(e2){throw new Error(asset+" price unavailable");}
   }
 }
