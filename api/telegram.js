@@ -85,11 +85,12 @@ async function savePendingBlackRock(chatId,pending){
   });
 }
 function parseUserPrice(text){
-  const n=parseNum(String(text||"").replace(/تومان|ریال/gi,"").replace(/\s/g,""));
+  const raw=String(text||"");
+  const isRial=/ریال/i.test(raw);
+  const n=parseNum(raw.replace(/تومان|ریال/gi,"").replace(/\s/g,""));
   if(n===null||n<=0)return null;
-  // User is asked for toman/unit. If they explicitly provide rial, convert it.
-  if(/ریال/i.test(text))return n;
-  return n*10;
+  // User is asked for toman/unit. If they explicitly provide rial, keep it as rial.
+  return isRial?n:n*10;
 }
 async function telegram(req,res){
   const secret=process.env.TELEGRAM_WEBHOOK_SECRET;
@@ -248,18 +249,18 @@ async function shakhesban(symbol,type){
 
 async function shakhesbanSilverBar(){
   const html=await fetchText("https://www.shakhesban.com/ime/gavahi");
-  const rowMatch=[...String(html||"").matchAll(/<tr\b[\s\S]*?<\/tr>/gi)]
-    .map(m=>m[0])
-    .find(row=>normMarketText(row).includes("SilverBar"));
-  if(!rowMatch)throw new Error("SilverBar row not found");
-  const text=normMarketText(rowMatch
+  const plain=normMarketText(String(html||"")
     .replace(/<script[\s\S]*?<\/script>/gi," ")
     .replace(/<style[\s\S]*?<\/style>/gi," ")
     .replace(/<[^>]+>/g," ")
     .replace(/&nbsp;/gi," "));
-  const nums=[...text.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*(?:\.[۰-۹٠-٩0-9]+)?/g)]
+  const marker=plain.indexOf("SilverBar");
+  if(marker<0)throw new Error("SilverBar row not found");
+  const tail=plain.slice(marker,marker+700);
+  const nums=[...tail.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*(?:\.[۰-۹٠-٩0-9]+)?/g)]
     .map(m=>parseNum(m[0])).filter(x=>x!==null);
-  // The row description contains silver purity (999.9), so the first numeric token is not the market price.\n  const priceRial=nums.find(x=>x>=100000);
+  // The row contains the silver purity 999.9 before the market price.
+  const priceRial=nums.find(x=>x>=1000000&&x<=100000000);
   if(!priceRial||priceRial<=0)throw new Error("SilverBar last trade not found");
   return {priceRial,source:"Shakhesban IME",symbol:"SilverBar",retrievedAt:new Date().toISOString(),unit:"IRR/g"};
 }
@@ -379,9 +380,12 @@ async function allocationReply(q,blackRockPriceRial=null){
     total+=v;
     delete errors["بلک راک"];
   }
-  const missing=ASSETS.filter(a=>errors[a]||!prices[a]);
+  const missing=ASSETS.filter(a=>
+    (errors[a]||!prices[a]) &&
+    !(a==="بلک راک" && blackRockPriceRial!==null)
+  );
   if(errors["بلک راک"]==="USER_INPUT_REQUIRED" && blackRockPriceRial===null){
-    return "Portfolio valuation needs one additional input.\\n\\nPlease send the current EcoCoach بلک راک price per unit in toman.\\nQuantity: "+format(q["بلک راک"]||0)+" units\\n\\nExample: 850000";
+    return "Portfolio valuation needs one additional input.\n\nPlease send the current EcoCoach بلک راک price per unit in toman.\nQuantity: "+format(q["بلک راک"]||0)+" units\n\nExample: 850000";
   }
   if(!total)return "Allocation unavailable: no current prices were obtained.";
   const lines=["Portfolio valuation (live prices)",""];
