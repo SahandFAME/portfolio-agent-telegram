@@ -1,4 +1,5 @@
 import { put, get } from "@vercel/blob";
+import { waitUntil } from "@vercel/functions";
 
 const SNAPSHOT = "portfolio/latest.json";
 const ASSETS = [
@@ -71,22 +72,22 @@ async function telegram(req,res){
   const message=req.body?.message;
   if(!message?.chat?.id)return res.status(200).json({ok:true});
   const command=(message.text||"").trim();
-  const snapshot=await safeSnapshot();
-  const quantities={...(snapshot?.assets||{}),...MANUAL};
-  let reply;
-  if(command==="/start"||command==="/help") reply=help();
-  else if(command==="/status") reply=snapshot?("Portfolio Agent is connected.\n\nTrading Journal snapshot: "+snapshot.updated_at+(snapshot.workbook_updated_at?"\nWorkbook: "+snapshot.workbook_updated_at:"")):"Portfolio Agent is connected, but no Trading Journal snapshot has been synchronized yet.";
-  else if(command==="/assets") reply="Portfolio assets (29)\n\n"+ASSETS.map((a,i)=>(i+1)+". "+a+": "+(quantities[a]===undefined?"not synchronized":format(quantities[a]))).join("\n")+(snapshot?"\n\nSnapshot: "+snapshot.updated_at:"");
-  else if(command==="/gold") reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","نهال","طعام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"Gold & precious metals");
-  else if(command==="/crypto") reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"Crypto");
-  else if(command==="/cash") reply=await valuationReply(quantities,["دلار"],"Cash");
-  else if(command==="/allocation") reply=await allocationReply(quantities);
-  else if(command==="/refresh") reply=await allocationReply(quantities,true);
-  else reply=help();
-  await sendTelegram(message.chat.id,reply);
+  waitUntil((async()=>{
+    const snapshot=await safeSnapshot();
+    const quantities={...(snapshot?.assets||{}),...MANUAL};
+    let reply;
+    if(command==="/start"||command==="/help") reply=help();
+    else if(command==="/status") reply=snapshot?("Portfolio Agent is connected.\\n\\nTrading Journal snapshot: "+snapshot.updated_at+(snapshot.workbook_updated_at?"\\nWorkbook: "+snapshot.workbook_updated_at:"")):"Portfolio Agent is connected, but no Trading Journal snapshot has been synchronized yet.";
+    else if(command==="/assets") reply="Portfolio assets (29)\\n\\n"+ASSETS.map((x,i)=>(i+1)+". "+x+": "+(quantities[x]===undefined?"not synchronized":format(quantities[x]))).join("\\n")+(snapshot?"\\n\\nSnapshot: "+snapshot.updated_at:"");
+    else if(command==="/gold") reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","نهال","طعام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"Gold & precious metals");
+    else if(command==="/crypto") reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"Crypto");
+    else if(command==="/cash") reply=await valuationReply(quantities,["دلار"],"Cash");
+    else if(command==="/allocation"||command==="/refresh") reply=await allocationReply(quantities);
+    else reply=help();
+    await sendTelegram(message.chat.id,reply);
+  })().catch(e=>console.error("Telegram handler error:",e)));
   return res.status(200).json({ok:true});
 }
-
 async function fetchJson(url){
   const r=await fetch(url,{headers:{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36","Accept":"application/json,text/plain,*/*"},cache:"no-store"});
   if(!r.ok) throw new Error("HTTP "+r.status);
@@ -106,15 +107,16 @@ function parseNum(v){
   return Number.isFinite(n)?n:null;
 }
 
-async function tgju(slug){
+async function tgju(slug,range){
   const html=await fetchText("https://www.tgju.org/profile/"+slug);
-  const m=html.match(/نرخ فعلی[^0-9]{0,120}([0-9][0-9,٬،]*)/);
-  if(!m) throw new Error("TGJU price not found");
-  const rial=parseNum(m[1]);
-  if(rial===null)throw new Error("TGJU invalid price");
+  const marker=html.indexOf("نرخ فعلی");
+  if(marker<0)throw new Error("TGJU current-rate marker not found");
+  const tail=html.slice(marker,marker+500);
+  const candidates=[...tail.matchAll(/[0-9][0-9,٬،]*/g)].map(m=>parseNum(m[0])).filter(x=>x!==null);
+  const rial=candidates.filter(x=>!range||(x>=range[0]&&x<=range[1])).sort((x,y)=>y-x)[0];
+  if(rial===undefined)throw new Error("TGJU current price not found or failed validation");
   return {priceRial:rial,source:"TGJU",retrievedAt:new Date().toISOString()};
 }
-
 async function tsetmc(symbol){
   const q=encodeURIComponent(symbol);
   const search=await fetchJson("https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/"+q);
@@ -152,9 +154,24 @@ async function getListedPrice(asset){
 async function getPrices(){
   const prices={};
   const errors={};
-  const goldSlugs={"طلا":"geram18","شمش نقره 999":"silver_999","سکه تمام":"sekee","آبشده (طلب)":"geram18","آبشده (شمش زربد)":"geram18","دلار":"price_dollar_rl"};
-  for(const [asset,slug] of Object.entries(goldSlugs)){try{prices[asset]={...(await tgju(slug)),unit:["دلار"].includes(asset)?"IRR/USD":asset==="شمش نقره 999"?"IRR/g":"IRR/g"};}catch(e){errors[asset]=e.message;}}
-  for(const asset of Object.keys(LISTED)){try{prices[asset]=await getListedPrice(asset);}catch(e){errors[asset]=e.message;}}
+  const goldDefs={
+    "طلا":{slug:"geram18",range:[100000000,1000000000],unit:"IRR/g"},
+    "شمش نقره 999":{slug:"silver_999",range:[1000000,50000000],unit:"IRR/g"},
+    "سکه تمام":{slug:"sekee",range:[1000000000,10000000000],unit:"IRR/coin"},
+    "آبشده (طلب)":{slug:"gold_futures",range:[500000000,2000000000],unit:"IRR/mithqal",perGram:true},
+    "آبشده (شمش زربد)":{slug:"gold_futures",range:[500000000,2000000000],unit:"IRR/mithqal",perGram:true},
+    "دلار":{slug:"price_dollar_rl",range:[500000,5000000],unit:"IRR/USD"}
+  };
+  const jobs=Object.entries(goldDefs).map(async([asset,d])=>{
+    try{
+      const p=await tgju(d.slug,d.range);
+      if(d.perGram)p.priceRial=p.priceRial/4.6083;
+      prices[asset]={...p,unit:d.perGram?"IRR/g":d.unit};
+    }catch(e){errors[asset]=e.message;}
+  });
+  jobs.push(...Object.keys(LISTED).map(async asset=>{
+    try{prices[asset]=await getListedPrice(asset);}catch(e){errors[asset]=e.message;}
+  }));
   try{
     const ids=Object.values(CRYPTO_IDS).join(",");
     const data=await fetchJson("https://api.coingecko.com/api/v3/simple/price?ids="+encodeURIComponent(ids)+"&vs_currencies=usd");
@@ -163,6 +180,7 @@ async function getPrices(){
       if(p===null)errors[asset]="Crypto price unavailable"; else prices[asset]={priceUsd:p,source:"CoinGecko",retrievedAt:new Date().toISOString(),unit:"USD"};
     }
   }catch(e){for(const asset of Object.keys(CRYPTO_IDS))errors[asset]="CoinGecko unavailable";}
+  await Promise.all(jobs);
   // These require asset-specific market data; never substitute a similarly named instrument.
   errors["بلک راک"]="EcoCoach-specific live price source is not yet connected";
   errors["ربع سکه غیره"]="A reliable live non-bank quarter-coin quote is not yet connected";
