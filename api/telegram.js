@@ -118,8 +118,8 @@ function parseNum(v){
 async function tgju(slug,range){
   const html=await fetchText("https://www.tgju.org/profile/"+slug);
   const plain=normMarketText(String(html||"")
-    .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
-    .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+    .replace(/<script[\s\S]*?<\/script>/gi," ")
+    .replace(/<style[\s\S]*?<\/style>/gi," ")
     .replace(/<[^>]+>/g," ")
     .replace(/&nbsp;/gi," "));
   const candidates=[];
