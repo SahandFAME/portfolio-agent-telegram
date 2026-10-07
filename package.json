@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "node-fetch": "^3.3.2",
-    "@vercel/blob": "^2.6.1"
+    "@vercel/blob": "^2.6.1",
+    "@vercel/functions": "^3.0.0"
   }
 }
