@@ -146,15 +146,15 @@ function normMarketText(s){
 }
 function parseMarketPage(html,symbol){
   const target=normMarketText(symbol);
-  const rows=[...String(html||"").matchAll(/<tr\\b[\\s\\S]*?<\\/tr>/gi)].map(m=>m[0]);
+  const rows=[...String(html||"").matchAll(/<tr\b[\s\S]*?<\/tr>/gi)].map(m=>m[0]);
   for(const row of rows){
     const text=normMarketText(row
-      .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
-      .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+      .replace(/<script[\s\S]*?<\/script>/gi," ")
+      .replace(/<style[\s\S]*?<\/style>/gi," ")
       .replace(/<[^>]+>/g," ")
       .replace(/&nbsp;/gi," "));
     if(!text.includes(target))continue;
-    const nums=[...text.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*(?:\\.[۰-۹٠-٩0-9]+)?/g)]
+    const nums=[...text.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*(?:\.[۰-۹٠-٩0-9]+)?/g)]
       .map(m=>parseNum(m[0])).filter(x=>x!==null);
     if(!nums.length)continue;
     const priceRial=nums[0];
