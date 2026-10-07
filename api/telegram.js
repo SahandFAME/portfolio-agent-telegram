@@ -11,10 +11,13 @@ const ASSETS = [
 const MANUAL = {"سکه تمام":3,"ربع سکه غیره":3,"ربع سکه بانکی":1,"آبشده (طلب)":1.37,"آبشده (شمش زربد)":20,"دلار":3030};
 
 const LISTED = {
-"عیار":"عیار","گوهر":"گوهر","آلتون":"آلتون","امرالد":"امرالد",
+  "عیار":"عیار","گوهر":"گوهر","آلتون":"آلتون","امرالد":"امرالد",
   "زرفام":"زرفام","نهال":"نهال","طعام":"طعام","استیل":"استیل",
-  "فلز فارابی":"فلز فارابی","پتروآگاه":"پتروآگاه","خودران":"خودران",
+  "فلز فارابی":"فلزفارابی","پتروآگاه":"پتروآگاه","خودران":"خودران",
   "سجام":"سجام","فملی":"فملی"
+};
+const SHAKHESBAN_TYPE = {
+  "سجام":"stock","فملی":"stock"
 };
 const CRYPTO_IDS = {
   BTC:"bitcoin", ETH:"ethereum", Tether:"tether", Link:"chainlink",
@@ -168,16 +171,44 @@ async function tgjuMarket(symbol,htmls){
   throw new Error("TGJU market symbol not found: "+symbol);
 }
 
+async function shakhesban(symbol,type){
+  const slug=encodeURIComponent(symbol);
+  const types=type?[type]:["fund","stock"];
+  let lastError="not found";
+  for(const t of types){
+    try{
+      const html=await fetchText("https://www.shakhesban.com/markets/"+t+"/"+slug);
+      const plain=normMarketText(html
+        .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
+        .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+        .replace(/<[^>]+>/g," ")
+        .replace(/&nbsp;/gi," "));
+      const marker=plain.indexOf("آخرین قیمت");
+      if(marker<0){lastError="آخرین قیمت not found";continue;}
+      const tail=plain.slice(marker,marker+160);
+      const m=tail.match(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*/);
+      const priceRial=m?parseNum(m[0]):null;
+      if(priceRial===null||priceRial<=0){lastError="last price not found";continue;}
+      return {priceRial,source:"Shakhesban",symbol,retrievedAt:new Date().toISOString()};
+    }catch(e){lastError=e.message;}
+  }
+  throw new Error("Shakhesban price unavailable: "+lastError);
+}
+
 async function getListedPrice(asset,marketHtmls){
   const symbol=LISTED[asset];
-  try{
-    if(!marketHtmls?.length)throw new Error("TGJU market pages unavailable");
-    return await tgjuMarket(symbol,marketHtmls);
-  }catch(e){
-    try{return await tsetmc(symbol);}
-    catch(e2){
-      console.error("Listed price failed:",asset,e.message,"/ TSETMC:",e2.message);
-      throw new Error(asset+" price unavailable");
+  const type=SHAKHESBAN_TYPE[asset];
+  try{return await shakhesban(symbol,type);}
+  catch(e){
+    try{
+      if(!marketHtmls?.length)throw new Error("TGJU market pages unavailable");
+      return await tgjuMarket(symbol,marketHtmls);
+    }catch(e2){
+      try{return await tsetmc(symbol);}
+      catch(e3){
+        console.error("Listed price failed:",asset,"Shakhesban:",e.message,"/ TGJU:",e2.message,"/ TSETMC:",e3.message);
+        throw new Error(asset+" price unavailable");
+      }
     }
   }
 }
