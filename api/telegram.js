@@ -2,6 +2,7 @@ import { put, get } from "@vercel/blob";
 import { waitUntil } from "@vercel/functions";
 
 const SNAPSHOT = "portfolio/latest.json";
+const BLACKROCK_PENDING_PREFIX = "portfolio/pending-blackrock/";
 const ASSETS = [
   "طلا","عیار","گوهر","آلتون","امرالد","زرفام","نهال","طعام","استیل",
   "فلز فارابی","پتروآگاه","خودران","بلک راک","سجام","فملی","شمش نقره 999",
@@ -69,6 +70,27 @@ async function readSnapshot(req,res){
   catch(e){console.error(e);return res.status(404).json({ok:false,error:"No portfolio snapshot available"});}
 }
 
+async function loadPendingBlackRock(chatId){
+  try{
+    const r=await get(BLACKROCK_PENDING_PREFIX+String(chatId)+".json",{access:"private",useCache:false});
+    if(!r)return null;
+    const reader=r.stream.getReader(),chunks=[];
+    while(true){const x=await reader.read();if(x.done)break;chunks.push(Buffer.from(x.value));}
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  }catch(e){return null;}
+}
+async function savePendingBlackRock(chatId,pending){
+  await put(BLACKROCK_PENDING_PREFIX+String(chatId)+".json",JSON.stringify(pending),{
+    access:"private",addRandomSuffix:false,allowOverwrite:true,contentType:"application/json"
+  });
+}
+function parseUserPrice(text){
+  const n=parseNum(String(text||"").replace(/تومان|ریال/gi,"").replace(/\s/g,""));
+  if(n===null||n<=0)return null;
+  // User is asked for toman/unit. If they explicitly provide rial, convert it.
+  if(/ریال/i.test(text))return n;
+  return n*10;
+}
 async function telegram(req,res){
   const secret=process.env.TELEGRAM_WEBHOOK_SECRET;
   if(secret&&req.headers["x-telegram-bot-api-secret-token"]!==secret)return res.status(401).json({ok:false});
@@ -79,7 +101,18 @@ async function telegram(req,res){
     const snapshot=await safeSnapshot();
     const quantities={...(snapshot?.assets||{}),...MANUAL};
     let reply;
-    if(command==="/start"||command==="/help") reply=help();
+    const pending=await loadPendingBlackRock(message.chat.id);
+
+    // A pending BlackRock request is fulfilled by the next user message.
+    if(pending?.type==="blackrock_price"){
+      const priceRial=parseUserPrice(command);
+      if(priceRial===null){
+        reply="Please send the current EcoCoach بلک راک price per unit in toman (for example: 850000).";
+      }else{
+        await savePendingBlackRock(message.chat.id,{type:"blackrock_price",priceRial,enteredAt:new Date().toISOString()});
+        reply=await allocationReply(quantities,priceRial);
+      }
+    }else if(command==="/start"||command==="/help") reply=help();
     else if(command==="/status") reply=snapshot?("Portfolio Agent is connected.\\n\\nTrading Journal snapshot: "+snapshot.updated_at+(snapshot.workbook_updated_at?"\\nWorkbook: "+snapshot.workbook_updated_at:"")):"Portfolio Agent is connected, but no Trading Journal snapshot has been synchronized yet.";
     else if(command==="/assets") reply="Portfolio assets (29)\\n\\n"+ASSETS.map((x,i)=>(i+1)+". "+x+": "+(quantities[x]===undefined?"not synchronized":format(quantities[x]))).join("\\n")+(snapshot?"\\n\\nSnapshot: "+snapshot.updated_at:"");
     else if(command==="/gold") reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","نهال","طعام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"Gold & precious metals");
@@ -251,6 +284,8 @@ async function getPrices(){
     "طلا":{slug:"ime_fund_lotuss",range:[500000,5000000],unit:"IRR/unit",source:"TGJU صندوق طلای لوتوس"},
     "شمش نقره 999":{imeSilver:true,unit:"IRR/g"},
     "سکه تمام":{slug:"sekee",range:[1000000000,10000000000],unit:"IRR/coin"},
+    "ربع سکه بانکی":{slug:"rob",range:[500000000,1500000000],unit:"IRR/coin"},
+    "ربع سکه غیره":{gold18Quarter:true,unit:"IRR/coin"},
     "آبشده (طلب)":{slug:"gold_futures",range:[500000000,2000000000],unit:"IRR/mithqal",perGram:true},
     "آبشده (شمش زربد)":{slug:"gold_futures",range:[500000000,2000000000],unit:"IRR/mithqal",perGram:true},
     "دلار":{slug:"price_dollar_rl",range:[500000,5000000],unit:"IRR/USD"}
@@ -272,7 +307,12 @@ async function getPrices(){
   };
   const jobs=Object.entries(goldDefs).map(async([asset,d])=>{
     try{
-      const p=d.imeSilver?await shakhesbanSilverBar():await tgjuCached(d.slug,d.range);
+      let p;
+      if(d.imeSilver)p=await shakhesbanSilverBar();
+      else if(d.gold18Quarter){
+        const gold18=await tgjuCached("geram18",[100000000,1000000000]);
+        p={...gold18,priceRial:gold18.priceRial*2.03325,source:"TGJU 18K gold × quarter-coin weight",unit:"IRR/coin"};
+      }else p=await tgjuCached(d.slug,d.range);
       if(d.perGram)p.priceRial=p.priceRial/4.6083;
       prices[asset]={...p,unit:d.perGram?"IRR/g":d.unit};
     }catch(e){errors[asset]=e.message;console.error("Gold/metal price failed:",asset,e.message);}
@@ -290,9 +330,9 @@ async function getPrices(){
   }catch(e){for(const asset of Object.keys(CRYPTO_IDS))errors[asset]="CoinGecko unavailable";}
   await Promise.all(jobs);
   // These require asset-specific market data; never substitute a similarly named instrument.
-  errors["بلک راک"]="EcoCoach-specific live price source is not yet connected";
-  errors["ربع سکه غیره"]="A reliable live non-bank quarter-coin quote is not yet connected";
-  errors["ربع سکه بانکی"]="A reliable live bank quarter-coin quote is not yet connected";
+  // بلک راک is the user's EcoCoach private fund. Its current price must be supplied by the user for each valuation.
+  // The allocation flow prompts for it rather than substituting a similarly named security.
+  errors["بلک راک"]="USER_INPUT_REQUIRED";
   return {prices,errors};
 }
 
@@ -319,7 +359,7 @@ async function valuationReply(q,names,title){
   return lines.join("\n");
 }
 
-async function allocationReply(q){
+async function allocationReply(q,blackRockPriceRial=null){
   const {prices,errors}=await getPrices();
   const usdIrr=prices["دلار"]?.priceRial;
   if(!usdIrr)return "Allocation unavailable: current USD/IRR price could not be obtained.";
@@ -328,7 +368,16 @@ async function allocationReply(q){
     if(errors[a]||!prices[a])continue;
     vals[a]=valueRial(a,q[a]||0,prices[a],usdIrr); total+=vals[a];
   }
+  if(blackRockPriceRial!==null){
+    const v=(q["بلک راک"]||0)*blackRockPriceRial;
+    vals["بلک راک"]=v;
+    total+=v;
+    delete errors["بلک راک"];
+  }
   const missing=ASSETS.filter(a=>errors[a]||!prices[a]);
+  if(errors["بلک راک"]==="USER_INPUT_REQUIRED" && blackRockPriceRial===null){
+    return "Portfolio valuation needs one additional input.\\n\\nPlease send the current EcoCoach بلک راک price per unit in toman.\\nQuantity: "+format(q["بلک راک"]||0)+" units\\n\\nExample: 850000";
+  }
   if(!total)return "Allocation unavailable: no current prices were obtained.";
   const lines=["Portfolio valuation (live prices)",""];
   lines.push("Total valued: "+formatToman(total));
@@ -345,7 +394,7 @@ function formatPrice(asset,p){
 function formatToman(rial){return format(rial/10)+" toman";}
 function format(v){return Number(v).toLocaleString("en-US",{maximumFractionDigits:8});}
 function group(q,names){return names.map(n=>n+": "+(q[n]===undefined?"not synchronized":format(q[n]))).join("\n");}
-function help(){return "Portfolio Agent is online.\n\n/status — portfolio status\n/assets — asset list\n/allocation — live portfolio valuation & allocation\n/gold — live gold & precious-metal valuation\n/crypto — live crypto valuation\n/cash — live cash valuation\n/refresh — refresh live market data and portfolio valuation";}
+function help(){return "Portfolio Agent is online.\n\n/status — portfolio status\n/assets — asset list\n/allocation — live portfolio valuation & allocation\n/gold — live gold & precious-metal valuation\n/crypto — live crypto valuation\n/cash — live cash valuation\n/refresh — refresh live market data and portfolio valuation\\n\\nFor بلک راک, the bot asks for the current EcoCoach price per unit whenever a valuation needs it.";}
 async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return null;}}
 
 async function sendTelegram(chatId,text){
