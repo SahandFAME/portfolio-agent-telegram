@@ -109,8 +109,8 @@ async function telegram(req,res){
       if(priceRial===null){
         reply="Please send the current EcoCoach بلک راک price per unit in toman (for example: 850000).";
       }else{
-        await savePendingBlackRock(message.chat.id,{type:"blackrock_price",priceRial,enteredAt:new Date().toISOString()});
         reply=await allocationReply(quantities,priceRial);
+        await savePendingBlackRock(message.chat.id,{type:"none",updatedAt:new Date().toISOString()});
       }
     }else if(command==="/start"||command==="/help") reply=help();
     else if(command==="/status") reply=snapshot?("Portfolio Agent is connected.\\n\\nTrading Journal snapshot: "+snapshot.updated_at+(snapshot.workbook_updated_at?"\\nWorkbook: "+snapshot.workbook_updated_at:"")):"Portfolio Agent is connected, but no Trading Journal snapshot has been synchronized yet.";
@@ -118,7 +118,12 @@ async function telegram(req,res){
     else if(command==="/gold") reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","نهال","طعام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"Gold & precious metals");
     else if(command==="/crypto") reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"Crypto");
     else if(command==="/cash") reply=await valuationReply(quantities,["دلار"],"Cash");
-    else if(command==="/allocation"||command==="/refresh") reply=await allocationReply(quantities);
+    else if(command==="/allocation"||command==="/refresh"){
+      reply=await allocationReply(quantities);
+      if(reply.startsWith("Portfolio valuation needs one additional input.")){
+        await savePendingBlackRock(message.chat.id,{type:"blackrock_price",requestedAt:new Date().toISOString()});
+      }
+    }
     else reply=help();
     await sendTelegram(message.chat.id,reply);
   })().catch(e=>console.error("Telegram handler error:",e)));
