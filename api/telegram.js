@@ -13,7 +13,7 @@ const MANUAL = {"سکه تمام":3,"ربع سکه غیره":3,"ربع سکه ب
 const LISTED = {
 "عیار":"عیار","گوهر":"گوهر","آلتون":"آلتون","امرالد":"امرالد",
   "زرفام":"زرفام","نهال":"نهال","طعام":"طعام","استیل":"استیل",
-  "فلز فارابی":"فلزفارابی","پتروآگاه":"پتروآگاه","خودران":"خودران",
+  "فلز فارابی":"فلز فارابی","پتروآگاه":"پتروآگاه","خودران":"خودران",
   "سجام":"سجام","فملی":"فملی"
 };
 const CRYPTO_IDS = {
@@ -137,23 +137,31 @@ async function tsetmc(symbol){
   return {priceRial,source:"TSETMC",symbol:hit.lVal18AFC,retrievedAt:new Date().toISOString()};
 }
 
-function parseMarketPage(html,symbol){
-  const plain=html
-    .replace(/<script[\s\S]*?<\/script>/gi," ")
-    .replace(/<style[\s\S]*?<\/style>/gi," ")
-    .replace(/<[^>]+>/g," ")
-    .replace(/&nbsp;/gi," ")
+function normMarketText(s){
+  return String(s||"")
+    .replace(/[يى]/g,"ی").replace(/ك/g,"ک")
+    .replace(/[\u200c\u200d]/g,"")
     .replace(/\s+/g," ")
     .trim();
-  const marker=plain.indexOf(" "+symbol+" ");
-  if(marker<0)return null;
-  const tail=plain.slice(marker+symbol.length,marker+symbol.length+700);
-  const nums=[...tail.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*(?:\.[۰-۹٠-٩0-9]+)?/g)]
-    .map(m=>parseNum(m[0])).filter(x=>x!==null);
-  if(!nums.length)return null;
-  const priceRial=nums[0];
-  if(!Number.isFinite(priceRial)||priceRial<=0)return null;
-  return {priceRial,source:"TGJU markets/all",symbol,retrievedAt:new Date().toISOString()};
+}
+function parseMarketPage(html,symbol){
+  const target=normMarketText(symbol);
+  const rows=[...String(html||"").matchAll(/<tr\\b[\\s\\S]*?<\\/tr>/gi)].map(m=>m[0]);
+  for(const row of rows){
+    const text=normMarketText(row
+      .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
+      .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+      .replace(/<[^>]+>/g," ")
+      .replace(/&nbsp;/gi," "));
+    if(!text.includes(target))continue;
+    const nums=[...text.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*(?:\\.[۰-۹٠-٩0-9]+)?/g)]
+      .map(m=>parseNum(m[0])).filter(x=>x!==null);
+    if(!nums.length)continue;
+    const priceRial=nums[0];
+    if(Number.isFinite(priceRial)&&priceRial>0)
+      return {priceRial,source:"TGJU markets/all",symbol,retrievedAt:new Date().toISOString()};
+  }
+  return null;
 }
 async function tgjuMarket(symbol,htmls){
   for(const html of htmls||[]){const p=parseMarketPage(html,symbol);if(p)return p;}
@@ -194,12 +202,18 @@ async function getPrices(){
     try{marketHtmls.push(await fetchText(url));}
     catch(e){console.error("TGJU market table fetch failed:",url,e.message);}
   }
+  const profileCache=new Map();
+  const tgjuCached=async(slug,range)=>{
+    const key=slug+"|"+range.join(",");
+    if(!profileCache.has(key))profileCache.set(key,tgju(slug,range));
+    return await profileCache.get(key);
+  };
   const jobs=Object.entries(goldDefs).map(async([asset,d])=>{
     try{
-      const p=await tgju(d.slug,d.range);
+      const p=await tgjuCached(d.slug,d.range);
       if(d.perGram)p.priceRial=p.priceRial/4.6083;
       prices[asset]={...p,unit:d.perGram?"IRR/g":d.unit};
-    }catch(e){errors[asset]=e.message;}
+    }catch(e){errors[asset]=e.message;console.error("Gold/metal price failed:",asset,e.message);}
   });
   jobs.push(...Object.keys(LISTED).map(async asset=>{
     try{prices[asset]=await getListedPrice(asset,marketHtmls);}catch(e){errors[asset]=e.message;}
