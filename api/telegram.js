@@ -195,6 +195,24 @@ async function shakhesban(symbol,type){
   throw new Error("Shakhesban price unavailable: "+lastError);
 }
 
+async function shakhesbanSilverBar(){
+  const html=await fetchText("https://www.shakhesban.com/ime/gavahi");
+  const rowMatch=[...String(html||"").matchAll(/<tr\b[\s\S]*?<\/tr>/gi)]
+    .map(m=>m[0])
+    .find(row=>normMarketText(row).includes("SilverBar"));
+  if(!rowMatch)throw new Error("SilverBar row not found");
+  const text=normMarketText(rowMatch
+    .replace(/<script[\s\S]*?<\/script>/gi," ")
+    .replace(/<style[\s\S]*?<\/style>/gi," ")
+    .replace(/<[^>]+>/g," ")
+    .replace(/&nbsp;/gi," "));
+  const nums=[...text.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*(?:\.[۰-۹٠-٩0-9]+)?/g)]
+    .map(m=>parseNum(m[0])).filter(x=>x!==null);
+  const priceRial=nums[0];
+  if(!priceRial||priceRial<=0)throw new Error("SilverBar last trade not found");
+  return {priceRial,source:"Shakhesban IME",symbol:"SilverBar",retrievedAt:new Date().toISOString(),unit:"IRR/g"};
+}
+
 async function getListedPrice(asset,marketHtmls){
   const symbol=LISTED[asset];
   const type=SHAKHESBAN_TYPE[asset];
@@ -217,8 +235,8 @@ async function getPrices(){
   const prices={};
   const errors={};
   const goldDefs={
-    "طلا":{slug:"geram18",range:[100000000,1000000000],unit:"IRR/g"},
-    "شمش نقره 999":{slug:"silver_999",range:[1000000,50000000],unit:"IRR/g"},
+    "طلا":{slug:"ime_fund_lotuss",range:[500000,5000000],unit:"IRR/unit",source:"TGJU صندوق طلای لوتوس"},
+    "شمش نقره 999":{imeSilver:true,unit:"IRR/g"},
     "سکه تمام":{slug:"sekee",range:[1000000000,10000000000],unit:"IRR/coin"},
     "آبشده (طلب)":{slug:"gold_futures",range:[500000000,2000000000],unit:"IRR/mithqal",perGram:true},
     "آبشده (شمش زربد)":{slug:"gold_futures",range:[500000000,2000000000],unit:"IRR/mithqal",perGram:true},
@@ -241,7 +259,7 @@ async function getPrices(){
   };
   const jobs=Object.entries(goldDefs).map(async([asset,d])=>{
     try{
-      const p=await tgjuCached(d.slug,d.range);
+      const p=d.imeSilver?await shakhesbanSilverBar():await tgjuCached(d.slug,d.range);
       if(d.perGram)p.priceRial=p.priceRial/4.6083;
       prices[asset]={...p,unit:d.perGram?"IRR/g":d.unit};
     }catch(e){errors[asset]=e.message;console.error("Gold/metal price failed:",asset,e.message);}
