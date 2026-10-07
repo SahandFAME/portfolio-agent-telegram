@@ -117,14 +117,27 @@ function parseNum(v){
 
 async function tgju(slug,range){
   const html=await fetchText("https://www.tgju.org/profile/"+slug);
-  const marker=html.indexOf("نرخ فعلی");
-  if(marker<0)throw new Error("TGJU current-rate marker not found");
-  const tail=html.slice(marker,marker+500);
-  const candidates=[...tail.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*/g)].map(m=>parseNum(m[0])).filter(x=>x!==null);
-  const rial=candidates.filter(x=>!range||(x>=range[0]&&x<=range[1])).sort((x,y)=>y-x)[0];
+  const plain=normMarketText(String(html||"")
+    .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
+    .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+    .replace(/<[^>]+>/g," ")
+    .replace(/&nbsp;/gi," "));
+  const candidates=[];
+  const markerRe=/نرخ فعلی/g;
+  let m;
+  while((m=markerRe.exec(plain))!==null){
+    const tail=plain.slice(m.index,m.index+1200);
+    for(const hit of tail.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*/g)){
+      const n=parseNum(hit[0]);
+      if(n!==null)candidates.push(n);
+    }
+  }
+  const valid=candidates.filter(x=>!range||(x>=range[0]&&x<=range[1]));
+  const rial=valid[0];
   if(rial===undefined)throw new Error("TGJU current price not found or failed validation");
   return {priceRial:rial,source:"TGJU",retrievedAt:new Date().toISOString()};
 }
+
 async function tsetmc(symbol){
   const q=encodeURIComponent(symbol);
   const search=await fetchJson("https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/"+q);
@@ -208,7 +221,7 @@ async function shakhesbanSilverBar(){
     .replace(/&nbsp;/gi," "));
   const nums=[...text.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*(?:\.[۰-۹٠-٩0-9]+)?/g)]
     .map(m=>parseNum(m[0])).filter(x=>x!==null);
-  const priceRial=nums[0];
+  // The row description contains silver purity (999.9), so the first numeric token is not the market price.\n  const priceRial=nums.find(x=>x>=100000);
   if(!priceRial||priceRial<=0)throw new Error("SilverBar last trade not found");
   return {priceRial,source:"Shakhesban IME",symbol:"SilverBar",retrievedAt:new Date().toISOString(),unit:"IRR/g"};
 }
