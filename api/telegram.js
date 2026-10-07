@@ -102,7 +102,12 @@ async function fetchText(url){
 
 function parseNum(v){
   if(v===null||v===undefined)return null;
-  const s=String(v).replace(/[,٬،]/g,"").replace(/<[^>]*>/g,"").trim();
+  const s=String(v)
+    .replace(/[۰-۹]/g,c=>String("۰۱۲۳۴۵۶۷۸۹".indexOf(c)))
+    .replace(/[٠-٩]/g,c=>String("٠١٢٣٤٥٦٧٨٩".indexOf(c)))
+    .replace(/[,٬،]/g,"")
+    .replace(/<[^>]*>/g,"")
+    .trim();
   const n=Number(s);
   return Number.isFinite(n)?n:null;
 }
@@ -112,7 +117,7 @@ async function tgju(slug,range){
   const marker=html.indexOf("نرخ فعلی");
   if(marker<0)throw new Error("TGJU current-rate marker not found");
   const tail=html.slice(marker,marker+500);
-  const candidates=[...tail.matchAll(/[0-9][0-9,٬،]*/g)].map(m=>parseNum(m[0])).filter(x=>x!==null);
+  const candidates=[...tail.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*/g)].map(m=>parseNum(m[0])).filter(x=>x!==null);
   const rial=candidates.filter(x=>!range||(x>=range[0]&&x<=range[1])).sort((x,y)=>y-x)[0];
   if(rial===undefined)throw new Error("TGJU current price not found or failed validation");
   return {priceRial:rial,source:"TGJU",retrievedAt:new Date().toISOString()};
