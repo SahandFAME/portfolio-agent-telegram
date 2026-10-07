@@ -137,8 +137,7 @@ async function tsetmc(symbol){
   return {priceRial,source:"TSETMC",symbol:hit.lVal18AFC,retrievedAt:new Date().toISOString()};
 }
 
-async function tgjuMarket(symbol){
-  const html=await fetchText("https://www.tgju.org/markets/all");
+async function tgjuMarket(symbol,html){
   const plain=html
     .replace(/<script[\s\S]*?<\/script>/gi," ")
     .replace(/<style[\s\S]*?<\/style>/gi," ")
@@ -147,22 +146,27 @@ async function tgjuMarket(symbol){
     .replace(/\s+/g," ")
     .trim();
   const marker=plain.indexOf(" "+symbol+" ");
-  if(marker<0)throw new Error("TGJU market symbol not found");
-  const tail=plain.slice(marker+symbol.length,marker+symbol.length+500);
-  const nums=[...tail.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*(?:\\.[۰-۹٠-٩0-9]+)?/g)]
+  if(marker<0)throw new Error("TGJU market symbol not found: "+symbol);
+  const tail=plain.slice(marker+symbol.length,marker+symbol.length+700);
+  const nums=[...tail.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*(?:\.[۰-۹٠-٩0-9]+)?/g)]
     .map(m=>parseNum(m[0])).filter(x=>x!==null);
-  if(!nums.length)throw new Error("TGJU market price not found");
+  if(!nums.length)throw new Error("TGJU market price not found: "+symbol);
   const priceRial=nums[0];
-  if(!Number.isFinite(priceRial)||priceRial<=0)throw new Error("TGJU market price invalid");
-  return {priceRial,source:"TGJU markets/all",symbol,retrievedAt:new Date().toISOString()};
+  if(!Number.isFinite(priceRial)||priceRial<=0)throw new Error("TGJU market price invalid: "+symbol);
+  return {priceRial,source:"TGJU English markets/all",symbol,retrievedAt:new Date().toISOString()};
 }
 
-async function getListedPrice(asset){
+async function getListedPrice(asset,marketHtml){
   const symbol=LISTED[asset];
-  try{return await tgjuMarket(symbol);}
-  catch(e){
+  try{
+    if(!marketHtml)throw new Error("TGJU market page unavailable");
+    return await tgjuMarket(symbol,marketHtml);
+  }catch(e){
     try{return await tsetmc(symbol);}
-    catch(e2){throw new Error(asset+" price unavailable");}
+    catch(e2){
+      console.error("Listed price failed:",asset,e.message,"/ TSETMC:",e2.message);
+      throw new Error(asset+" price unavailable");
+    }
   }
 }
 
@@ -177,6 +181,12 @@ async function getPrices(){
     "آبشده (شمش زربد)":{slug:"gold_futures",range:[500000000,2000000000],unit:"IRR/mithqal",perGram:true},
     "دلار":{slug:"price_dollar_rl",range:[500000,5000000],unit:"IRR/USD"}
   };
+  let marketHtml=null;
+  try{
+    marketHtml=await fetchText("https://english.tgju.org/markets/all");
+  }catch(e){
+    console.error("TGJU market table fetch failed:",e.message);
+  }
   const jobs=Object.entries(goldDefs).map(async([asset,d])=>{
     try{
       const p=await tgju(d.slug,d.range);
@@ -185,7 +195,7 @@ async function getPrices(){
     }catch(e){errors[asset]=e.message;}
   });
   jobs.push(...Object.keys(LISTED).map(async asset=>{
-    try{prices[asset]=await getListedPrice(asset);}catch(e){errors[asset]=e.message;}
+    try{prices[asset]=await getListedPrice(asset,marketHtml);}catch(e){errors[asset]=e.message;}
   }));
   try{
     const ids=Object.values(CRYPTO_IDS).join(",");
