@@ -140,11 +140,11 @@ async function tsetmc(symbol){
 async function tgjuMarket(symbol){
   const html=await fetchText("https://www.tgju.org/markets/all");
   const plain=html
-    .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
-    .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+    .replace(/<script[\s\S]*?<\/script>/gi," ")
+    .replace(/<style[\s\S]*?<\/style>/gi," ")
     .replace(/<[^>]+>/g," ")
     .replace(/&nbsp;/gi," ")
-    .replace(/\\s+/g," ")
+    .replace(/\s+/g," ")
     .trim();
   const marker=plain.indexOf(" "+symbol+" ");
   if(marker<0)throw new Error("TGJU market symbol not found");
