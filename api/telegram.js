@@ -285,18 +285,19 @@ async function shakhesbanSilverBar(){
 async function getListedPrice(asset,marketHtmls){
   const symbol=LISTED[asset];
   const type=SHAKHESBAN_TYPE[asset];
-  try{return await shakhesbanEnglish(symbol,type);}
-  catch(e){try{return await shakhesban(symbol,type);}catch(e0){e=e0;}
-  catch(e){
-    try{
-      if(!marketHtmls?.length)throw new Error("TGJU market pages unavailable");
-      return await tgjuMarket(symbol,marketHtmls);
-    }catch(e2){
-      try{return await tsetmc(symbol);}
-      catch(e3){
-        console.error("Listed price failed:",asset,"Shakhesban:",e.message,"/ TGJU:",e2.message,"/ TSETMC:",e3.message);
-        throw new Error(asset+" price unavailable");
-      }
+  let shakhesError=null;
+  try{return await shakhesban(symbol,type);}
+  catch(e){shakhesError=e;}
+  try{
+    if(!marketHtmls?.length)throw new Error("TGJU market pages unavailable");
+    return await tgjuMarket(symbol,marketHtmls);
+  }catch(e2){
+    try{return await tsetmc(symbol);}
+    catch(e3){
+      console.error("Listed price failed:",asset,
+        "Shakhesban:",shakhesError?.message||"n/a",
+        "/ TGJU:",e2.message,"/ TSETMC:",e3.message);
+      throw new Error(asset+" price unavailable");
     }
   }
 }
@@ -397,15 +398,17 @@ const REPORT_UNIT={
 };
 function valueUsd(v,usdIrr){return usdIrr>0?v/usdIrr:0;}
 function portfolioTable(q,vals,total,prices,usdIrr){
-  const header=["#","گروه","دارایی","مقدار","واحد","ارزش واحد","ارزش کل تومان","ارزش کل دلار","%"];
+  const header=["#","گروه","دارایی","مقدار","واحد","قیمت واحد","ارزش کل تومان","ارزش کل دلار","%","منبع"];
   const rows=Object.entries(vals).sort((a,b)=>b[1]-a[1]).map(([a,v],i)=>{
-    const p=prices[a]; const qty=q[a]||0;
-    const unit=p.priceUsd!==undefined?("$"+format(p.priceUsd)):formatToman(p.priceRial);
-    return [String(i+1),REPORT_GROUP[a]||"-",a,format(qty),REPORT_UNIT[a]||"-",unit,format(v/10),format(valueUsd(v,usdIrr)),(v/total*100).toFixed(1)+"%"];
+    const p=prices[a];
+    if(!p) throw new Error("Missing price metadata for "+a);
+    const qty=q[a]||0;
+    const unit=p.priceUsd!==undefined ? "$"+format(p.priceUsd) : formatToman(p.priceRial);
+    return [String(i+1),REPORT_GROUP[a]||"-",a,format(qty),REPORT_UNIT[a]||"-",unit,format(v/10),format(valueUsd(v,usdIrr)),(v/total*100).toFixed(1)+"%",p.source||"-"];
   });
   const widths=header.map((h,i)=>Math.max(h.length,...rows.map(r=>r[i].length)));
   const line=r=>r.map((x,i)=>String(x).padEnd(widths[i]," ")).join(" | ");
-  return "<pre>"+line(header)+"\\n"+rows.map(line).join("\\n")+"</pre>";
+  return "<pre>"+line(header)+"\n"+rows.map(line).join("\n")+"</pre>";
 }
 async function allocationReply(q,blackRockPriceRial=null){
   const {prices,errors}=await getPrices();
@@ -414,7 +417,9 @@ async function allocationReply(q,blackRockPriceRial=null){
   let total=0;const vals={};
   for(const a of ASSETS){
     if(errors[a]||!prices[a])continue;
-    vals[a]=valueRial(a,q[a]||0,prices[a],usdIrr); total+=vals[a];
+    const qty=Number(q[a]||0);
+    if(!Number.isFinite(qty)||qty<0){errors[a]="Invalid quantity";continue;}
+    vals[a]=valueRial(a,qty,prices[a],usdIrr); total+=vals[a];
   }
   if(blackRockPriceRial!==null){
     const v=(q["بلک راک"]||0)*blackRockPriceRial;
@@ -430,9 +435,11 @@ async function allocationReply(q,blackRockPriceRial=null){
     return "Portfolio valuation needs one additional input.\n\nPlease send the current EcoCoach بلک راک price per unit in toman.\nQuantity: "+format(q["بلک راک"]||0)+" units\n\nExample: 850000";
   }
   if(!total)return "Allocation unavailable: no current prices were obtained.";
-  const table=portfolioTable(q,vals,total,prices,usdIrr);
-  const sources=[...new Set(Object.keys(vals).map(a=>prices[a]?.source).filter(Boolean))].join(", ");
-  const lines=["<b>Portfolio valuation — live prices</b>","","<b>Total:</b> "+formatToman(total)+" | <b>USD:</b> $"+format(valueUsd(total,usdIrr)),"",table];
+  const reportPrices={...prices};
+  if(blackRockPriceRial!==null) reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
+  const table=portfolioTable(q,vals,total,reportPrices,usdIrr);
+  const sources=[...new Set(Object.keys(vals).map(a=>reportPrices[a]?.source).filter(Boolean))].join(", ");
+  const lines=["<b>Portfolio valuation — live prices</b>","","<b>Total:</b> "+formatToman(total)+" | <b>USD:</b> $"+format(valueUsd(total,usdIrr)),"","<i>Unit prices and sources are shown below.</i>","",table];
   if(missing.length)lines.push("\n<b>Not valued:</b> "+missing.join(", "));
   lines.push("\n<b>Price sources:</b> "+sources);
   lines.push("<b>Retrieved:</b> "+new Date().toISOString());
