@@ -497,16 +497,33 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
       source:sourceEn[p.source]||p.source||"-"
     };
   });
-  const W=1800,H=1540,tableX=40,tableW=1120,sideX=1190,sideW=570,rowH=37,headerY=315,headerH=48;
+
+  // The table is deliberately placed BELOW the dashboard panels. This prevents
+  // the 29-row table from ever covering the chart, cards, or summary.
+  const W=1800,H=2160;
+  const tableX=40,tableW=1720,rowH=37,headerY=790,headerH=48;
   const cols=[
-    ["rank","#",40],["asset","Asset",185],["group","Group",130],["qty","Qty",85],["unit","Unit",70],
-    ["unitPrice","Unit Price",145],["valueToman","Value (toman)",165],["valueUsd","Value (USD)",150],["pct","%",65],["source","Source",85]
+    ["rank","#",45],["asset","Asset",245],["group","Group",175],["qty","Qty",105],["unit","Unit",100],
+    ["unitPrice","Unit Price",205],["valueToman","Value (toman)",250],["valueUsd","Value (USD)",205],["pct","%",70],["source","Source",320]
   ];
   let cx=tableX;const xmap={};for(const [k,,w] of cols){xmap[k]=cx;cx+=w;}
-  const cats={};for(const r of rows){const k=categoryName(Object.keys(assetEn).find(x=>assetEn[x]===r.asset)||r.asset);cats[k]=(cats[k]||0)+r.valueToman*10;}
+
+  const cats={};
+  for(const [a,v] of Object.entries(vals)){
+    const k=categoryName(a);
+    cats[k]=(cats[k]||0)+v;
+  }
   const catOrder=["طلا و سکه","رمز ارز","دلار و نقدینگی","سهام و صندوق","نقره"];
   const catColors={"طلا و سکه":"#d9a400","رمز ارز":"#7250d5","دلار و نقدینگی":"#43a866","سهام و صندوق":"#2f9ea4","نقره":"#718096"};
   const catEn={"طلا و سکه":"Gold & Coins","رمز ارز":"Crypto","دلار و نقدینگی":"USD & Cash","سهام و صندوق":"Stocks & Funds","نقره":"Silver"};
+
+  // Conservative text truncation keeps every cell inside its column.
+  const fit=(text,width,font=13)=>{
+    const s=String(text??"");
+    const max=Math.max(4,Math.floor((width-16)/(font*0.58)));
+    return s.length<=max?s:s.slice(0,Math.max(1,max-1))+"…";
+  };
+
   let svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'"><rect width="100%" height="100%" fill="#f7fafc"/>';
   svg+='<rect x="20" y="20" width="1760" height="245" rx="22" fill="#123b5d"/>';
   svg+=svgText(1730,78,"Portfolio Valuation Report",38,{anchor:"end",weight:700,fill:"#ffffff"});
@@ -515,7 +532,9 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   svg+=svgText(70,120,usdText(valueUsd(total,usdIrr)),25,{anchor:"start",fill:"#dce9f4"});
   svg+=svgText(70,160,"USD/IRR: "+enNum(usdIrr/10),18,{anchor:"start",fill:"#dce9f4"});
   svg+=svgText(70,200,"Crypto unit prices are shown in USD",18,{anchor:"start",fill:"#dce9f4"});
-  const cards=catOrder.map(name=>[name,cats[name]||0]);let cardX=20;
+
+  const cards=catOrder.map(name=>[name,cats[name]||0]);
+  let cardX=20;
   for(const [name,val] of cards){
     const pct=total?val/total*100:0;
     svg+='<rect x="'+cardX+'" y="285" width="335" height="105" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
@@ -524,36 +543,69 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
     svg+=svgText(cardX+20,360,enNum(val/10)+" toman",16,{anchor:"start",fill:"#526579"});
     cardX+=350;
   }
-  const tableHeight=headerH+rows.length*rowH+20;
+
+  // Top-right dashboard: allocation chart.
+  const sx=940,sy=425,sw=820;
+  svg+='<rect x="'+sx+'" y="'+sy+'" width="'+sw+'" height="330" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
+  svg+=svgText(sx+sw-25,sy+42,"Asset Allocation",25,{anchor:"end",weight:700});
+  const cx0=sx+235,cy0=sy+190,R=105,r0=58;let angle=-Math.PI/2;
+  for(const [name,val] of cards){
+    const frac=total?val/total:0,a2=angle+frac*Math.PI*2;
+    const x1=cx0+R*Math.cos(angle),y1=cy0+R*Math.sin(angle),x2=cx0+R*Math.cos(a2),y2=cy0+R*Math.sin(a2);
+    const ix1=cx0+r0*Math.cos(a2),iy1=cy0+r0*Math.sin(a2),ix2=cx0+r0*Math.cos(angle),iy2=cy0+r0*Math.sin(angle);
+    const large=(a2-angle)>Math.PI?1:0;
+    svg+='<path d="M '+x1+' '+y1+' A '+R+' '+R+' 0 '+large+' 1 '+x2+' '+y2+' L '+ix1+' '+iy1+' A '+r0+' '+r0+' 0 '+large+' 0 '+ix2+' '+iy2+' Z" fill="'+catColors[name]+'"/>';
+    angle=a2;
+  }
+  svg+=svgText(cx0,cy0-4,enNum(total/10),18,{anchor:"middle",weight:700});
+  svg+=svgText(cx0,cy0+23,"toman",13,{anchor:"middle",fill:"#607080"});
+  cards.forEach(([name,val],i)=>{
+    const yy=sy+82+i*47;
+    svg+='<rect x="'+(sx+430)+'" y="'+(yy-14)+'" width="18" height="18" rx="4" fill="'+catColors[name]+'"/>';
+    svg+=svgText(sx+410,yy,catEn[name],15,{anchor:"end",weight:600});
+    svg+=svgText(sx+775,yy,(total?val/total*100:0).toFixed(1)+"%",15,{anchor:"end",weight:700});
+  });
+
+  // Top-left dashboard: summary.
+  const tx=40,ty=425,tw=850;
+  svg+='<rect x="'+tx+'" y="'+ty+'" width="'+tw+'" height="330" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
+  svg+=svgText(tx+tw-25,ty+42,"Portfolio Summary",25,{anchor:"end",weight:700});
+  const summary=[["Total Value",toman(total/10)],["Total USD",usdText(valueUsd(total,usdIrr))],["Assets",String(rows.length)],["USD/IRR",enNum(usdIrr/10)],["Price Time",new Date().toLocaleString("en-US")]];
+  summary.forEach(([k,v],i)=>{
+    const yy=ty+92+i*48;
+    svg+=svgText(tx+tw-25,yy,k,17,{anchor:"end",weight:600});
+    svg+=svgText(tx+25,yy,v,16,{anchor:"start",fill:"#526579"});
+  });
+
+  // Table: full-width, below all dashboard content.
+  const tableHeight=headerH+rows.length*rowH+18;
   svg+='<rect x="'+tableX+'" y="'+headerY+'" width="'+tableW+'" height="'+tableHeight+'" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
   svg+='<rect x="'+tableX+'" y="'+headerY+'" width="'+tableW+'" height="'+headerH+'" rx="16" fill="#1b4d70"/>';
   for(const [k,label,w] of cols)svg+=svgText(xmap[k]+w-8,headerY+31,label,14,{anchor:"end",weight:700,fill:"#ffffff"});
   rows.forEach((r,i)=>{
-    const y=headerY+headerH+i*rowH;if(i%2===0)svg+='<rect x="'+tableX+'" y="'+y+'" width="'+tableW+'" height="'+rowH+'" fill="#f2f7fa"/>';
+    const y=headerY+headerH+i*rowH;
+    if(i%2===0)svg+='<rect x="'+tableX+'" y="'+y+'" width="'+tableW+'" height="'+rowH+'" fill="#f2f7fa"/>';
     for(const [k,,w] of cols){
       let v=r[k];
-      if(k==="valueToman")v=enNum(v);else if(k==="valueUsd")v=usdText(v);else if(k==="pct")v=r.pct.toFixed(1)+"%";else if(k==="qty")v=enNum(v);
-      svg+=svgText(xmap[k]+w-8,y+25,String(v),13,{anchor:"end",fill:"#243b53"});
+      if(k==="valueToman")v=enNum(v);
+      else if(k==="valueUsd")v=usdText(v);
+      else if(k==="pct")v=r.pct.toFixed(1)+"%";
+      else if(k==="qty")v=enNum(v);
+      const font=(k==="asset"||k==="group"||k==="source")?12:13;
+      v=fit(v,w,font);
+      svg+=svgText(xmap[k]+w-8,y+25,String(v),font,{anchor:"end",fill:"#243b53"});
     }
   });
-  const sx=sideX,sy=headerY,sw=sideW;
-  svg+='<rect x="'+sx+'" y="'+sy+'" width="'+sw+'" height="440" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
-  svg+=svgText(sx+sw-25,sy+42,"Asset Allocation",25,{anchor:"end",weight:700});
-  const cx0=sx+185,cy0=sy+225,R=125,r0=70;let angle=-Math.PI/2;
-  for(const [name,val] of cards){const frac=total?val/total:0,a2=angle+frac*Math.PI*2,x1=cx0+R*Math.cos(angle),y1=cy0+R*Math.sin(angle),x2=cx0+R*Math.cos(a2),y2=cy0+R*Math.sin(a2),ix1=cx0+r0*Math.cos(a2),iy1=cy0+r0*Math.sin(a2),ix2=cx0+r0*Math.cos(angle),iy2=cy0+r0*Math.sin(angle),large=(a2-angle)>Math.PI?1:0;svg+='<path d="M '+x1+' '+y1+' A '+R+' '+R+' 0 '+large+' 1 '+x2+' '+y2+' L '+ix1+' '+iy1+' A '+r0+' '+r0+' 0 '+large+' 0 '+ix2+' '+iy2+' Z" fill="'+catColors[name]+'"/>';angle=a2;}
-  svg+=svgText(cx0,cy0-4,enNum(total/10),19,{anchor:"middle",weight:700});svg+=svgText(cx0,cy0+24,"toman",14,{anchor:"middle",fill:"#607080"});
-  cards.forEach(([name,val],i)=>{const yy=sy+95+i*58;svg+='<rect x="'+(sx+360)+'" y="'+(yy-14)+'" width="18" height="18" rx="4" fill="'+catColors[name]+'"/>';svg+=svgText(sx+340,yy,catEn[name],15,{anchor:"end",weight:600});svg+=svgText(sx+535,yy,(total?val/total*100:0).toFixed(1)+"%",15,{anchor:"end",weight:700});});
-  svg+='<rect x="'+sx+'" y="745" width="'+sw+'" height="475" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
-  svg+=svgText(sx+sw-25,785,"Portfolio Summary",25,{anchor:"end",weight:700});
-  const summary=[["Total Value",toman(total/10)],["Total USD",usdText(valueUsd(total,usdIrr))],["Assets",String(rows.length)],["USD/IRR",enNum(usdIrr/10)],["Price Time",new Date().toLocaleString("en-US")]];
-  summary.forEach(([k,v],i)=>{const yy=830+i*70;svg+=svgText(sx+sw-25,yy,k,17,{anchor:"end",weight:600});svg+=svgText(sx+25,yy,v,16,{anchor:"start",fill:"#526579"});});
-  svg+=svgText(sx+sw-25,1180,"EcoCoach Fund = private fund (BlackRock is not used)",15,{anchor:"end",fill:"#657786"});
-  svg+='<rect x="40" y="1370" width="1720" height="135" rx="16" fill="#edf4f8" stroke="#d7e2eb"/>';
-  svg+=svgText(1730,1410,"Notes",19,{anchor:"end",weight:700});
-  svg+=svgText(1730,1440,"• Crypto unit prices are displayed in USD.",14,{anchor:"end"});
-  svg+=svgText(1730,1467,"• Non-crypto USD values = toman value ÷ current USD/IRR.",14,{anchor:"end"});
-  svg+=svgText(1730,1494,"• Crypto USD values = quantity × current USD price.",14,{anchor:"end"});
-  svg+='</svg>';return svg;
+
+  const noteY=1965;
+  svg+='<rect x="40" y="'+noteY+'" width="1720" height="155" rx="16" fill="#edf4f8" stroke="#d7e2eb"/>';
+  svg+=svgText(1730,noteY+38,"Notes",19,{anchor:"end",weight:700});
+  svg+=svgText(1730,noteY+70,"• Crypto unit prices are displayed in USD.",14,{anchor:"end"});
+  svg+=svgText(1730,noteY+98,"• Non-crypto USD values = toman value ÷ current USD/IRR.",14,{anchor:"end"});
+  svg+=svgText(1730,noteY+126,"• Crypto USD values = quantity × current USD price.",14,{anchor:"end"});
+  svg+=svgText(1730,noteY+150,"• EcoCoach Fund is the private fund; BlackRock Inc. is not used.",14,{anchor:"end"});
+  svg+='</svg>';
+  return svg;
 }
 async function allocationImageReply(q,blackRockPriceRial){
   const {prices,errors}=await getPrices();
