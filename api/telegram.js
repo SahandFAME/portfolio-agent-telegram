@@ -1,6 +1,8 @@
 import { put, get } from "@vercel/blob";
 import { waitUntil } from "@vercel/functions";
 import sharp from "sharp";
+import { Resvg } from "@resvg/resvg-js";
+import path from "path";
 
 const SNAPSHOT = "portfolio/latest.json";
 const BLACKROCK_PENDING_PREFIX = "portfolio/pending-blackrock/";
@@ -568,7 +570,9 @@ async function allocationImageReply(q,blackRockPriceRial){
   if(!total)return {text:"هیچ قیمت معتبر فعلی برای ارزش‌گذاری دریافت نشد."};
   const reportPrices={...prices};if(blackRockPriceRial!==null)reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
   const svg=buildPortfolioSvg(q,vals,total,reportPrices,usdIrr);
-  const png=await sharp(Buffer.from(svg)).png({compressionLevel:9}).toBuffer();
+  const fontPath=path.join(process.cwd(),"node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf");
+  const rendered=new Resvg(svg,{font:{fontFiles:[fontPath],loadSystemFonts:false,defaultFontFamily:"DejaVu Sans",sansSerifFamily:"DejaVu Sans"}}).render();
+  const png=rendered.asPng();
   return {png,total};
 }
 function formatPrice(asset,p){
