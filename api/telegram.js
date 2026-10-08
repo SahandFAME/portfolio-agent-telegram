@@ -456,13 +456,13 @@ async function sendTelegram(chatId,text){
   // instead of silently failing.
   if(String(text).length<=3900){await send(text);return;}
 
-  const m=String(text).match(/^(.*?)<pre>([\\s\\S]*?)<\\/pre>([\\s\\S]*)$/);
+  const m=String(text).match(/^(.*?)<pre>([\s\S]*?)<\/pre>([\s\S]*)$/);
   if(m){
     const prefix=m[1], body=m[2], suffix=m[3];
-    const lines=body.split("\\n");
+    const lines=body.split("\n");
     let chunk="", first=true;
     for(const line of lines){
-      const candidate=chunk ? chunk+"\\n"+line : line;
+      const candidate=chunk ? chunk+"\n"+line : line;
       if(candidate.length>3300 && chunk){
         await send((first?prefix:"")+"<pre>"+chunk+"</pre>");
         first=false;
@@ -474,7 +474,7 @@ async function sendTelegram(chatId,text){
     return;
   }
 
-  const lines=String(text).split("\\n");
+  const lines=String(text).split("\n");
   let chunk="";
   for(const line of lines){
     const candidate=chunk ? chunk+"\\n"+line : line;
