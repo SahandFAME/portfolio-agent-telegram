@@ -575,7 +575,12 @@ async function sendTelegram(chatId,text){
   // instead of silently failing.
   if(String(text).length<=3900){await send(text);return;}
 
-  const m=String(text).match(/^(.*?)<pre>([\\s\\S]*?)<\\/pre>([\\s\\S]*)$/);
+  const raw=String(text);
+  const preStart=raw.indexOf("<pre>");
+  const preEnd=raw.indexOf("</pre>",preStart+5);
+  const m=preStart>=0 && preEnd>=0
+    ? [raw.slice(0,preStart),raw.slice(preStart+5,preEnd),raw.slice(preEnd+6)]
+    : null;
   if(m){
     const prefix=m[1], body=m[2], suffix=m[3];
     const lines=body.split("\\n");
