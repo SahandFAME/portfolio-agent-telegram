@@ -446,7 +446,7 @@ function usdFa(n){return "$"+Number(n).toLocaleString("en-US",{maximumFractionDi
 function buildPortfolioSvg(q,vals,total,prices,usdIrr,blackRockPriceRial){
   const rows=allocationData(q,vals,total,prices,usdIrr);
   const W=1800,H=1540;
-  const left=40,right=1760,tableX=40,tableW=1120,sideX=1190,sideW=570;
+  const left=40,right=1760,tableX=40,tableW=1150,sideX=1190,sideW=570;
   const rowH=37, headerY=315, headerH=48;
   const cols=[
     {key:"rank",label:"#",w:40},{key:"asset",label:"دارایی",w:150},{key:"group",label:"گروه",w:125},
