@@ -1,5 +1,6 @@
 import { put, get } from "@vercel/blob";
 import { waitUntil } from "@vercel/functions";
+import sharp from "sharp";
 
 const SNAPSHOT = "portfolio/latest.json";
 const BLACKROCK_PENDING_PREFIX = "portfolio/pending-blackrock/";
@@ -126,7 +127,7 @@ async function telegram(req,res){
       }
     }
     else reply=help();
-    await sendTelegram(message.chat.id,reply);
+    if(reply) await sendTelegram(message.chat.id,reply);
   })().catch(e=>console.error("Telegram handler error:",e)));
   return res.status(200).json({ok:true});
 }
@@ -380,23 +381,183 @@ const REPORT_UNIT={
   "BTC":"-","ETH":"-","Tether":"-","Link":"-","ADA":"-","SOL":"-","ONDO":"-","دلار":"-"
 };
 function valueUsd(v,usdIrr){return usdIrr>0?v/usdIrr:0;}
+function cryptoAsset(asset){return ["BTC","ETH","Tether","Link","ADA","SOL","ONDO"].includes(asset);}
+
+function unitPriceDisplay(asset,p){
+  if(!p)return "-";
+  if(cryptoAsset(asset))return "$"+format(p.priceUsd);
+  if(asset==="دلار")return formatToman(p.priceRial);
+  return formatToman(p.priceRial);
+}
+function assetUsdValue(asset,v,p,usdIrr){
+  if(cryptoAsset(asset))return (qSafe(p.quantity)||0)*p.priceUsd;
+  if(asset==="دلار")return qSafe(p.quantity)||0;
+  return valueUsd(v,usdIrr);
+}
+function qSafe(v){const n=Number(v);return Number.isFinite(n)?n:0;}
+
 function portfolioTable(q,vals,total,prices,usdIrr){
   const header=["#","گروه","دارایی","مقدار","واحد","قیمت واحد","ارزش کل تومان","ارزش کل دلار","%","منبع"];
   const rows=Object.entries(vals).sort((a,b)=>b[1]-a[1]).map(([a,v],i)=>{
-    const p=prices[a];
-    if(!p) throw new Error("Missing price metadata for "+a);
-    const qty=q[a]||0;
-    const unit=p.priceUsd!==undefined ? "$"+format(p.priceUsd) : formatToman(p.priceRial);
-    return [String(i+1),REPORT_GROUP[a]||"-",a,format(qty),REPORT_UNIT[a]||"-",unit,format(v/10),format(valueUsd(v,usdIrr)),(v/total*100).toFixed(1)+"%",p.source||"-"];
+    const p={...(prices[a]||{}),quantity:q[a]||0};
+    if(!p.priceUsd && p.priceRial===undefined)throw new Error("Missing price metadata for "+a);
+    const usd=cryptoAsset(a)?qSafe(q[a])*p.priceUsd:(a==="دلار"?qSafe(q[a]):valueUsd(v,usdIrr));
+    return [String(i+1),REPORT_GROUP[a]||"-",a,format(q[a]),REPORT_UNIT[a]||"-",unitPriceDisplay(a,p),format(v/10),format(usd),(v/total*100).toFixed(1)+"%",sourceFa(p.source)];
   });
   const widths=header.map((h,i)=>Math.max(h.length,...rows.map(r=>r[i].length)));
   const line=r=>r.map((x,i)=>String(x).padEnd(widths[i]," ")).join(" | ");
   return "<pre>"+line(header)+"\n"+rows.map(line).join("\n")+"</pre>";
 }
-async function allocationReply(q,blackRockPriceRial=null){
+
+function sourceFa(s){
+  const m={"CoinGecko":"CoinGecko","Shakhesban":"شاخص‌بان","TGJU":"TGJU","User input":"ورودی کاربر","Zarbed":"زربد","TGJU 18K gold × quarter-coin weight":"TGJU × وزن ربع سکه"};
+  return m[s]||s||"-";
+}
+
+function allocationData(q,vals,total,prices,usdIrr){
+  return Object.entries(vals).sort((a,b)=>b[1]-a[1]).map(([a,v],i)=>({
+    rank:i+1,asset:a,group:REPORT_GROUP[a]||"-",qty:q[a]||0,unit:REPORT_UNIT[a]||"-",
+    unitPrice:unitPriceDisplay(a,prices[a]),valueToman:v/10,
+    valueUsd:cryptoAsset(a)?qSafe(q[a])*prices[a].priceUsd:(a==="دلار"?qSafe(q[a]):valueUsd(v,usdIrr)),
+    pct:v/total*100,source:sourceFa(prices[a]?.source)
+  }));
+}
+
+function categoryName(asset){
+  if(asset==="دلار")return "دلار و نقدینگی";
+  if(cryptoAsset(asset))return "رمز ارز";
+  if(asset==="شمش نقره 999")return "نقره";
+  if(["سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","طلا","عیار","گوهر","آلتون","امرالد","زرفام"].includes(asset))return "طلا و سکه";
+  return "سهام و صندوق";
+}
+
+function svgText(x,y,text,size,opts={}){
+  const anchor=opts.anchor||"start";
+  const weight=opts.weight||400;
+  const fill=opts.fill||"#18324a";
+  const dir=opts.dir||"rtl";
+  return '<text x="'+x+'" y="'+y+'" font-family="Noto Sans Arabic, Noto Sans, Arial, sans-serif" font-size="'+size+'" font-weight="'+weight+'" fill="'+fill+'" text-anchor="'+anchor+'" direction="'+dir+'" unicode-bidi="plaintext">'+escXml(text)+"</text>";
+}
+function escXml(s){return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function compactNumber(n){return Number(n).toLocaleString("fa-IR",{maximumFractionDigits:2});}
+function moneyFa(n){return compactNumber(n)+" تومان";}
+function usdFa(n){return "$"+Number(n).toLocaleString("en-US",{maximumFractionDigits:2});}
+
+function buildPortfolioSvg(q,vals,total,prices,usdIrr,blackRockPriceRial){
+  const rows=allocationData(q,vals,total,prices,usdIrr);
+  const W=1800,H=1540;
+  const left=40,right=1760,tableX=40,tableW=1120,sideX=1190,sideW=570;
+  const rowH=37, headerY=315, headerH=48;
+  const cols=[
+    {key:"rank",label:"#",w:40},{key:"asset",label:"دارایی",w:150},{key:"group",label:"گروه",w:125},
+    {key:"qty",label:"مقدار",w:105},{key:"unit",label:"واحد",w:65},{key:"unitPrice",label:"قیمت واحد",w:145},
+    {key:"valueToman",label:"ارزش کل (تومان)",w:175},{key:"valueUsd",label:"ارزش کل (دلار)",w:155},
+    {key:"pct",label:"درصد",w:75},{key:"source",label:"منبع",w:110}
+  ];
+  let cx=tableX;
+  const xmap={}; for(const col of cols){xmap[col.key]=cx;cx+=col.w;}
+  const cats={}; for(const r of rows){const k=categoryName(r.asset);cats[k]=(cats[k]||0)+(r.valueToman*10);}
+  const catOrder=["طلا و سکه","رمز ارز","دلار و نقدینگی","سهام و صندوق","نقره"];
+  const catColors={"طلا و سکه":"#e6ad00","رمز ارز":"#7250d5","دلار و نقدینگی":"#43a866","سهام و صندوق":"#2f9ea4","نقره":"#718096"};
+
+  let svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">';
+  svg+='<rect width="100%" height="100%" fill="#f7fafc"/>';
+  svg+='<rect x="20" y="20" width="1760" height="245" rx="22" fill="#123b5d"/>';
+  svg+=svgText(70,82,"گزارش ارزش‌گذاری پرتفوی",38,{anchor:"start",weight:700,fill:"#ffffff"});
+  svg+=svgText(70,126,"قیمت‌های زنده • "+new Date().toLocaleString("fa-IR"),22,{anchor:"start",fill:"#dce9f4"});
+  svg+=svgText(1730,82,moneyFa(total/10),34,{anchor:"end",weight:700,fill:"#ffffff"});
+  svg+=svgText(1730,126,usdFa(valueUsd(total,usdIrr)),24,{anchor:"end",fill:"#dce9f4"});
+  svg+=svgText(1730,170,"نرخ دلار: "+moneyFa(usdIrr/10),18,{anchor:"end",fill:"#dce9f4"});
+  svg+=svgText(1730,208,"واحد قیمت‌های رمزارز: دلار آمریکا",18,{anchor:"end",fill:"#dce9f4"});
+
+  const cards=[
+    ["طلا و سکه",cats["طلا و سکه"]||0],
+    ["رمز ارز",cats["رمز ارز"]||0],
+    ["دلار و نقدینگی",cats["دلار و نقدینگی"]||0],
+    ["سهام و صندوق",cats["سهام و صندوق"]||0],
+    ["نقره",cats["نقره"]||0]
+  ];
+  let cardX=20;
+  for(const [name,val] of cards){
+    const pct=total?val/total*100:0;
+    svg+='<rect x="'+cardX+'" y="285" width="335" height="105" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
+    svg+=svgText(cardX+300,320,name,20,{anchor:"end",weight:700});
+    svg+=svgText(cardX+300,360,pct.toFixed(1)+"٪",28,{anchor:"end",weight:700,fill:catColors[name]||"#18324a"});
+    svg+=svgText(cardX+20,360,compactNumber(val/10)+" تومان",17,{anchor:"start",fill:"#526579",dir:"ltr"});
+    cardX+=350;
+  }
+
+  svg+='<rect x="'+tableX+'" y="'+headerY+'" width="'+tableW+'" height="'+(headerH+rows.length*rowH+20)+'" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
+  svg+='<rect x="'+tableX+'" y="'+headerY+'" width="'+tableW+'" height="'+headerH+'" rx="16" fill="#1b4d70"/>';
+  for(const col of cols){
+    svg+=svgText(xmap[col.key]+col.w-8,headerY+31,col.label,15,{anchor:"end",weight:700,fill:"#ffffff"});
+  }
+  rows.forEach((r,idx)=>{
+    const y=headerY+headerH+idx*rowH;
+    if(idx%2===0)svg+='<rect x="'+tableX+'" y="'+y+'" width="'+tableW+'" height="'+rowH+'" fill="#f2f7fa"/>';
+    for(const col of cols){
+      let val=r[col.key];
+      if(col.key==="valueToman")val=compactNumber(val);
+      else if(col.key==="valueUsd")val=usdFa(val);
+      else if(col.key==="pct")val=r.pct.toFixed(1)+"٪";
+      else if(col.key==="qty")val=compactNumber(val);
+      else val=String(val);
+      const dir=(col.key==="asset"||col.key==="group"||col.key==="source")?"rtl":"ltr";
+      svg+=svgText(xmap[col.key]+col.w-8,y+25,val,14,{anchor:"end",fill:"#243b53",dir});
+    }
+  });
+
+  const sx=sideX, sy=headerY, sw=sideW;
+  svg+='<rect x="'+sx+'" y="'+sy+'" width="'+sw+'" height="440" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
+  svg+=svgText(sx+sw-25,sy+42,"تخصیص دارایی",26,{anchor:"end",weight:700});
+  const cx0=sx+180,cy0=sy+225,R=125,r0=70;
+  let angle=-Math.PI/2;
+  for(const [name,val] of cards){
+    const pct=total?val/total:0; const a2=angle+pct*Math.PI*2;
+    const x1=cx0+R*Math.cos(angle),y1=cy0+R*Math.sin(angle),x2=cx0+R*Math.cos(a2),y2=cy0+R*Math.sin(a2);
+    const ix1=cx0+r0*Math.cos(a2),iy1=cy0+r0*Math.sin(a2),ix2=cx0+r0*Math.cos(angle),iy2=cy0+r0*Math.sin(angle);
+    const large=(a2-angle)>Math.PI?1:0;
+    svg+='<path d="M '+x1+' '+y1+' A '+R+' '+R+' 0 '+large+' 1 '+x2+' '+y2+' L '+ix1+' '+iy1+' A '+r0+' '+r0+' 0 '+large+' 0 '+ix2+' '+iy2+' Z" fill="'+(catColors[name]||"#999")+'"/>';
+    angle=a2;
+  }
+  svg+=svgText(cx0,cy0-4,compactNumber(total/10),20,{anchor:"middle",weight:700});
+  svg+=svgText(cx0,cy0+25,"تومان",15,{anchor:"middle",fill:"#607080"});
+  cards.forEach(([name,val],i)=>{
+    const yy=sy+95+i*58;
+    svg+='<rect x="'+(sx+360)+'" y="'+(yy-14)+'" width="18" height="18" rx="4" fill="'+(catColors[name]||"#999")+'"/>';
+    svg+=svgText(sx+340,yy,name,16,{anchor:"end",weight:600});
+    svg+=svgText(sx+535,yy,(total?val/total*100:0).toFixed(1)+"٪",16,{anchor:"end",weight:700,dir:"ltr"});
+  });
+
+  svg+='<rect x="'+sx+'" y="745" width="'+sw+'" height="475" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
+  svg+=svgText(sx+sw-25,785,"خلاصه پرتفوی",26,{anchor:"end",weight:700});
+  const summary=[
+    ["ارزش کل",moneyFa(total/10)],
+    ["ارزش دلاری",usdFa(valueUsd(total,usdIrr))],
+    ["تعداد دارایی‌ها",String(rows.length)],
+    ["نرخ دلار",moneyFa(usdIrr/10)],
+    ["آخرین دریافت قیمت",new Date().toLocaleString("fa-IR")]
+  ];
+  summary.forEach(([k,v],i)=>{
+    const yy=830+i*70;
+    svg+=svgText(sx+sw-25,yy,k,18,{anchor:"end",weight:600});
+    svg+=svgText(sx+25,yy,v,17,{anchor:"start",fill:"#526579",dir:"ltr"});
+  });
+  svg+=svgText(sx+sw-25,1180,"بلک راک = صندوق خصوصی EcoCoach",16,{anchor:"end",fill:"#657786"});
+
+  svg+='<rect x="'+tableX+'" y="1370" width="'+(tableW+1120)+'" height="135" rx="16" fill="#edf4f8" stroke="#d7e2eb"/>';
+  svg+=svgText(tableX+tableW+1080,1410,"نکات",20,{anchor:"end",weight:700});
+  svg+=svgText(tableX+tableW+1080,1440,"• قیمت واحد رمزارزها بر حسب دلار نمایش داده می‌شود.",15,{anchor:"end"});
+  svg+=svgText(tableX+tableW+1080,1467,"• ارزش دلاری سایر دارایی‌ها از ارزش تومانی ÷ نرخ دلار محاسبه می‌شود.",15,{anchor:"end"});
+  svg+=svgText(tableX+tableW+1080,1494,"• منبع قیمت و زمان دریافت در جدول و سربرگ گزارش مشخص است.",15,{anchor:"end"});
+  svg+='</svg>';
+  return svg;
+}
+
+async function allocationImageReply(q,blackRockPriceRial){
   const {prices,errors}=await getPrices();
   const usdIrr=prices["دلار"]?.priceRial;
-  if(!usdIrr)return "Allocation unavailable: current USD/IRR price could not be obtained.";
+  if(!usdIrr)return {text:"دریافت نرخ دلار آزاد ناموفق بود؛ ارزش‌گذاری انجام نشد."};
   let total=0;const vals={};
   for(const a of ASSETS){
     if(errors[a]||!prices[a])continue;
@@ -406,27 +567,23 @@ async function allocationReply(q,blackRockPriceRial=null){
   }
   if(blackRockPriceRial!==null){
     const v=(q["بلک راک"]||0)*blackRockPriceRial;
-    vals["بلک راک"]=v;
-    total+=v;
-    delete errors["بلک راک"];
+    vals["بلک راک"]=v; total+=v; delete errors["بلک راک"];
   }
-  const missing=ASSETS.filter(a=>
-    (errors[a]||!prices[a]) &&
-    !(a==="بلک راک" && blackRockPriceRial!==null)
-  );
   if(errors["بلک راک"]==="USER_INPUT_REQUIRED" && blackRockPriceRial===null){
-    return "Portfolio valuation needs one additional input.\n\nPlease send the current EcoCoach بلک راک price per unit in toman.\nQuantity: "+format(q["بلک راک"]||0)+" units\n\nExample: 850000";
+    return {text:"برای تهیه گزارش، قیمت فعلی هر واحد صندوق بلک راک (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: "+format(q["بلک راک"]||0)+" واحد"};
   }
-  if(!total)return "Allocation unavailable: no current prices were obtained.";
+  if(!total)return {text:"هیچ قیمت معتبر فعلی برای ارزش‌گذاری دریافت نشد."};
   const reportPrices={...prices};
-  if(blackRockPriceRial!==null) reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
-  const table=portfolioTable(q,vals,total,reportPrices,usdIrr);
-  const sources=[...new Set(Object.keys(vals).map(a=>reportPrices[a]?.source).filter(Boolean))].join(", ");
-  const lines=["<b>Portfolio valuation — live prices</b>","","<b>Total:</b> "+formatToman(total)+" | <b>USD:</b> $"+format(valueUsd(total,usdIrr)),"","<i>Unit prices and sources are shown below.</i>","",table];
-  if(missing.length)lines.push("\n<b>Not valued:</b> "+missing.join(", "));
-  lines.push("\n<b>Price sources:</b> "+sources);
-  lines.push("<b>Retrieved:</b> "+new Date().toISOString());
-  return lines.join("\n");
+  if(blackRockPriceRial!==null)reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
+  const svg=buildPortfolioSvg(q,vals,total,reportPrices,usdIrr,blackRockPriceRial);
+  const png=await sharp(Buffer.from(svg)).png({compressionLevel:9}).toBuffer();
+  return {png,total,usd:valueUsd(total,usdIrr)};
+}
+
+async function allocationReply(q,blackRockPriceRial=null){
+  const report=await allocationImageReply(q,blackRockPriceRial);
+  if(report.text)return report.text;
+  return "گزارش پرتفوی آماده شد.";
 }
 
 function formatPrice(asset,p){
@@ -441,64 +598,21 @@ async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return n
 async function sendTelegram(chatId,text){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
-
-  const send=async msg=>{
-    const r=await fetch("https://api.telegram.org/bot"+token+"/sendMessage",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:"HTML"})
-    });
-    if(!r.ok)console.error("Telegram API error:",await r.text());
-  };
-
-  // Telegram limits text messages to 4096 characters. Split the audit table
-  // into balanced HTML <pre> blocks so large portfolio reports are delivered
-  // instead of silently failing.
-  if(String(text).length<=3900){await send(text);return;}
-
-  const m=String(text).match(/^(.*?)<pre>([\s\S]*?)<\/pre>([\s\S]*)$/);
-  if(m){
-    const prefix=m[1], body=m[2], suffix=m[3];
-    const lines=body.split("\n");
-    let chunk="", first=true;
-    for(const line of lines){
-      const candidate=chunk ? chunk+"\n"+line : line;
-      if(candidate.length>3300 && chunk){
-        await send((first?prefix:"")+"<pre>"+chunk+"</pre>");
-        first=false;
-        chunk=line;
-      }else chunk=candidate;
-    }
-    if(chunk)await send((first?prefix:"")+"<pre>"+chunk+"</pre>");
-    if(suffix.trim())await send(suffix.trim());
-    return;
-  }
-
-  const lines=String(text).split("\n");
-  let chunk="";
-  for(const line of lines){
-    const candidate=chunk ? chunk+"\\n"+line : line;
-    if(candidate.length>3800 && chunk){await send(chunk);chunk=line;}
-    else chunk=candidate;
-  }
-  if(chunk)await send(chunk);
+  const r=await fetch("https://api.telegram.org/bot"+token+"/sendMessage",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({chat_id:chatId,text,parse_mode:"HTML"})
+  });
+  if(!r.ok)console.error("Telegram API error:",await r.text());
 }
 
-function setup(req,res){
-  if(req.query?.key===undefined)return res.status(200).send("<h1>Portfolio Agent Telegram Webhook</h1><p>Enter the SETUP_SECRET as the key query parameter.</p>");
-  if(req.query.key!==process.env.SETUP_SECRET)return res.status(401).send("Authentication failed.");
-  return configureWebhook(req,res);
-}
-async function configureWebhook(req,res){
+async function sendTelegramPhoto(chatId,png,caption){
   const token=process.env.TELEGRAM_BOT_TOKEN;
-  if(!token)return res.status(500).send("TELEGRAM_BOT_TOKEN is not configured.");
-  const url="https://"+req.headers.host+"/api/telegram";
-  const body={url};
-  if(process.env.TELEGRAM_WEBHOOK_SECRET)body.secret_token=process.env.TELEGRAM_WEBHOOK_SECRET;
-  try{
-    const r=await fetch("https://api.telegram.org/bot"+token+"/setWebhook",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    const result=await r.json();
-    if(!r.ok||!result.ok)return res.status(500).send(result.description||"Webhook setup failed.");
-    return res.status(200).send("Webhook configured successfully.");
-  }catch(e){return res.status(500).send("Webhook setup failed.");}
+  if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
+  const form=new FormData();
+  form.append("chat_id",String(chatId));
+  form.append("photo",new Blob([png],{type:"image/png"}),"portfolio-report.png");
+  if(caption)form.append("caption",caption);
+  const r=await fetch("https://api.telegram.org/bot"+token+"/sendPhoto",{method:"POST",body:form});
+  if(!r.ok)console.error("Telegram sendPhoto error:",await r.text());
+}
 }
