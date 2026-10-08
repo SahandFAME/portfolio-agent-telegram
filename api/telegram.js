@@ -441,8 +441,47 @@ async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return n
 async function sendTelegram(chatId,text){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
-  const r=await fetch("https://api.telegram.org/bot"+token+"/sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,parse_mode:"HTML"})});
-  if(!r.ok)console.error("Telegram API error:",await r.text());
+
+  const send=async msg=>{
+    const r=await fetch("https://api.telegram.org/bot"+token+"/sendMessage",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:"HTML"})
+    });
+    if(!r.ok)console.error("Telegram API error:",await r.text());
+  };
+
+  // Telegram limits text messages to 4096 characters. Split the audit table
+  // into balanced HTML <pre> blocks so large portfolio reports are delivered
+  // instead of silently failing.
+  if(String(text).length<=3900){await send(text);return;}
+
+  const m=String(text).match(/^(.*?)<pre>([\\s\\S]*?)<\\/pre>([\\s\\S]*)$/);
+  if(m){
+    const prefix=m[1], body=m[2], suffix=m[3];
+    const lines=body.split("\\n");
+    let chunk="", first=true;
+    for(const line of lines){
+      const candidate=chunk ? chunk+"\\n"+line : line;
+      if(candidate.length>3300 && chunk){
+        await send((first?prefix:"")+"<pre>"+chunk+"</pre>");
+        first=false;
+        chunk=line;
+      }else chunk=candidate;
+    }
+    if(chunk)await send((first?prefix:"")+"<pre>"+chunk+"</pre>");
+    if(suffix.trim())await send(suffix.trim());
+    return;
+  }
+
+  const lines=String(text).split("\\n");
+  let chunk="";
+  for(const line of lines){
+    const candidate=chunk ? chunk+"\\n"+line : line;
+    if(candidate.length>3800 && chunk){await send(chunk);chunk=line;}
+    else chunk=candidate;
+  }
+  if(chunk)await send(chunk);
 }
 
 function setup(req,res){
