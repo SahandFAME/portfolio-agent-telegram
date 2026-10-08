@@ -12,7 +12,7 @@ const ASSETS = [
 const MANUAL = {"سکه تمام":3,"ربع سکه غیره":3,"ربع سکه بانکی":1,"آبشده (طلب)":1.37,"آبشده (شمش زربد)":20,"دلار":3030};
 
 const LISTED = {
-  "عیار":"عیار","گوهر":"گوهر","آلتون":"آلتون","امرالد":"امرالد",
+  "طلا":"طلا","عیار":"عیار","گوهر":"گوهر","آلتون":"آلتون","امرالد":"امرالد",
   "زرفام":"زرفام","نهال":"نهال","طعام":"طعام","استیل":"استیل",
   "فلز فارابی":"فلزفارابی","پتروآگاه":"پتروآگاه","خودران":"خودران",
   "سجام":"سجام","فملی":"فملی"
@@ -223,6 +223,23 @@ async function tgjuMarket(symbol,htmls){
   throw new Error("TGJU market symbol not found: "+symbol);
 }
 
+async function shakhesbanEnglish(symbol,type){
+  const slug=encodeURIComponent(symbol);
+  const types=type?[type]:["fund","stock"];
+  let lastError="not found";
+  for(const t of types){
+    try{
+      const html=await fetchText("https://english.shakhesban.com/markets/"+t+"/"+slug);
+      const plain=normMarketText(html.replace(/<script[\\s\\S]*?<\\/script>/gi," ").replace(/<style[\\s\\S]*?<\\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," "));
+      const m=plain.match(/Last Price\\s*:\\s*([0-9][0-9,]*)/i);
+      const priceRial=m?parseNum(m[1]):null;
+      if(priceRial!==null&&priceRial>0)return {priceRial,source:"Shakhesban",symbol,retrievedAt:new Date().toISOString()};
+      lastError="Last Price not found";
+    }catch(e){lastError=e.message;}
+  }
+  throw new Error("Shakhesban English unavailable: "+lastError);
+}
+
 async function shakhesban(symbol,type){
   const slug=encodeURIComponent(symbol);
   const types=type?[type]:["fund","stock"];
@@ -268,7 +285,8 @@ async function shakhesbanSilverBar(){
 async function getListedPrice(asset,marketHtmls){
   const symbol=LISTED[asset];
   const type=SHAKHESBAN_TYPE[asset];
-  try{return await shakhesban(symbol,type);}
+  try{return await shakhesbanEnglish(symbol,type);}
+  catch(e){try{return await shakhesban(symbol,type);}catch(e0){e=e0;}
   catch(e){
     try{
       if(!marketHtmls?.length)throw new Error("TGJU market pages unavailable");
@@ -287,7 +305,6 @@ async function getPrices(){
   const prices={};
   const errors={};
   const goldDefs={
-    "طلا":{slug:"ime_fund_lotuss",range:[500000,5000000],unit:"IRR/unit",source:"TGJU صندوق طلای لوتوس"},
     "شمش نقره 999":{imeSilver:true,unit:"IRR/g"},
     "سکه تمام":{slug:"sekee",range:[1000000000,10000000000],unit:"IRR/coin"},
     "ربع سکه بانکی":{slug:"rob",range:[500000000,1500000000],unit:"IRR/coin"},
@@ -365,6 +382,31 @@ async function valuationReply(q,names,title){
   return lines.join("\n");
 }
 
+const REPORT_GROUP={
+  "سکه تمام":"طلا","ربع سکه غیره":"طلا","ربع سکه بانکی":"طلا","آبشده (طلب)":"طلا","آبشده (شمش زربد)":"طلا",
+  "طلا":"صندوق طلا","عیار":"صندوق طلا","گوهر":"صندوق طلا","آلتون":"صندوق طلا","امرالد":"صندوق طلا","زرفام":"صندوق طلا",
+  "شمش نقره 999":"گواهی سپرده","نهال":"صندوق کالایی","طعام":"صندوق بخشی","استیل":"صندوق سهامی","فلز فارابی":"صندوق سهامی",
+  "پتروآگاه":"صندوق سهامی","خودران":"صندوق سهامی","بلک راک":"صندوق","سجام":"سهام","فملی":"سهام",
+  "BTC":"رمز ارز","ETH":"رمز ارز","Tether":"رمز ارز","Link":"رمز ارز","ADA":"رمز ارز","SOL":"رمز ارز","ONDO":"رمز ارز","دلار":"فیات"
+};
+const REPORT_UNIT={
+  "سکه تمام":"عدد","ربع سکه غیره":"عدد","ربع سکه بانکی":"عدد","آبشده (طلب)":"گرم","آبشده (شمش زربد)":"گرم",
+  "طلا":"سهم","عیار":"سهم","گوهر":"سهم","آلتون":"سهم","امرالد":"سهم","زرفام":"سهم","شمش نقره 999":"واحد",
+  "نهال":"سهم","طعام":"سهم","استیل":"سهم","فلز فارابی":"سهم","پتروآگاه":"سهم","خودران":"سهم","بلک راک":"سهم","سجام":"سهم","فملی":"سهم",
+  "BTC":"-","ETH":"-","Tether":"-","Link":"-","ADA":"-","SOL":"-","ONDO":"-","دلار":"-"
+};
+function valueUsd(v,usdIrr){return usdIrr>0?v/usdIrr:0;}
+function portfolioTable(q,vals,total,prices,usdIrr){
+  const header=["#","گروه","دارایی","مقدار","واحد","ارزش واحد","ارزش کل تومان","ارزش کل دلار","%"];
+  const rows=Object.entries(vals).sort((a,b)=>b[1]-a[1]).map(([a,v],i)=>{
+    const p=prices[a]; const qty=q[a]||0;
+    const unit=p.priceUsd!==undefined?("$"+format(p.priceUsd)):formatToman(p.priceRial);
+    return [String(i+1),REPORT_GROUP[a]||"-",a,format(qty),REPORT_UNIT[a]||"-",unit,format(v/10),format(valueUsd(v,usdIrr)),(v/total*100).toFixed(1)+"%"];
+  });
+  const widths=header.map((h,i)=>Math.max(h.length,...rows.map(r=>r[i].length)));
+  const line=r=>r.map((x,i)=>String(x).padEnd(widths[i]," ")).join(" | ");
+  return "<pre>"+line(header)+"\\n"+rows.map(line).join("\\n")+"</pre>";
+}
 async function allocationReply(q,blackRockPriceRial=null){
   const {prices,errors}=await getPrices();
   const usdIrr=prices["دلار"]?.priceRial;
@@ -388,12 +430,12 @@ async function allocationReply(q,blackRockPriceRial=null){
     return "Portfolio valuation needs one additional input.\n\nPlease send the current EcoCoach بلک راک price per unit in toman.\nQuantity: "+format(q["بلک راک"]||0)+" units\n\nExample: 850000";
   }
   if(!total)return "Allocation unavailable: no current prices were obtained.";
-  const lines=["Portfolio valuation (live prices)",""];
-  lines.push("Total valued: "+formatToman(total));
-  lines.push("");
-  for(const [a,v] of Object.entries(vals).sort((x,y)=>y[1]-x[1])) lines.push(a+": "+formatToman(v)+" ("+(v/total*100).toFixed(1)+"%)");
-  if(missing.length)lines.push("\nNot valued: "+missing.join(", "));
-  lines.push("\nPrice retrieval: "+new Date().toISOString());
+  const table=portfolioTable(q,vals,total,prices,usdIrr);
+  const sources=[...new Set(Object.keys(vals).map(a=>prices[a]?.source).filter(Boolean))].join(", ");
+  const lines=["<b>Portfolio valuation — live prices</b>","","<b>Total:</b> "+formatToman(total)+" | <b>USD:</b> $"+format(valueUsd(total,usdIrr)),"",table];
+  if(missing.length)lines.push("\n<b>Not valued:</b> "+missing.join(", "));
+  lines.push("\n<b>Price sources:</b> "+sources);
+  lines.push("<b>Retrieved:</b> "+new Date().toISOString());
   return lines.join("\n");
 }
 
@@ -409,7 +451,7 @@ async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return n
 async function sendTelegram(chatId,text){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
-  const r=await fetch("https://api.telegram.org/bot"+token+"/sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text})});
+  const r=await fetch("https://api.telegram.org/bot"+token+"/sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,parse_mode:"HTML"})});
   if(!r.ok)console.error("Telegram API error:",await r.text());
 }
 
