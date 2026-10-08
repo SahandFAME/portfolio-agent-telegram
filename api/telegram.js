@@ -223,23 +223,6 @@ async function tgjuMarket(symbol,htmls){
   throw new Error("TGJU market symbol not found: "+symbol);
 }
 
-async function shakhesbanEnglish(symbol,type){
-  const slug=encodeURIComponent(symbol);
-  const types=type?[type]:["fund","stock"];
-  let lastError="not found";
-  for(const t of types){
-    try{
-      const html=await fetchText("https://english.shakhesban.com/markets/"+t+"/"+slug);
-      const plain=normMarketText(html.replace(/<script[\\s\\S]*?<\\/script>/gi," ").replace(/<style[\\s\\S]*?<\\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," "));
-      const m=plain.match(/Last Price\\s*:\\s*([0-9][0-9,]*)/i);
-      const priceRial=m?parseNum(m[1]):null;
-      if(priceRial!==null&&priceRial>0)return {priceRial,source:"Shakhesban",symbol,retrievedAt:new Date().toISOString()};
-      lastError="Last Price not found";
-    }catch(e){lastError=e.message;}
-  }
-  throw new Error("Shakhesban English unavailable: "+lastError);
-}
-
 async function shakhesban(symbol,type){
   const slug=encodeURIComponent(symbol);
   const types=type?[type]:["fund","stock"];
