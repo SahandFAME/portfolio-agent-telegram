@@ -459,7 +459,7 @@ function categoryName(asset){
 function escXml(s){return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function svgText(x,y,text,size,opts={}){
   const anchor=opts.anchor||"start",weight=opts.weight||400,fill=opts.fill||"#18324a",dir=opts.dir||"rtl";
-  return '<text x="'+x+'" y="'+y+'" font-family="Noto Sans Arabic, Noto Sans, Arial, sans-serif" font-size="'+size+'" font-weight="'+weight+'" fill="'+fill+'" text-anchor="'+anchor+'" direction="'+dir+'" unicode-bidi="plaintext">'+escXml(text)+"</text>";
+  return '<text x="'+x+'" y="'+y+'" font-family="DejaVu Sans, Arial, sans-serif" font-size="'+size+'" font-weight="'+weight+'" fill="'+fill+'" text-anchor="'+anchor+'" direction="'+dir+'" unicode-bidi="plaintext">'+escXml(text)+"</text>";
 }
 function compactNumber(n){return Number(n).toLocaleString("fa-IR",{maximumFractionDigits:2});}
 function moneyFa(n){return compactNumber(n)+" تومان";}
