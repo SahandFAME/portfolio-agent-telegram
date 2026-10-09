@@ -104,7 +104,7 @@ async function telegram(req,res){
   // Fail closed: only explicitly allowlisted Telegram user IDs may use the bot.
   // Restrict interaction to private chats so portfolio reports cannot leak into groups.
   const allowedUserIds=new Set(String(process.env.TELEGRAM_ALLOWED_USER_IDS||"")
-    .split(/[,\s]+/).map(x=>x.trim()).filter(x=>/^\u005cd+$/.test(x)));
+    .split(/[,\s]+/).map(x=>x.trim()).filter(x=>/^\d+$/.test(x)));
   const userId=message.from?.id;
   if(message.chat.type!=="private"||userId===undefined||!allowedUserIds.has(String(userId))){
     if(message.chat.type==="private"&&userId!==undefined){
