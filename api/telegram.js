@@ -269,28 +269,38 @@ function parseNum(v){
 }
 
 async function tgju(slug,range){
-  const html=await fetchText("https://www.tgju.org/profile/"+slug);
-  const plain=normMarketText(String(html||"")
-    .replace(/<script[\s\S]*?<\/script>/gi," ")
-    .replace(/<style[\s\S]*?<\/style>/gi," ")
-    .replace(/<[^>]+>/g," ")
-    .replace(/&nbsp;/gi," "));
-  const candidates=[];
-  const markerRe=/نرخ فعلی/g;
-  let m;
-  while((m=markerRe.exec(plain))!==null){
-    const tail=plain.slice(m.index,m.index+1200);
-    for(const hit of tail.matchAll(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*/g)){
-      const n=parseNum(hit[0]);
-      if(n!==null)candidates.push(n);
+  // Prefer TGJU's gem host, which currently exposes the live profile quote;
+  // fall back to the canonical www host only if the primary fetch/parse fails.
+  const hosts=["https://gem.tgju.org/profile/","https://www.tgju.org/profile/"];
+  let lastError=null;
+  for(const base of hosts){
+    try{
+      const html=await fetchText(base+slug);
+      const plain=normMarketText(String(html||"")
+        .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
+        .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+        .replace(/<[^>]+>/g," ")
+        .replace(/&nbsp;/gi," "));
+      // Read only the first numeric value immediately following the first
+      // "نرخ فعلی" marker. Do not scan a large page region, which can capture
+      // unrelated historical/high/low values and mistake them for the quote.
+      const marker=plain.indexOf("نرخ فعلی");
+      if(marker<0)throw new Error("TGJU current-price marker not found");
+      const tail=plain.slice(marker+ "نرخ فعلی".length, marker+ "نرخ فعلی".length+180);
+      const hit=tail.match(/[۰-۹٠-٩0-9][۰-۹٠-٩0-9,٬،]*/);
+      const rial=hit?parseNum(hit[0]):null;
+      if(rial===null||rial<=0)throw new Error("TGJU current price not found");
+      if(range&&(rial<range[0]||rial>range[1]))throw new Error("TGJU current price failed validation");
+      const result={priceRial:rial,source:"TGJU ("+new URL(base).hostname+")",retrievedAt:new Date().toISOString()};
+      console.info("TGJU quote retrieved",JSON.stringify({slug,priceRial:rial,source:result.source,retrievedAt:result.retrievedAt}));
+      return result;
+    }catch(e){
+      lastError=e;
+      console.warn("TGJU profile fetch/parse failed",slug,base,e.message);
     }
   }
-  const valid=candidates.filter(x=>!range||(x>=range[0]&&x<=range[1]));
-  const rial=valid[0];
-  if(rial===undefined)throw new Error("TGJU current price not found or failed validation");
-  return {priceRial:rial,source:"TGJU",retrievedAt:new Date().toISOString()};
+  throw new Error("TGJU current price unavailable: "+(lastError?.message||"unknown error"));
 }
-
 async function tsetmc(symbol){
   const q=encodeURIComponent(symbol);
   const search=await fetchJson("https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/"+q);
