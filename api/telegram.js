@@ -100,6 +100,20 @@ async function telegram(req,res){
   if(secret&&req.headers["x-telegram-bot-api-secret-token"]!==secret)return res.status(401).json({ok:false});
   const message=req.body?.message;
   if(!message?.chat?.id)return res.status(200).json({ok:true});
+
+  // Fail closed: only explicitly allowlisted Telegram user IDs may use the bot.
+  // Restrict interaction to private chats so portfolio reports cannot leak into groups.
+  const allowedUserIds=new Set(String(process.env.TELEGRAM_ALLOWED_USER_IDS||"")
+    .split(/[,\s]+/).map(x=>x.trim()).filter(x=>/^\u005cd+$/.test(x)));
+  const userId=message.from?.id;
+  if(message.chat.type!=="private"||userId===undefined||!allowedUserIds.has(String(userId))){
+    if(message.chat.type==="private"&&userId!==undefined){
+      waitUntil(sendTelegram(message.chat.id,
+        "Access is restricted. Your Telegram user ID is "+String(userId)+". Ask the bot owner to authorise this ID."));
+    }
+    return res.status(200).json({ok:true});
+  }
+
   const command=(message.text||"").trim();
   waitUntil((async()=>{
     try{
