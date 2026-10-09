@@ -43,9 +43,14 @@ export default async function handler(req,res){
 function syncAuth(req){return !!process.env.PORTFOLIO_SYNC_SECRET && req.headers["x-portfolio-sync-secret"]===process.env.PORTFOLIO_SYNC_SECRET}
 
 async function sync(req,res){
-  if(!syncAuth(req)) return res.status(401).json({ok:false,error:"Unauthorized"});
+  if(!syncAuth(req)){
+    console.warn("Portfolio sync rejected: missing or invalid sync secret",new Date().toISOString());
+    return res.status(401).json({ok:false,error:"Unauthorized"});
+  }
   const b=req.body||{};
-  if(!b.version||!b.updated_at||typeof b.assets!=="object"||Array.isArray(b.assets))
+  if(!b.version||!b.updated_at||!Number.isFinite(Date.parse(String(b.updated_at)))||
+     (b.workbook_updated_at&&!Number.isFinite(Date.parse(String(b.workbook_updated_at))))||
+     typeof b.assets!=="object"||Array.isArray(b.assets))
     return res.status(400).json({ok:false,error:"Invalid portfolio payload"});
   const assets={};
   for(const [name,value] of Object.entries(b.assets)){
@@ -53,11 +58,25 @@ async function sync(req,res){
     if(!Number.isFinite(n)||n<0) return res.status(400).json({ok:false,error:"Invalid quantity for "+name});
     assets[name]=n;
   }
+  const journalAssets=ASSETS.filter(name=>!Object.prototype.hasOwnProperty.call(MANUAL,name));
+  const missing=journalAssets.filter(name=>!Object.prototype.hasOwnProperty.call(assets,name));
+  const unexpected=Object.keys(assets).filter(name=>!journalAssets.includes(name));
+  if(missing.length||unexpected.length){
+    console.warn("Portfolio sync rejected: incomplete or unexpected asset set",JSON.stringify({missingCount:missing.length,unexpectedCount:unexpected.length,receivedCount:Object.keys(assets).length}));
+    return res.status(400).json({ok:false,error:"Incomplete or unexpected asset set",missing,unexpected});
+  }
   const snapshot={version:String(b.version),updated_at:String(b.updated_at),workbook_updated_at:b.workbook_updated_at?String(b.workbook_updated_at):null,assets};
   try{
+    const previous=await loadSnapshot().catch(()=>null);
+    const incomingStamp=Date.parse(snapshot.workbook_updated_at||snapshot.updated_at);
+    const previousStamp=Date.parse(previous?.workbook_updated_at||previous?.updated_at||"");
+    if(Number.isFinite(previousStamp)&&incomingStamp<previousStamp){
+      return res.status(409).json({ok:false,error:"Refusing to replace a newer portfolio snapshot",current_updated_at:previous.workbook_updated_at||previous.updated_at});
+    }
     await put(SNAPSHOT,JSON.stringify(snapshot,null,2),{access:"private",addRandomSuffix:false,allowOverwrite:true,contentType:"application/json"});
+    console.info("Portfolio snapshot stored",JSON.stringify({received:Object.keys(assets).length,updated_at:snapshot.updated_at,workbook_updated_at:snapshot.workbook_updated_at}));
     return res.status(200).json({ok:true,received:Object.keys(assets).length,stored:true,updated_at:snapshot.updated_at});
-  }catch(e){console.error(e);return res.status(500).json({ok:false,error:"Unable to store portfolio snapshot"});}
+  }catch(e){console.error("Portfolio snapshot storage failed",e.message);return res.status(500).json({ok:false,error:"Unable to store portfolio snapshot"});}
 }
 
 async function loadSnapshot(){
