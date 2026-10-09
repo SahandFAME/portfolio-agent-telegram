@@ -109,15 +109,15 @@ async function telegram(req,res){
   const uid=String(userId);
   const adminIds=adminUserIds();
   const state=await loadAccessState();
-  const legacyIds=String(process.env.TELEGRAM_ALLOWED_USER_IDS||"").split(/[\\s,]+/).map(x=>x.trim()).filter(x=>/^\\d+$/.test(x));
+  const legacyIds=String(process.env.TELEGRAM_ALLOWED_USER_IDS||"").split(/[\s,]+/).map(x=>x.trim()).filter(x=>/^\d+$/.test(x));
   const approved=new Set([...(state.approved||[]).map(String),...legacyIds,...adminIds]);
   const isAdmin=adminIds.includes(uid);
-  if(isAdmin&&(/^\\/users(?:@\\w+)?$/.test(command)||/^\\/revoke(?:@\\w+)?\\s+\\d+$/.test(command)||/^\\/approve(?:@\\w+)?\\s+\\d+$/.test(command))){
+  if(isAdmin&&(/^\/users(?:@\w+)?$/.test(command)||/^\/revoke(?:@\w+)?\s+\d+$/.test(command)||/^\/approve(?:@\w+)?\s+\d+$/.test(command))){
     waitUntil(handleAdminAccessCommand(message.chat.id,command,state,adminIds));
     return res.status(200).json({ok:true});
   }
   if(!approved.has(uid)){
-    if(/^\\/(start|request|help)(?:@\\w+)?$/.test(command)){
+    if(/^\/(start|request|help)(?:@\w+)?$/.test(command)){
       const result=await requestAccess(uid,message.from,adminIds,state);
       waitUntil(sendTelegram(message.chat.id,result));
     }else{
@@ -174,7 +174,7 @@ async function fetchText(url){
 
 
 function adminUserIds(){
-  return [...new Set(String(process.env.TELEGRAM_ADMIN_USER_IDS||"").split(/[\\s,]+/).map(x=>x.trim()).filter(x=>/^\\d+$/.test(x)))];
+  return [...new Set(String(process.env.TELEGRAM_ADMIN_USER_IDS||"").split(/[\s,]+/).map(x=>x.trim()).filter(x=>/^\d+$/.test(x)))];
 }
 async function loadAccessState(){
   try{
@@ -191,20 +191,20 @@ async function saveAccessState(state){
 }
 async function requestAccess(uid,user,adminIds,state){
   if(!adminIds.length)return "Access requests are not configured yet. Your Telegram user ID is "+uid+". Ask the bot owner to configure admin access.";
-  if((state.approved||[]).map(String).includes(uid)||String(process.env.TELEGRAM_ALLOWED_USER_IDS||"").split(/[\\s,]+/).includes(uid))return "You are already authorised. Send /help to see available commands.";
+  if((state.approved||[]).map(String).includes(uid)||String(process.env.TELEGRAM_ALLOWED_USER_IDS||"").split(/[\s,]+/).includes(uid))return "You are already authorised. Send /help to see available commands.";
   state.pending=state.pending||{};
   if(state.pending[uid])return "Your access request is already pending. The bot admin has been notified.";
   state.pending[uid]={id:uid,first_name:String(user.first_name||""),last_name:String(user.last_name||""),username:String(user.username||""),requestedAt:new Date().toISOString()};
   await saveAccessState(state);
   const display=[user.first_name,user.last_name].filter(Boolean).join(" ")||"Telegram user";
-  const who=display+(user.username?" (@"+user.username+")":"")+"\\nUser ID: "+uid;
+  const who=display+(user.username?" (@"+user.username+")":"")+"\nUser ID: "+uid;
   for(const adminId of adminIds){
-    await sendTelegramWithKeyboard(adminId,"New portfolio bot access request\\n\\n"+who,[[{text:"Approve",callback_data:"access:approve:"+uid},{text:"Reject",callback_data:"access:reject:"+uid}]]);
+    await sendTelegramWithKeyboard(adminId,"New portfolio bot access request\n\n"+who,[[{text:"Approve",callback_data:"access:approve:"+uid},{text:"Reject",callback_data:"access:reject:"+uid}]]);
   }
   return "Your access request has been sent to the bot admin. You will receive a message when it is reviewed.";
 }
 async function handleAccessCallback(callback){
-  const m=String(callback.data||"").match(/^access:(approve|reject):(\\d+)$/);
+  const m=String(callback.data||"").match(/^access:(approve|reject):(\d+)$/);
   const uid=String(callback.from?.id||"");
   if(!m||!adminUserIds().includes(uid)){await answerCallback(callback.id,"Not authorised.");return;}
   const state=await loadAccessState(),target=m[2],action=m[1],request=state.pending?.[target];
@@ -223,14 +223,14 @@ async function handleAccessCallback(callback){
   }
 }
 async function handleAdminAccessCommand(chatId,command,state,adminIds){
-  if(/^\\/users(?:@\\w+)?$/.test(command)){
-    const legacy=String(process.env.TELEGRAM_ALLOWED_USER_IDS||"").split(/[\\s,]+/).map(x=>x.trim()).filter(x=>/^\\d+$/.test(x));
+  if(/^\/users(?:@\w+)?$/.test(command)){
+    const legacy=String(process.env.TELEGRAM_ALLOWED_USER_IDS||"").split(/[\s,]+/).map(x=>x.trim()).filter(x=>/^\d+$/.test(x));
     const approved=[...new Set([...(state.approved||[]).map(String),...legacy,...adminIds])];
     const pending=Object.keys(state.pending||{});
-    await sendTelegram(chatId,"Authorised user IDs:\\n"+(approved.join("\\n")||"None")+"\\n\\nPending requests:\\n"+(pending.join("\\n")||"None")+"\\n\\nRevoke access with /revoke USER_ID.");
+    await sendTelegram(chatId,"Authorised user IDs:\n"+(approved.join("\n")||"None")+"\n\nPending requests:\n"+(pending.join("\n")||"None")+"\n\nRevoke access with /revoke USER_ID.");
     return;
   }
-  const revoke=command.match(/^\\/revoke(?:@\\w+)?\\s+(\\d+)$/);
+  const revoke=command.match(/^\/revoke(?:@\w+)?\s+(\d+)$/);
   if(revoke){
     const target=revoke[1];
     if(adminIds.includes(target)){await sendTelegram(chatId,"Admin IDs cannot be revoked with this command.");return;}
@@ -240,7 +240,7 @@ async function handleAdminAccessCommand(chatId,command,state,adminIds){
     await sendTelegram(Number(target),"Your access to the portfolio bot has been revoked.");
     return;
   }
-  const approve=command.match(/^\\/approve(?:@\\w+)?\\s+(\\d+)$/);
+  const approve=command.match(/^\/approve(?:@\w+)?\s+(\d+)$/);
   if(approve){
     const target=approve[1];state.approved=[...new Set([...(state.approved||[]).map(String),target])];
     delete (state.pending||{})[target];await saveAccessState(state);
