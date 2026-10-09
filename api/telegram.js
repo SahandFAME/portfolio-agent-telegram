@@ -491,7 +491,11 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   const enNum=n=>Number(n).toLocaleString("en-US",{maximumFractionDigits:2});
   const toman=n=>(Math.round(Number(n)/1000)*1000).toLocaleString("en-US")+" toman";
   const usdText=n=>"$"+Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
-  const rows=Object.entries(vals).sort((a,b)=>b[1]-a[1]).map(([a,v],i)=>{
+  const categoryRank={"طلا و سکه":0,"نقره":1,"سهام و صندوق":2,"رمز ارز":3,"Tether":4,"US Dollar":5};
+  const rows=Object.entries(vals).sort((a,b)=>{
+    const ga=categoryRank[categoryName(a[0])]??99,gb=categoryRank[categoryName(b[0])]??99;
+    return ga-gb || b[1]-a[1];
+  }).map(([a,v],i)=>{
     const p=prices[a]||{};
     const crypto=cryptoAsset(a);
     const usd=crypto?qSafe(q[a])*qSafe(p.priceUsd):(a==="دلار"?qSafe(q[a]):valueUsd(v,usdIrr));
