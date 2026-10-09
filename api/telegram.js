@@ -277,8 +277,8 @@ async function tgju(slug,range){
     try{
       const html=await fetchText(base+slug);
       const plain=normMarketText(String(html||"")
-        .replace(/<script[\\s\\S]*?<\\/script>/gi," ")
-        .replace(/<style[\\s\\S]*?<\\/style>/gi," ")
+        .replace(/<script[\s\S]*?<\/script>/gi," ")
+        .replace(/<style[\s\S]*?<\/style>/gi," ")
         .replace(/<[^>]+>/g," ")
         .replace(/&nbsp;/gi," "));
       // Read only the first numeric value immediately following the first
