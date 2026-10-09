@@ -388,9 +388,19 @@ function valueUsd(v,usdIrr){return usdIrr>0?v/usdIrr:0;}
 function portfolioTable(q,vals,total,prices,usdIrr){
   const header=["#","گروه","دارایی","مقدار","واحد","قیمت واحد","ارزش کل تومان","ارزش کل دلار","%","منبع"];
   const categoryRank={"طلا و سکه":0,"نقره":1,"سهام و صندوق":2,"رمز ارز":3,"Tether":4,"US Dollar":5};
+  const subgroupRank={
+    "سکه تمام":0,"ربع سکه غیره":0,"ربع سکه بانکی":0,"آبشده (طلب)":0,"آبشده (شمش زربد)":0,
+    "طلا":1,"عیار":1,"گوهر":1,"آلتون":1,"امرالد":1,"زرفام":1,
+    "شمش نقره 999":0,
+    "سهام":0,"صندوق سهامی":1,"صندوق بخشی":2,"صندوق کالایی":3,"صندوق طلا":4,"صندوق":5,
+    "رمز ارز":0,"فیات":0
+  };
   const rows=Object.entries(vals).sort((a,b)=>{
     const ga=categoryRank[categoryName(a[0])]??99,gb=categoryRank[categoryName(b[0])]??99;
-    return ga-gb || b[1]-a[1];
+    if(ga!==gb)return ga-gb;
+    const sa=subgroupRank[REPORT_GROUP[a[0]]]??(categoryName(a[0])==="طلا و سکه"?9:99);
+    const sb=subgroupRank[REPORT_GROUP[b[0]]]??(categoryName(b[0])==="طلا و سکه"?9:99);
+    return sa-sb || b[1]-a[1];
   }).map(([a,v],i)=>{
     const p=prices[a];
     if(!p) throw new Error("Missing price metadata for "+a);
