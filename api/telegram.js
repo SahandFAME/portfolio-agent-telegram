@@ -387,7 +387,11 @@ const REPORT_UNIT={
 function valueUsd(v,usdIrr){return usdIrr>0?v/usdIrr:0;}
 function portfolioTable(q,vals,total,prices,usdIrr){
   const header=["#","گروه","دارایی","مقدار","واحد","قیمت واحد","ارزش کل تومان","ارزش کل دلار","%","منبع"];
-  const rows=Object.entries(vals).sort((a,b)=>b[1]-a[1]).map(([a,v],i)=>{
+  const categoryRank={"طلا و سکه":0,"نقره":1,"سهام و صندوق":2,"رمز ارز":3,"Tether":4,"US Dollar":5};
+  const rows=Object.entries(vals).sort((a,b)=>{
+    const ga=categoryRank[categoryName(a[0])]??99,gb=categoryRank[categoryName(b[0])]??99;
+    return ga-gb || b[1]-a[1];
+  }).map(([a,v],i)=>{
     const p=prices[a];
     if(!p) throw new Error("Missing price metadata for "+a);
     const qty=q[a]||0;
@@ -452,7 +456,8 @@ function assetUsdValue(asset,v,p,usdIrr){
   return valueUsd(v,usdIrr);
 }
 function categoryName(asset){
-  if(asset==="دلار")return "دلار و نقدینگی";
+  if(asset==="دلار")return "US Dollar";
+  if(asset==="Tether")return "Tether";
   if(cryptoAsset(asset))return "رمز ارز";
   if(asset==="شمش نقره 999")return "نقره";
   if(["سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","طلا","عیار","گوهر","آلتون","امرالد","زرفام"].includes(asset))return "طلا و سکه";
@@ -472,10 +477,10 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
     "طلا":"Tala Gold Fund","عیار":"Ayar Gold Fund","گوهر":"Gohar Gold Fund","آلتون":"Alton Gold Fund",
     "امرالد":"Emerald Gold Fund","زرفام":"Zarfam Gold Fund","نهال":"Nahal Commodity Fund","طعام":"Taam Sector Fund",
     "استیل":"Steel Equity Fund","فلز فارابی":"Felez Farabi Fund","پتروآگاه":"PetroAgaah Fund","خودران":"Khodro Fund",
-    "بلک راک":"EcoCoach Fund","سجام":"Sejam","فملی":"FEMI","شمش نقره 999":"999 Silver Certificate",
+    "بلک راک":"EcoCoach Fund","سجام":"Sejam","فملی":"Fameli","شمش نقره 999":"999 Silver Certificate",
     "BTC":"BTC","ETH":"ETH","Tether":"Tether","Link":"LINK","ADA":"ADA","SOL":"SOL","ONDO":"ONDO",
     "سکه تمام":"Full Coin","ربع سکه غیره":"Non-bank Quarter Coin","ربع سکه بانکی":"Bank Quarter Coin",
-    "آبشده (طلب)":"Gold Receivable","آبشده (شمش زربد)":"Zarbed Gold Bar","دلار":"USD Cash"
+    "آبشده (طلب)":"Gold Receivable","آبشده (شمش زربد)":"Zarbed Gold Bar","دلار":"US Dollar"
   };
   const groupEn={
     "طلا":"Gold","صندوق طلا":"Gold","گواهی سپرده":"Commodity Certificate","صندوق کالایی":"Commodity Fund",
@@ -513,9 +518,9 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
     const k=categoryName(a);
     cats[k]=(cats[k]||0)+v;
   }
-  const catOrder=["طلا و سکه","رمز ارز","دلار و نقدینگی","سهام و صندوق","نقره"];
-  const catColors={"طلا و سکه":"#d9a400","رمز ارز":"#7250d5","دلار و نقدینگی":"#43a866","سهام و صندوق":"#2f9ea4","نقره":"#718096"};
-  const catEn={"طلا و سکه":"Gold & Coins","رمز ارز":"Crypto","دلار و نقدینگی":"USD & Cash","سهام و صندوق":"Stocks & Funds","نقره":"Silver"};
+  const catOrder=["طلا و سکه","نقره","سهام و صندوق","رمز ارز","Tether","US Dollar"];
+  const catColors={"طلا و سکه":"#d9a400","رمز ارز":"#7250d5","Tether":"#26a17b","US Dollar":"#43a866","سهام و صندوق":"#2f9ea4","نقره":"#718096"};
+  const catEn={"طلا و سکه":"Gold & Coins","رمز ارز":"Crypto","Tether":"Tether","US Dollar":"US Dollar","سهام و صندوق":"Stocks & Funds","نقره":"Silver"};
 
   // Conservative text truncation keeps every cell inside its column.
   const fit=(text,width,font=13)=>{
@@ -537,11 +542,13 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   let cardX=20;
   for(const [name,val] of cards){
     const pct=total?val/total*100:0;
-    svg+='<rect x="'+cardX+'" y="285" width="335" height="105" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
-    svg+=svgText(cardX+305,320,catEn[name],19,{anchor:"end",weight:700});
-    svg+=svgText(cardX+305,360,pct.toFixed(1)+"%",28,{anchor:"end",weight:700,fill:catColors[name]});
-    svg+=svgText(cardX+20,360,enNum(val/10)+" toman",16,{anchor:"start",fill:"#526579"});
-    cardX+=350;
+    const cardW=285;
+    const cardToman=(Math.round((val/10)/1000)*1000).toLocaleString("en-US");
+    svg+='<rect x="'+cardX+'" y="285" width="'+cardW+'" height="105" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
+    svg+=svgText(cardX+cardW-14,320,catEn[name],17,{anchor:"end",weight:700});
+    svg+=svgText(cardX+cardW-14,360,pct.toFixed(1)+"%",25,{anchor:"end",weight:700,fill:catColors[name]});
+    svg+=svgText(cardX+14,360,cardToman+" toman",14,{anchor:"start",fill:"#526579"});
+    cardX+=295;
   }
 
   // Top-right dashboard: larger, more graphical donut chart.
