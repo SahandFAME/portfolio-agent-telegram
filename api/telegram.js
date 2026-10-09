@@ -133,9 +133,9 @@ async function telegram(req,res){
       let reply=null;
       const valuationCommands=["/allocation","/refresh","/gold","/crypto","/cash"];
       const quantityStatus=quantitySnapshotStatus(snapshot);
-      if(valuationCommands.includes(command)&&quantityStatus.stale){
+      if((valuationCommands.includes(command)||(pending?.type==="blackrock_price"&&!command.startsWith("/")))&&quantityStatus.stale){
         reply=quantityStatus.message;
-      }else if(pending?.type==="blackrock_price"){
+      }else if(pending?.type==="blackrock_price"&&!command.startsWith("/")){
         const priceRial=parseUserPrice(command);
         if(priceRial===null){
           reply="لطفاً قیمت فعلی هر واحد بلک راک (EcoCoach) را به تومان وارد کنید.";
@@ -804,6 +804,7 @@ async function allocationImageReply(q,blackRockPriceRial){
   }
   let total=0;const vals={};
   for(const a of ASSETS){
+    if(a==="بلک راک")continue;
     const qty=Number(q[a]);
     vals[a]=valueRial(a,qty,prices[a],usdIrr);
     total+=vals[a];
