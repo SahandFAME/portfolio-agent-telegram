@@ -502,9 +502,24 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   const toman=n=>(Math.round(Number(n)/1000)*1000).toLocaleString("en-US")+" toman";
   const usdText=n=>"$"+Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
   const categoryRank={"طلا و سکه":0,"نقره":1,"سهام و صندوق":2,"رمز ارز":3,"Tether":4,"US Dollar":5};
+  function subgroupRank(asset){
+    const category=categoryName(asset);
+    if(category==="طلا و سکه"){
+      if(["سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (شمش زربد)"].includes(asset))return 0;
+      if(asset==="آبشده (طلب)")return 1;
+      return 2;
+    }
+    if(category==="سهام و صندوق"){
+      const group=REPORT_GROUP[asset]||"";
+      return ({"سهام":0,"صندوق سهامی":1,"صندوق بخشی":2,"صندوق کالایی":3,"صندوق":4}[group]??99);
+    }
+    return 0;
+  }
   const rows=Object.entries(vals).sort((a,b)=>{
     const ga=categoryRank[categoryName(a[0])]??99,gb=categoryRank[categoryName(b[0])]??99;
-    return ga-gb || b[1]-a[1];
+    if(ga!==gb)return ga-gb;
+    const sa=subgroupRank(a[0]),sb=subgroupRank(b[0]);
+    return sa-sb || b[1]-a[1];
   }).map(([a,v],i)=>{
     const p=prices[a]||{};
     const crypto=cryptoAsset(a);
