@@ -131,7 +131,11 @@ async function telegram(req,res){
       const quantities={...(snapshot?.assets||{}),...MANUAL};
       const pending=await loadPendingBlackRock(message.chat.id);
       let reply=null;
-      if(pending?.type==="blackrock_price"){
+      const valuationCommands=["/allocation","/refresh","/gold","/crypto","/cash"];
+      const quantityStatus=quantitySnapshotStatus(snapshot);
+      if(valuationCommands.includes(command)&&quantityStatus.stale){
+        reply=quantityStatus.message;
+      }else if(pending?.type==="blackrock_price"){
         const priceRial=parseUserPrice(command);
         if(priceRial===null){
           reply="لطفاً قیمت فعلی هر واحد بلک راک (EcoCoach) را به تومان وارد کنید.";
@@ -142,7 +146,10 @@ async function telegram(req,res){
           await savePendingBlackRock(message.chat.id,{type:"none",updatedAt:new Date().toISOString()});
         }
       }else if(command==="/start"||command==="/help")reply=help();
-      else if(command==="/status")reply=snapshot?("پورتفولیو متصل است.\n\nآخرین Snapshot معاملات: "+snapshot.updated_at+(snapshot.workbook_updated_at?"\nآخرین به‌روزرسانی فایل: "+snapshot.workbook_updated_at:"")):"پورتفولیو متصل است، اما Snapshot معاملات هنوز همگام‌سازی نشده است.";
+      else if(command==="/status"){
+        const status=quantitySnapshotStatus(snapshot);
+        reply=snapshot?("پورتفولیو متصل است.\n\nآخرین Snapshot معاملات: "+snapshot.updated_at+(snapshot.workbook_updated_at?"\nآخرین به‌روزرسانی فایل: "+snapshot.workbook_updated_at:"")+(status.stale?"\n\n⚠️ "+status.message:"\n\nوضعیت Snapshot: به‌روز")):"پورتفولیو متصل است، اما Snapshot معاملات هنوز همگام‌سازی نشده است.";
+      }
       else if(command==="/assets")reply="دارایی‌های پرتفوی (۲۹ مورد)\n\n"+ASSETS.map((x,i)=>(i+1)+". "+x+": "+(quantities[x]===undefined?"همگام‌سازی نشده":format(quantities[x]))).join("\n")+(snapshot?"\n\nSnapshot: "+snapshot.updated_at:"");
       else if(command==="/gold")reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","نهال","طعام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"طلا و فلزات گرانبها");
       else if(command==="/crypto")reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"رمزارز");
@@ -475,17 +482,25 @@ function valueRial(asset,qty,p,usdIrr){
 
 async function valuationReply(q,names,title){
   const {prices,errors}=await getPrices();
-  let usdIrr=prices["دلار"]?.priceRial;
+  const usdIrr=prices["دلار"]?.priceRial;
   if(!usdIrr) return title+"\n\nUSD/IRR price unavailable; valuation cannot be calculated.";
   const lines=[title+"\n"];
   let total=0;
+  const missing=[];
   for(const name of names){
-    if(errors[name]||!prices[name]){lines.push(name+": "+(errors[name]||"price unavailable"));continue;}
-    const v=valueRial(name,q[name]||0,prices[name],usdIrr);
+    if(errors[name]||!prices[name]){missing.push(name+": "+(errors[name]||"price unavailable"));continue;}
+    if(q[name]===undefined||!Number.isFinite(Number(q[name]))||Number(q[name])<0){missing.push(name+": quantity unavailable");continue;}
+    const v=valueRial(name,Number(q[name]),prices[name],usdIrr);
     total+=v;
     lines.push(name+": "+format(q[name])+" × "+formatPrice(name,prices[name])+" = "+formatToman(v));
   }
-  lines.push("\nSubtotal: "+formatToman(total));
+  if(missing.length){
+    lines.push("\nValuation incomplete — subtotal omitted to avoid understating the portfolio.");
+    lines.push("Missing data:");
+    lines.push(...missing);
+  }else{
+    lines.push("\nSubtotal: "+formatToman(total));
+  }
   lines.push("\nPrices retrieved: "+new Date().toISOString());
   return lines.join("\n");
 }
@@ -774,14 +789,26 @@ async function allocationImageReply(q,blackRockPriceRial){
   const {prices,errors}=await getPrices();
   const usdIrr=prices["دلار"]?.priceRial;
   if(!usdIrr)return {text:"دریافت نرخ دلار آزاد ناموفق بود؛ ارزش‌گذاری انجام نشد."};
+  const missingQuantities=ASSETS.filter(a=>q[a]===undefined||!Number.isFinite(Number(q[a]))||Number(q[a])<0);
+  if(missingQuantities.length)return {text:"ارزش‌گذاری انجام نشد؛ مقدار این دارایی‌ها موجود یا معتبر نیست: "+missingQuantities.join("، ")};
+  const missingPrices=ASSETS.filter(a=>{
+    if(a==="بلک راک")return blackRockPriceRial===null;
+    return !!errors[a]||!prices[a];
+  });
+  if(missingPrices.length){
+    const otherMissing=missingPrices.filter(a=>a!=="بلک راک");
+    const lines=["گزارش ارزش‌گذاری کامل تهیه نشد. برای جلوگیری از نمایش جمع و درصدهای ناقص، هیچ جمع کل یا نموداری ارائه نمی‌شود."];
+    if(otherMissing.length)lines.push("قیمت ناموجود/نامعتبر: "+otherMissing.map(a=>a+" ("+(errors[a]||"قیمت دریافت نشد")+")").join("؛ "));
+    if(missingPrices.includes("بلک راک"))lines.push("لطفاً قیمت فعلی هر واحد صندوق بلک راک (EcoCoach) را به تومان ارسال کنید. تعداد: "+format(q["بلک راک"])+" واحد");
+    return {text:lines.join("\n\n")};
+  }
   let total=0;const vals={};
   for(const a of ASSETS){
-    if(errors[a]||!prices[a])continue;
-    const qty=Number(q[a]||0);if(!Number.isFinite(qty)||qty<0)continue;
-    vals[a]=valueRial(a,qty,prices[a],usdIrr);total+=vals[a];
+    const qty=Number(q[a]);
+    vals[a]=valueRial(a,qty,prices[a],usdIrr);
+    total+=vals[a];
   }
   if(blackRockPriceRial!==null){const v=qSafe(q["بلک راک"])*blackRockPriceRial;vals["بلک راک"]=v;total+=v;delete errors["بلک راک"];}
-  if(errors["بلک راک"]==="USER_INPUT_REQUIRED"&&blackRockPriceRial===null)return {text:"برای تهیه گزارش، قیمت فعلی هر واحد صندوق بلک راک (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: "+format(q["بلک راک"]||0)+" واحد"};
   if(!total)return {text:"هیچ قیمت معتبر فعلی برای ارزش‌گذاری دریافت نشد."};
   const reportPrices={...prices};if(blackRockPriceRial!==null)reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
   const svg=buildPortfolioSvg(q,vals,total,reportPrices,usdIrr);
@@ -790,6 +817,7 @@ async function allocationImageReply(q,blackRockPriceRial){
   const png=rendered.asPng();
   return {png,total};
 }
+
 function formatPrice(asset,p){
   return p.priceUsd!==undefined?"$"+format(p.priceUsd):formatToman(p.priceRial);
 }
@@ -798,6 +826,17 @@ function format(v){return Number(v).toLocaleString("en-US",{maximumFractionDigit
 function group(q,names){return names.map(n=>n+": "+(q[n]===undefined?"not synchronized":format(q[n]))).join("\n");}
 function help(){return "Portfolio Agent is online.\n\n/status — portfolio status\n/assets — asset list\n/allocation — live portfolio valuation & allocation\n/gold — live gold & precious-metal valuation\n/crypto — live crypto valuation\n/cash — live cash valuation\n/refresh — refresh live market data and portfolio valuation\\n\\nFor بلک راک, the bot asks for the current EcoCoach price per unit whenever a valuation needs it.";}
 async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return null;}}
+function quantitySnapshotStatus(snapshot){
+  const stamp=snapshot?.workbook_updated_at||snapshot?.updated_at;
+  const ms=stamp?Date.parse(stamp):NaN;
+  const age=Date.now()-ms;
+  const maxAgeMs=24*60*60*1000;
+  if(!snapshot||!Number.isFinite(ms)||age<0||age>maxAgeMs){
+    const when=stamp||"نامشخص";
+    return {stale:true,message:"Snapshot مقادیر پرتفوی قدیمی یا نامعتبر است (آخرین زمان ثبت‌شده: "+when+"). برای جلوگیری از ارزش‌گذاری با مقادیر قدیمی، گزارش ارزش‌گذاری متوقف شد. ابتدا همگام‌سازی Trading Journal را اجرا و سپس /status را بررسی کنید."};
+  }
+  return {stale:false,message:""};
+}
 
 async function sendTelegram(chatId,text){
   const token=process.env.TELEGRAM_BOT_TOKEN;
