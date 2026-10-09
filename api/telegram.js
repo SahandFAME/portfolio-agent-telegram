@@ -109,8 +109,7 @@ async function telegram(req,res){
   const uid=String(userId);
   const adminIds=adminUserIds();
   const state=await loadAccessState();
-  const legacyIds=String(process.env.TELEGRAM_ALLOWED_USER_IDS||"").split(/[\s,]+/).map(x=>x.trim()).filter(x=>/^\d+$/.test(x));
-  const approved=new Set([...(state.approved||[]).map(String),...legacyIds,...adminIds]);
+  const approved=new Set([...(state.approved||[]).map(String),...adminIds]);
   const isAdmin=adminIds.includes(uid);
   if(isAdmin&&(/^\/users(?:@\w+)?$/.test(command)||/^\/revoke(?:@\w+)?\s+\d+$/.test(command)||/^\/approve(?:@\w+)?\s+\d+$/.test(command))){
     waitUntil(handleAdminAccessCommand(message.chat.id,command,state,adminIds));
@@ -191,7 +190,7 @@ async function saveAccessState(state){
 }
 async function requestAccess(uid,user,adminIds,state){
   if(!adminIds.length)return "Access requests are not configured yet. Your Telegram user ID is "+uid+". Ask the bot owner to configure admin access.";
-  if((state.approved||[]).map(String).includes(uid)||String(process.env.TELEGRAM_ALLOWED_USER_IDS||"").split(/[\s,]+/).includes(uid))return "You are already authorised. Send /help to see available commands.";
+  if((state.approved||[]).map(String).includes(uid)||adminIds.includes(uid))return "You are already authorised. Send /help to see available commands.";
   state.pending=state.pending||{};
   if(state.pending[uid])return "Your access request is already pending. The bot admin has been notified.";
   state.pending[uid]={id:uid,first_name:String(user.first_name||""),last_name:String(user.last_name||""),username:String(user.username||""),requestedAt:new Date().toISOString()};
@@ -224,8 +223,7 @@ async function handleAccessCallback(callback){
 }
 async function handleAdminAccessCommand(chatId,command,state,adminIds){
   if(/^\/users(?:@\w+)?$/.test(command)){
-    const legacy=String(process.env.TELEGRAM_ALLOWED_USER_IDS||"").split(/[\s,]+/).map(x=>x.trim()).filter(x=>/^\d+$/.test(x));
-    const approved=[...new Set([...(state.approved||[]).map(String),...legacy,...adminIds])];
+    const approved=[...new Set([...(state.approved||[]).map(String),...adminIds])];
     const pending=Object.keys(state.pending||{});
     await sendTelegram(chatId,"Authorised user IDs:\n"+(approved.join("\n")||"None")+"\n\nPending requests:\n"+(pending.join("\n")||"None")+"\n\nRevoke access with /revoke USER_ID.");
     return;
