@@ -20,6 +20,8 @@ Read [docs/CODEX_HANDOFF.md](docs/CODEX_HANDOFF.md) **before changing this proje
 - App: `api/telegram.js` (Vercel Node serverless webhook; private Blob snapshot and access state).
 - Config: `vercel.json`, `package.json`.
 - Handoff: [docs/CODEX_HANDOFF.md](docs/CODEX_HANDOFF.md).
+- Operations and ownership audit: [docs/OPERATIONS.md](docs/OPERATIONS.md).
+- Permanent ownership objective: read [GitHub Issue #1](https://github.com/SahandFAME/portfolio-agent-telegram/issues/1) before development. Preserve the production bot and ChatGPT sync until replacement verification and explicit owner migration approval.
 - Repo: `SahandFAME/portfolio-agent-telegram` (`main`).
 - Production: `https://portfolio-agent-telegram.vercel.app/api/telegram`.
 - All changes: add regression tests for sync and financial arithmetic, test locally, inspect production deploy, and perform safe authenticated readback before declaring success.

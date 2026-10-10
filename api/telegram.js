@@ -50,12 +50,12 @@ async function sync(req,res){
   const b=req.body||{};
   if(!b.version||!b.updated_at||!Number.isFinite(Date.parse(String(b.updated_at)))||
      (b.workbook_updated_at&&!Number.isFinite(Date.parse(String(b.workbook_updated_at))))||
-     typeof b.assets!=="object"||Array.isArray(b.assets))
+     !b.assets||typeof b.assets!=="object"||Array.isArray(b.assets))
     return res.status(400).json({ok:false,error:"Invalid portfolio payload"});
   const assets={};
   for(const [name,value] of Object.entries(b.assets)){
-    const n=Number(value);
-    if(!Number.isFinite(n)||n<0) return res.status(400).json({ok:false,error:"Invalid quantity for "+name});
+    const n=value;
+    if(typeof n!=="number"||!Number.isFinite(n)||n<0) return res.status(400).json({ok:false,error:"Invalid quantity for "+name});
     assets[name]=n;
   }
   const journalAssets=ASSETS.filter(name=>!Object.prototype.hasOwnProperty.call(MANUAL,name));
@@ -67,7 +67,7 @@ async function sync(req,res){
   }
   const snapshot={version:String(b.version),updated_at:String(b.updated_at),workbook_updated_at:b.workbook_updated_at?String(b.workbook_updated_at):null,assets};
   try{
-    const previous=await loadSnapshot().catch(()=>null);
+    const previous=await loadSnapshot();
     const incomingStamp=Date.parse(snapshot.workbook_updated_at||snapshot.updated_at);
     const previousStamp=Date.parse(previous?.workbook_updated_at||previous?.updated_at||"");
     if(Number.isFinite(previousStamp)&&incomingStamp<previousStamp){
@@ -117,6 +117,7 @@ function parseUserPrice(text){
 }
 async function telegram(req,res){
   const secret=process.env.TELEGRAM_WEBHOOK_SECRET;
+  if(!secret)return res.status(503).json({ok:false,error:"Webhook authentication is not configured"});
   if(secret&&req.headers["x-telegram-bot-api-secret-token"]!==secret)return res.status(401).json({ok:false});
   const callback=req.body?.callback_query;
   if(callback){waitUntil(handleAccessCallback(callback));return res.status(200).json({ok:true});}
@@ -470,7 +471,7 @@ async function getPrices(){
         const gold18=await tgjuCached("geram18",[100000000,1000000000]);
         p={...gold18,priceRial:gold18.priceRial*2.03325,source:"TGJU 18K gold × quarter-coin weight",unit:"IRR/coin"};
       }else p=await tgjuCached(d.slug,d.range);
-      if(d.perGram)p.priceRial=p.priceRial/4.6083;
+      if(d.perGram)p={...p,priceRial:p.priceRial/4.6083};
       prices[asset]={...p,unit:d.perGram?"IRR/g":d.unit};
     }catch(e){errors[asset]=e.message;console.error("Gold/metal price failed:",asset,e.message);}
   });
@@ -883,11 +884,11 @@ async function sendTelegram(chatId,text){
     ? [raw.slice(0,preStart),raw.slice(preStart+5,preEnd),raw.slice(preEnd+6)]
     : null;
   if(m){
-    const prefix=m[1], body=m[2], suffix=m[3];
-    const lines=body.split("\\n");
+    const [prefix, body, suffix]=m;
+    const lines=body.split("\n");
     let chunk="", first=true;
-    for(const line of lines){
-      const candidate=chunk ? chunk+"\\n"+line : line;
+    for(const line of lines.flatMap(line=>line.match(/.{1,3000}/gu)||[""])){
+      const candidate=chunk ? chunk+"\n"+line : line;
       if(candidate.length>3300 && chunk){
         await send((first?prefix:"")+"<pre>"+chunk+"</pre>");
         first=false;
@@ -899,10 +900,10 @@ async function sendTelegram(chatId,text){
     return;
   }
 
-  const lines=String(text).split("\\n");
+  const lines=String(text).split("\n");
   let chunk="";
-  for(const line of lines){
-    const candidate=chunk ? chunk+"\\n"+line : line;
+  for(const line of lines.flatMap(line=>line.match(/.{1,3000}/gu)||[""])){
+    const candidate=chunk ? chunk+"\n"+line : line;
     if(candidate.length>3800 && chunk){await send(chunk);chunk=line;}
     else chunk=candidate;
   }
