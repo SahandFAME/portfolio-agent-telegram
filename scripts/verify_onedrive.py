@@ -220,12 +220,44 @@ def download_workbook(token):
 
 
 
+def endpoint():
+    value = required('PORTFOLIO_ENDPOINT')
+    url = parse.urlsplit(value)
+    if url.scheme != 'https' or not url.hostname or url.username or url.password or url.query or url.fragment:
+        raise SyncError('invalid_portfolio_endpoint')
+    return value
+
+
+def read_snapshot(base, secret):
+    response = json_request(base + '?data=portfolio', headers={'x-portfolio-sync-secret': secret}, redirect=False)
+    if response.get('ok') is not True or not isinstance(response.get('snapshot'), dict):
+        raise SyncError('snapshot_readback_invalid')
+    snapshot = response['snapshot']
+    validate_assets(snapshot.get('assets'))
+    iso(snapshot.get('updated_at'))
+    if snapshot.get('workbook_updated_at'):
+        iso(snapshot['workbook_updated_at'])
+    return snapshot
+
+
+
+def compare_production(assets):
+    secret = os.environ.get('PORTFOLIO_SYNC_SECRET_AGENT')
+    if not secret:
+        return {'production_comparison': 'missing_repository_sync_secret'}
+    snapshot = read_snapshot(endpoint(), secret)
+    changed = sum(snapshot['assets'][asset] != value for asset, value in assets.items())
+    return {'production_comparison': 'matched' if changed == 0 else 'different',
+            'changed_asset_count': changed, 'cache_verified_at': snapshot['updated_at']}
+
+
 def main():
     try:
         content, modified = download_workbook(graph_token())
         assets = extract_quantities(content)
         result = {'ok': True, 'verified_assets': len(assets),
-                  'workbook_modified_at': modified, 'production_written': False}
+                  'workbook_modified_at': modified, 'production_written': False,
+                  **compare_production(assets)}
     except SyncError as exc:
         result = {'ok': False, 'error': str(exc), 'production_written': False}
     except Exception:

@@ -11,8 +11,11 @@ the Microsoft application's public client ID. There is no schedule. The workflow
 refreshes delegated authorization and securely persists any rotated refresh token,
 verifies workbook identity and an unchanged eTag around the download, then checks
 all 23 configured named tables and their explicit cached quantity totals. It never
-sums transaction history, saves the workbook, accesses the production cache, or
-sends production sync requests. Missing or ambiguous totals fail closed.
+sums transaction history, saves the workbook, sends production sync requests. If the repository secret
+`PORTFOLIO_SYNC_SECRET_AGENT` is configured, it also performs an authenticated
+GET of the production cache and reports whether all 23 fresh quantities match.
+Otherwise it reports this precise missing prerequisite without losing the
+successful workbook verification. Missing or ambiguous totals fail closed.
 
 Only counts, a source modification timestamp, and fixed error codes are logged.
 The `onedrive/read-only` commit status records the safe aggregate result for
