@@ -5,3 +5,6 @@ node_modules
 .DS_Store
 __pycache__/
 *.py[cod]
+.venv/
+*.xlsm
+verification-result.json

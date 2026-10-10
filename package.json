@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vercel dev"
+    "dev": "vercel dev",
+    "test": "node --experimental-vm-modules --test tests/telegram.test.mjs",
+    "test:sync": "python -m unittest discover -s tests -p 'test_*.py' -v"
   },
   "dependencies": {
     "node-fetch": "^3.3.2",
