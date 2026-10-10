@@ -124,7 +124,8 @@ async function telegram(req,res){
   if(!message?.chat?.id)return res.status(200).json({ok:true});
   const userId=message.from?.id;
   if(message.chat.type!=="private"||userId===undefined)return res.status(200).json({ok:true});
-  const command=(message.text||"").trim();
+  const text=(message.text||"").trim();
+  const command=MENU_COMMANDS.get(text)||text;
   const uid=String(userId);
   const adminIds=adminUserIds();
   const state=await loadAccessState();
@@ -164,7 +165,7 @@ async function telegram(req,res){
           else await sendTelegramPhoto(message.chat.id,report.png,"گزارش ارزش‌گذاری پرتفوی • قیمت‌های زنده");
           await savePendingBlackRock(message.chat.id,{type:"none",updatedAt:new Date().toISOString()});
         }
-      }else if(command==="/start"||command==="/help")reply=help();
+      }else if(command==="/start"||command==="/help"||command==="/menu")reply=help();
       else if(command==="/status"){
         const status=quantitySnapshotStatus(snapshot);
         reply=snapshot?("پورتفولیو متصل است.\n\nآخرین Snapshot معاملات: "+snapshot.updated_at+(snapshot.workbook_updated_at?"\nآخرین به‌روزرسانی فایل: "+snapshot.workbook_updated_at:"")+(status.stale?"\n\n⚠️ "+status.message:"\n\nوضعیت Snapshot: به‌روز")):"پورتفولیو متصل است، اما Snapshot معاملات هنوز همگام‌سازی نشده است.";
@@ -180,8 +181,8 @@ async function telegram(req,res){
           if(report.text.includes("قیمت فعلی هر واحد صندوق بلک"))await savePendingBlackRock(message.chat.id,{type:"blackrock_price",requestedAt:new Date().toISOString()});
         }else await sendTelegramPhoto(message.chat.id,report.png,"گزارش ارزش‌گذاری پرتفوی • قیمت‌های زنده");
       }else reply=help();
-      if(reply)await sendTelegram(message.chat.id,reply);
-    }catch(e){console.error("Telegram handler error:",e);try{await sendTelegram(message.chat.id,"خطا در تهیه گزارش. لطفاً دوباره تلاش کنید.");}catch(_){}}
+      if(reply)await sendTelegram(message.chat.id,reply,{menu:true});
+    }catch(e){console.error("Telegram handler error:",e);try{await sendTelegram(message.chat.id,"خطا در تهیه گزارش. لطفاً دوباره تلاش کنید.",{menu:true});}catch(_){}}
   })());
   return res.status(200).json({ok:true});
 }
@@ -844,7 +845,7 @@ function formatPrice(asset,p){
 function formatToman(rial){return format(rial/10)+" toman";}
 function format(v){return Number(v).toLocaleString("en-US",{maximumFractionDigits:8});}
 function group(q,names){return names.map(n=>n+": "+(q[n]===undefined?"not synchronized":format(q[n]))).join("\n");}
-function help(){return "Portfolio Agent is online.\n\n/status — portfolio status\n/assets — asset list\n/allocation — live portfolio valuation & allocation\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/cash — live cash valuation\n/refresh — refresh live market data and portfolio valuation\\n\\nFor بلک راک, the bot asks for the current EcoCoach price per unit whenever a valuation needs it.";}
+function help(){return "Portfolio Agent is online.\nبرای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n/status — portfolio status\n/assets — asset list\n/allocation — live portfolio valuation & allocation\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/cash — live cash valuation\n/refresh — refresh live market data and portfolio valuation\\n\\nFor بلک راک, the bot asks for the current EcoCoach price per unit whenever a valuation needs it.";}
 async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return null;}}
 function quantitySnapshotStatus(snapshot){
   const stamp=snapshot?.updated_at;
@@ -858,7 +859,20 @@ function quantitySnapshotStatus(snapshot){
   return {stale:false,message:""};
 }
 
-async function sendTelegram(chatId,text){
+const BUTTON_MENU=[
+  [{text:"وضعیت",command:"/status"},{text:"دارایی‌ها",command:"/assets"}],
+  [{text:"طلا و سایر فلزات گرانبها",command:"/gold_and_other_precious_metals"},{text:"رمزارز",command:"/crypto"}],
+  [{text:"نقدینگی",command:"/cash"},{text:"تخصیص دارایی",command:"/allocation"}],
+  [{text:"به‌روزرسانی",command:"/refresh"},{text:"راهنما",command:"/help"}]
+];
+const MENU_COMMANDS=new Map(BUTTON_MENU.flat().map(button=>[button.text,button.command]));
+function portfolioKeyboard(){
+  return {keyboard:BUTTON_MENU.map(row=>row.map(button=>({text:button.text}))),
+    resize_keyboard:true,is_persistent:true,
+    input_field_placeholder:"یک گزینه انتخاب کنید یا قیمت بلک راک را وارد کنید"};
+}
+
+async function sendTelegram(chatId,text,{menu=false}={}){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
 
@@ -866,7 +880,7 @@ async function sendTelegram(chatId,text){
     const r=await fetch("https://api.telegram.org/bot"+token+"/sendMessage",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:"HTML"})
+      body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:"HTML",...(menu?{reply_markup:portfolioKeyboard()}:{})})
     });
     if(!r.ok)console.error("Telegram API error:",await r.text());
   };
@@ -915,6 +929,7 @@ async function sendTelegramPhoto(chatId,png,caption){
   const form=new FormData();
   form.append("chat_id",String(chatId));
   form.append("photo",new Blob([png],{type:"image/png"}),"portfolio-report.png");
+  form.append("reply_markup",JSON.stringify(portfolioKeyboard()));
   if(caption)form.append("caption",caption);
   const r=await fetch("https://api.telegram.org/bot"+token+"/sendPhoto",{method:"POST",body:form});
   if(!r.ok)console.error("Telegram sendPhoto error:",await r.text());
