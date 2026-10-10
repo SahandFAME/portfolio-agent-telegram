@@ -36,6 +36,8 @@ jobs:
           MS_GRAPH_ITEM_ID: DAEF687B3C624F3!2063
           MS_GRAPH_REFRESH_TOKEN: ${{ secrets.MS_GRAPH_REFRESH_TOKEN }}
           GH_TOKEN: ${{ secrets.PORTFOLIO_SECRET_WRITER_TOKEN }}
+          PORTFOLIO_SYNC_SECRET_AGENT: ${{ secrets.PORTFOLIO_SYNC_SECRET_AGENT }}
+          PORTFOLIO_ENDPOINT: https://portfolio-agent-telegram.vercel.app/api/telegram
         run: python scripts/verify_onedrive.py
       - name: Publish safe verification status
         if: always()
@@ -48,7 +50,7 @@ jobs:
           from pathlib import Path
           path = Path('verification-result.json')
           result = json.loads(path.read_text()) if path.exists() else {'ok': False, 'error': 'verification_did_not_run'}
-          description = '23 live table totals verified; no production writes' if result.get('ok') else 'Read-only verification: ' + result['error']
+          description = ('23 live totals verified; cache ' + result.get('production_comparison', 'unchecked')) if result.get('ok') else 'Read-only verification: ' + result['error']
           subprocess.run(['gh', 'api', '--method', 'POST',
               f"repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GITHUB_SHA']}",
               '-f', 'context=onedrive/read-only', '-f', 'state=' + ('success' if result.get('ok') else 'failure'),

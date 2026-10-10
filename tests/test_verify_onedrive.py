@@ -133,5 +133,33 @@ class GraphTests(unittest.TestCase):
             store.assert_not_called()
 
 
+class ComparisonTests(unittest.TestCase):
+    def test_missing_secret_reports_precise_prerequisite(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(sync, 'json_request') as network:
+            self.assertEqual(sync.compare_production({})['production_comparison'], 'missing_repository_sync_secret')
+            network.assert_not_called()
+
+    def test_matching_and_different_cache_read_only(self):
+        assets = dict.fromkeys(sync.MAPPING, 0)
+        snapshot = {'updated_at': '2026-10-10T00:00:00Z', 'assets': dict(assets)}
+        with patch.dict(os.environ, {'PORTFOLIO_SYNC_SECRET_AGENT':'fixture',
+                                    'PORTFOLIO_ENDPOINT':'https://fixture.invalid/api/telegram'}, clear=True), \
+             patch.object(sync, 'json_request', return_value={'ok':True, 'snapshot':snapshot}) as network:
+            self.assertEqual(sync.compare_production(assets)['production_comparison'], 'matched')
+            snapshot['assets']['BTC'] = 1
+            self.assertEqual(sync.compare_production(assets)['changed_asset_count'], 1)
+            for call in network.call_args_list:
+                self.assertTrue(call.args[0].endswith('?data=portfolio'))
+                self.assertNotIn('body', call.kwargs)
+                self.assertNotIn('method', call.kwargs)
+
+    def test_invalid_cache_is_not_reported_as_matching(self):
+        with patch.dict(os.environ, {'PORTFOLIO_SYNC_SECRET_AGENT':'fixture',
+                                    'PORTFOLIO_ENDPOINT':'https://fixture.invalid/api/telegram'}, clear=True), \
+             patch.object(sync, 'json_request', return_value={'ok':True, 'snapshot':{'assets':{}}}):
+            with self.assertRaisesRegex(sync.SyncError, 'incorrect_asset_set'):
+                sync.compare_production(dict.fromkeys(sync.MAPPING, 0))
+
+
 if __name__ == '__main__':
     unittest.main()
