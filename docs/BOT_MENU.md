@@ -25,3 +25,11 @@ The image table displays ETH quantities to three decimal places and BTC to four.
 Only presentation is rounded; stored quantities and valuation arithmetic retain
 full precision. Both 18K gold gram holdings use the live TGJU `geram18` quote.
 The precious-metals report excludes طعام and نهال; both remain in the portfolio.
+
+## Regression verification
+
+Run `node --experimental-vm-modules --test tests/*.test.mjs` from the repository
+root. The 28 passing tests cover menu routing, access control, stale snapshots,
+EcoCoach input, report-image precision and the precious-metal pricing fixes.
+A successful preview build is separate from a successful production deployment
+and a verified menu interaction in the owner's Telegram chat.
