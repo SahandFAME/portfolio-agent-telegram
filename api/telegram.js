@@ -678,7 +678,7 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
     const usd=crypto?qSafe(q[a])*qSafe(p.priceUsd):(a==="دلار"?qSafe(q[a]):valueUsd(v,usdIrr));
     return {
       rank:i+1,asset:assetEn[a]||a,group:groupEn[REPORT_GROUP[a]]||REPORT_GROUP[a]||"-",
-      qty:qSafe(q[a]),unit:unitEn[REPORT_UNIT[a]]||REPORT_UNIT[a]||"-",
+      qty:qSafe(q[a]),qtyDecimals:a==="ETH"?3:a==="BTC"?4:null,unit:unitEn[REPORT_UNIT[a]]||REPORT_UNIT[a]||"-",
       unitPrice:unitPriceDisplay(a,p),valueToman:v/10,valueUsd:usd,pct:total?v/total*100:0,
       source:sourceEn[p.source]||p.source||"-"
     };
@@ -786,7 +786,7 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
       if(k==="valueToman")v=(Math.round(Number(v)/1000)*1000).toLocaleString("en-US");
       else if(k==="valueUsd")v=usdText(v);
       else if(k==="pct")v=r.pct.toFixed(1)+"%";
-      else if(k==="qty")v=enNum(v);
+      else if(k==="qty")v=r.qtyDecimals===null?enNum(v):Number(v).toLocaleString("en-US",{minimumFractionDigits:r.qtyDecimals,maximumFractionDigits:r.qtyDecimals});
       const font=(k==="asset"||k==="group"||k==="source")?12:13;
       v=fit(v,w,font);
       svg+=svgText(xmap[k]+w-8,y+25,String(v),font,{anchor:"end",fill:"#243b53"});
