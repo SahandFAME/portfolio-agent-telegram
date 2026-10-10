@@ -70,14 +70,14 @@ async function app({readError=false, env={}}={}) {
 }
 
 
-test('/gold excludes Taam while preserving gold funds and silver certificates', async()=>{
+test('/gold excludes Taam and Nahal while preserving gold funds and silver certificates', async()=>{
   const a=await app();
   a.store.set('portfolio/latest.json',a.payload);
   await a.request('POST',{}, {message:{chat:{id:1,type:'private'},from:{id:1},text:'/gold'}},
     {'x-telegram-bot-api-secret-token':'fixture-webhook'});
   const text=a.sends.map(x=>JSON.parse(x.options.body).text||'').join('\n');
   assert.ok(text.length>0);
-  assert.doesNotMatch(text,/طعام/);
+  assert.doesNotMatch(text,/طعام|نهال/);
   for(const asset of ['طلا','عیار','گوهر','آلتون','امرالد','زرفام','شمش نقره 999']) assert.ok(text.includes(asset),asset);
 });
 
@@ -88,6 +88,7 @@ test('/assets retains Taam and all 29 holdings including six manual balances', a
     {'x-telegram-bot-api-secret-token':'fixture-webhook'});
   const text=a.sends.map(x=>JSON.parse(x.options.body).text||'').join('\n');
   assert.match(text,/طعام/);
+  assert.match(text,/نهال/);
   assert.equal(a.ns.ASSETS.length,29);
   assert.deepEqual(JSON.parse(JSON.stringify(a.ns.MANUAL)),{'سکه تمام':3,'ربع سکه غیره':3,'ربع سکه بانکی':1,'آبشده (طلب)':1.37,'آبشده (شمش زربد)':20,'دلار':3030});
 });
