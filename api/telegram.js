@@ -40,7 +40,7 @@ export default async function handler(req,res){
   return res.status(405).json({ok:false,error:"Method not allowed"});
 }
 
-function syncAuth(req){return !!process.env.PORTFOLIO_SYNC_SECRET && req.headers["x-portfolio-sync-secret"]===process.env.PORTFOLIO_SYNC_SECRET}
+function syncAuth(req){const supplied=req.headers["x-portfolio-sync-secret"];return !!supplied && ((!!process.env.PORTFOLIO_SYNC_SECRET && supplied===process.env.PORTFOLIO_SYNC_SECRET)||(!!process.env.PORTFOLIO_SYNC_SECRET_AGENT && supplied===process.env.PORTFOLIO_SYNC_SECRET_AGENT));}
 
 async function sync(req,res){
   if(!syncAuth(req)){
