@@ -1,0 +1,57 @@
+name: Verify live OneDrive quantities (read only)
+on:
+  workflow_dispatch:
+    inputs:
+      client_id:
+        description: Microsoft application client ID (public identifier)
+        required: true
+        type: string
+permissions:
+  contents: read
+  statuses: write
+concurrency:
+  group: microsoft-consent
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install protected workbook reader and run regression tests
+        run: |
+          pip install -r scripts/requirements-sync.txt
+          python -m unittest discover -s tests -p 'test_verify_onedrive.py' -v
+      - name: Verify 23 live quantities without production writes
+        env:
+          MS_GRAPH_CLIENT_ID: ${{ inputs.client_id }}
+          MS_GRAPH_TENANT_ID: consumers
+          MS_GRAPH_AUTH_MODE: delegated
+          MS_GRAPH_DRIVE_ID: daef687b3c624f3
+          MS_GRAPH_ITEM_ID: DAEF687B3C624F3!2063
+          MS_GRAPH_REFRESH_TOKEN: ${{ secrets.MS_GRAPH_REFRESH_TOKEN }}
+          GH_TOKEN: ${{ secrets.PORTFOLIO_SECRET_WRITER_TOKEN }}
+        run: python scripts/verify_onedrive.py
+      - name: Publish safe verification status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          path = Path('verification-result.json')
+          result = json.loads(path.read_text()) if path.exists() else {'ok': False, 'error': 'verification_did_not_run'}
+          description = '23 live table totals verified; no production writes' if result.get('ok') else 'Read-only verification: ' + result['error']
+          subprocess.run(['gh', 'api', '--method', 'POST',
+              f"repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GITHUB_SHA']}",
+              '-f', 'context=onedrive/read-only', '-f', 'state=' + ('success' if result.get('ok') else 'failure'),
+              '-f', 'description=' + description, '-f', 'target_url=' + os.environ['RUN_URL']],
+              check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+          PY
