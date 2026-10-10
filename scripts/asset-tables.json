@@ -1,0 +1,94 @@
+{
+  "طلا": {
+    "table": "Table5731",
+    "column": "حجم خرید"
+  },
+  "عیار": {
+    "table": "Table51433",
+    "column": "حجم خرید"
+  },
+  "گوهر": {
+    "table": "Table51032",
+    "column": "حجم خرید"
+  },
+  "آلتون": {
+    "table": "Table5102338",
+    "column": "حجم خرید"
+  },
+  "امرالد": {
+    "table": "Table510232439",
+    "column": "حجم خرید"
+  },
+  "زرفام": {
+    "table": "Table5102324396",
+    "column": "حجم خرید"
+  },
+  "نهال": {
+    "table": "Table15182528294354",
+    "column": "حجم خرید"
+  },
+  "طعام": {
+    "table": "Table1518252829435",
+    "column": "حجم خرید"
+  },
+  "استیل": {
+    "table": "Table15182540",
+    "column": "حجم خرید"
+  },
+  "فلز فارابی": {
+    "table": "Table151825282943",
+    "column": "حجم خرید"
+  },
+  "پتروآگاه": {
+    "table": "Table1518252741",
+    "column": "حجم خرید"
+  },
+  "خودران": {
+    "table": "Table1518252842",
+    "column": "حجم خرید"
+  },
+  "بلک راک": {
+    "table": "Table151825408",
+    "column": "حجم خرید"
+  },
+  "سجام": {
+    "table": "Table53011",
+    "column": "حجم خرید"
+  },
+  "فملی": {
+    "table": "Table15347",
+    "column": "حجم خرید"
+  },
+  "شمش نقره 999": {
+    "table": "Table151825274110",
+    "column": "حجم خرید"
+  },
+  "BTC": {
+    "table": "Table13",
+    "column": "Quantity"
+  },
+  "ETH": {
+    "table": "Table1",
+    "column": "Quantity"
+  },
+  "Tether": {
+    "table": "Table13444",
+    "column": "Quantity"
+  },
+  "Link": {
+    "table": "Table1312",
+    "column": "Quantity"
+  },
+  "ADA": {
+    "table": "Table131219",
+    "column": "Quantity"
+  },
+  "SOL": {
+    "table": "Table131213192120",
+    "column": "Quantity"
+  },
+  "ONDO": {
+    "table": "Table13121319212022",
+    "column": "Quantity"
+  }
+}
