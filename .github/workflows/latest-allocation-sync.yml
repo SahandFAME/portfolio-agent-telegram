@@ -1,0 +1,65 @@
+name: Latest Allocation OneDrive synchronization
+run-name: Latest Allocation ${{ inputs.request_id || 'verification trial' }}
+on:
+  workflow_dispatch:
+    inputs:
+      client_id:
+        description: Public Microsoft application client ID
+        type: string
+        required: true
+      request_id:
+        description: Bot request UUID; leave empty for an authorized sync trial without Telegram messages
+        type: string
+        default: ''
+permissions:
+  contents: read
+  statuses: write
+concurrency:
+  group: microsoft-consent
+  cancel-in-progress: false
+jobs:
+  synchronize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Validate workbook reader and synchronization
+        run: |
+          pip install -r scripts/requirements-sync.txt
+          python -m unittest discover -s tests -p 'test_*sync.py' -v
+          python -m unittest discover -s tests -p 'test_verify_onedrive.py' -v
+      - name: Fresh OneDrive read, production sync and exact readback
+        env:
+          MS_GRAPH_CLIENT_ID: ${{ inputs.client_id }}
+          MS_GRAPH_TENANT_ID: consumers
+          MS_GRAPH_AUTH_MODE: delegated
+          MS_GRAPH_DRIVE_ID: daef687b3c624f3
+          MS_GRAPH_ITEM_ID: DAEF687B3C624F3!2063
+          MS_GRAPH_REFRESH_TOKEN: ${{ secrets.MS_GRAPH_REFRESH_TOKEN }}
+          GH_TOKEN: ${{ secrets.PORTFOLIO_SECRET_WRITER_TOKEN }}
+          PORTFOLIO_SYNC_SECRET_AGENT: ${{ secrets.PORTFOLIO_SYNC_SECRET_AGENT }}
+          PORTFOLIO_ONDEMAND_ENABLED: 'true'
+          ALLOCATION_REQUEST_ID: ${{ inputs.request_id }}
+        run: python scripts/latest_allocation_sync.py
+      - name: Publish aggregate verification result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          path = Path('latest-allocation-result.json')
+          result = json.loads(path.read_text()) if path.exists() else {'ok':False,'error':'sync_did_not_run'}
+          description = ('23 fresh quantities synced and read back; ' + result['snapshot_updated_at']) if result['ok'] else 'On-demand sync: ' + result['error']
+          subprocess.run(['gh','api','--method','POST',f"repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GITHUB_SHA']}",
+                         '-f','context=onedrive/on-demand','-f','state=' + ('success' if result['ok'] else 'failure'),
+                         '-f','description='+description[:140],'-f','target_url='+os.environ['RUN_URL']],
+                         check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+          PY
