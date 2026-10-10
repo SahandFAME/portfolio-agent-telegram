@@ -55,9 +55,15 @@ def authorize():
         raise ConsentError('github_secret_access_denied')
     response = oauth('devicecode', {'client_id':client,
                      'scope':'https://graph.microsoft.com/Files.Read offline_access'})
-    if not all(response.get(k) for k in ('device_code','user_code','expires_in')):
+    if not all(response.get(k) for k in ('device_code','user_code','verification_uri','expires_in')):
         raise ConsentError('microsoft_device_signin_unavailable')
-    print('Open https://microsoft.com/devicelogin', flush=True)
+    uri = response['verification_uri']
+    # Personal-account codes currently use microsoft.com/link; work/school
+    # codes can use devicelogin. Honor the authoritative OAuth response.
+    if uri not in ('https://www.microsoft.com/link', 'https://microsoft.com/devicelogin',
+                   'https://www.microsoft.com/devicelogin'):
+        raise ConsentError('unexpected_microsoft_signin_address')
+    print('Open ' + uri, flush=True)
     print('Enter this temporary sign-in code:',response['user_code'],flush=True)
     print('Sign in with the personal Microsoft account holding Trading Journal.xlsm.',flush=True)
     print('Review the read-only file access consent. No workbook write permission is requested.',flush=True)

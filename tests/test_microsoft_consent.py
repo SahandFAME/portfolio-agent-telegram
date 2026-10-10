@@ -17,7 +17,8 @@ class ConsentTests(unittest.TestCase):
             'GH_TOKEN':'synthetic-secret','GITHUB_REPOSITORY':'SahandFAME/portfolio-agent-telegram'},clear=True)
         self.env.start()
         self.addCleanup(self.env.stop)
-        self.device = {'device_code':'synthetic-device-secret','user_code':'USER-CODE','expires_in':30,'interval':5}
+        self.device = {'device_code':'synthetic-device-secret','user_code':'USERCODE',
+                       'verification_uri':'https://www.microsoft.com/link','expires_in':30,'interval':5}
 
     def test_github_denial_stops_before_microsoft_consent(self):
         with patch.object(consent.subprocess,'run',return_value=Mock(returncode=1)),patch.object(consent,'oauth') as oauth:
@@ -35,7 +36,15 @@ class ConsentTests(unittest.TestCase):
             self.assertEqual(run.call_args.kwargs['input'],b'synthetic-refresh-secret')
             self.assertNotIn('synthetic-refresh-secret',output.getvalue())
             self.assertNotIn('synthetic-device-secret',output.getvalue())
-            self.assertIn('USER-CODE',output.getvalue())
+            self.assertIn('USERCODE',output.getvalue())
+            self.assertIn('Open https://www.microsoft.com/link',output.getvalue())
+            self.assertNotIn('devicelogin',output.getvalue())
+
+    def test_unexpected_signin_address_rejected_before_polling(self):
+        with patch.object(consent.subprocess,'run',return_value=Mock(returncode=0)), \
+             patch.object(consent,'oauth',return_value={**self.device,'verification_uri':'https://example.invalid/'}):
+            with self.assertRaisesRegex(consent.ConsentError,'unexpected_microsoft_signin_address'):
+                consent.authorize()
 
     def test_write_scope_rejected(self):
         with patch.object(consent.subprocess,'run',return_value=Mock(returncode=0)) as run, \
