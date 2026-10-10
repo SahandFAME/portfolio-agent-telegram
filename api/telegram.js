@@ -847,7 +847,7 @@ function group(q,names){return names.map(n=>n+": "+(q[n]===undefined?"not synchr
 function help(){return "Portfolio Agent is online.\n\n/status — portfolio status\n/assets — asset list\n/allocation — live portfolio valuation & allocation\n/gold — live gold & precious-metal valuation\n/crypto — live crypto valuation\n/cash — live cash valuation\n/refresh — refresh live market data and portfolio valuation\\n\\nFor بلک راک, the bot asks for the current EcoCoach price per unit whenever a valuation needs it.";}
 async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return null;}}
 function quantitySnapshotStatus(snapshot){
-  const stamp=snapshot?.workbook_updated_at||snapshot?.updated_at;
+  const stamp=snapshot?.updated_at;
   const ms=stamp?Date.parse(stamp):NaN;
   const age=Date.now()-ms;
   const maxAgeMs=24*60*60*1000;
