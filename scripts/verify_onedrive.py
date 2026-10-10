@@ -247,7 +247,11 @@ def compare_production(assets):
         return {'production_comparison': 'missing_repository_sync_secret'}
     snapshot = read_snapshot(endpoint(), secret)
     changed = sum(snapshot['assets'][asset] != value for asset, value in assets.items())
+    precision_only = sum(snapshot['assets'][asset] != value and
+                         math.isclose(snapshot['assets'][asset], value, rel_tol=1e-12, abs_tol=1e-12)
+                         for asset, value in assets.items())
     return {'production_comparison': 'matched' if changed == 0 else 'different',
+            'precision_only_difference_count': precision_only,
             'changed_asset_count': changed, 'cache_verified_at': snapshot['updated_at']}
 
 
