@@ -1,22 +1,24 @@
-# Portfolio Agent Telegram Bot
+# Portfolio Agent — Telegram Bot
 
-Telegram webhook service for the Portfolio Agent.
+This is the Vercel-hosted Telegram presentation service for the user's 29-asset Portfolio Agent. The source of truth for **23 quantities** is the **read-only** OneDrive `Trading Journal.xlsm`; **six** other asset quantities are manually controlled. The encrypted, private Vercel Blob quantity snapshot is a cache, not the authoritative workbook.
 
-## Architecture
+**For Codex and maintainers, start with:**
+- [AGENTS.md](AGENTS.md) — mandatory data-integrity and security rules
+- [docs/CODEX_HANDOFF.md](docs/CODEX_HANDOFF.md) — historical setup, full asset/table mapping, architecture, sync, deployment, latest verification and outstanding tasks
 
-- Vercel hosts the webhook.
-- Telegram sends updates to `/api/telegram`.
-- Portfolio configuration and asset quantities remain external to this repository.
-- `Trading Journal.xlsm` is read-only and is never modified by this application.
-- Live market prices are obtained independently from external market-data sources.
-- Secrets must be stored as Vercel environment variables, never committed to Git.
+## Main integration points
 
-## Environment variables
+- Production: `https://portfolio-agent-telegram.vercel.app/api/telegram`
+- Telegram: `@SaRoPortfolioAgentBot`
+- Serverless webhook: `api/telegram.js`
+- Authenticated 23-asset sync: `POST /api/telegram?sync=portfolio`
+- Protected readback: `GET /api/telegram?data=portfolio`
+- Private access-managed Telegram commands: `/status`, `/assets`, `/allocation`, `/gold`, `/crypto`, `/cash`, `/refresh`
 
-Required:
-- `TELEGRAM_BOT_TOKEN`
+## Safety
 
-Recommended:
-- `TELEGRAM_WEBHOOK_SECRET`
+Never commit or print tokens, OAuth credentials, Vercel environment values, or the raw workbook. Only use authorized OneDrive/SharePoint access and live, independent market prices. Do not calculate incomplete portfolio totals or silently replace stale quantities. See AGENTS.md.
 
-Future data-source variables will be added when the Microsoft/OneDrive access layer is connected.
+## Operational status (2026-10-10)
+
+The workbook-to-production **one-time sync and authenticated cache readback** succeeded with all 23 correct asset balances. A ChatGPT scheduled daily sync was created for around 09:00 Tehran, first run scheduled for 2026-10-11; recurring executions and a fresh Telegram /status end-to-end check were not yet verified. The original previously proposed external sender was not located. See the handoff for exact evidence and follow-up actions.
