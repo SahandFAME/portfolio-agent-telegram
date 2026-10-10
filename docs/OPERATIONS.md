@@ -1,6 +1,6 @@
 # Operational ownership and migration
 
-Read AGENTS.md, CODEX_HANDOFF.md and [Issue #1](https://github.com/SahandFAME/portfolio-agent-telegram/issues/1) first. The existing bot, private Blob cache, price providers and Telegram access controls are retained. Development changes are on `codex/operational-ownership`; none has been deployed. The Trading Journal workbook is always read-only. No private workbook or credentials belong in this repository.
+Read AGENTS.md, CODEX_HANDOFF.md and [Issue #1](https://github.com/SahandFAME/portfolio-agent-telegram/issues/1) first. The existing bot, private Blob cache, price providers and Telegram access controls are retained. Development changes are pushed to `codex/operational-ownership` for review; no merge, production promotion or migration was performed. The Trading Journal workbook is always read-only. No private workbook or credentials belong in this repository.
 
 Codex tasks maintain this repository and prepare operations changes. A Codex chat is not a permanent worker or scheduler. GitHub Actions will execute independent jobs after configuration and explicit activation.
 
@@ -11,12 +11,12 @@ Audit date: 2026-10-10, Asia/Tehran.
 | Capability | Evidence | Current limit |
 |---|---|---|
 | Source and handoff | Read AGENTS.md, CODEX_HANDOFF.md and complete Issue #1 body through GitHub web page | GitHub API calls received Forbidden |
-| Git read | `git ls-remote origin HEAD` succeeded, main at `1cbba41e83df55f58e8ea5632273299beff7b6d6` | Push and Actions permissions not established |
+| Git read/write | `git ls-remote origin HEAD` succeeded, main at `1cbba41e83df55f58e8ea5632273299beff7b6d6`; ownership branch push succeeded | Actions/settings/secret permissions not established |
 | Local bot | Regression tests execute the actual source with mocked Blob/Telegram/market services; real Persian font/PNG rendering | Does not prove live quotes, private Blob or Telegram commands |
 | Production HTTP | Attempted health and protected readback | Proxy rejected the production host with 403 before reaching the application |
 | Vercel operations | Project identifiers available in handoff | No Vercel credential binding or callable connector; deployment state/logs not verified |
 | Microsoft Graph | Personal OneDrive confirmed by owner | Dedicated app/consent not supplied; actual table layout/cached totals not inspected |
-| Independent sync/monitor | Implemented and tested with synthetic workbooks and service responses | Workflow not pushed, scheduled, or run live |
+| Independent sync/monitor | Implementation and workflows pushed to review branch; 26 Node and 19 Python tests passed with no skips or TODOs | Not scheduled or run live; CI has not been observed on GitHub |
 | ChatGPT sync | Historical handoff says daily 09:00 Tehran from October 11 | No scheduler management access or verified recurring run; left untouched |
 
 The handoff's October 10 authenticated production sync is historical evidence, not a new live verification. No holdings are described as current in this audit.
@@ -111,4 +111,4 @@ If the independent writer fails after cutover, first set its gate false/disable 
 
 ## Operational limits still outstanding
 
-No live independent scheduled run, production readback, deployment verification, price completeness, Telegram command exchange or delivered alert has been verified by this development task. CI and operations workflow files are prepared locally, not activated. Recurring maintenance requires future Codex tasks and configured Actions; it does not happen automatically merely because this chat is open.
+No live independent scheduled run, production readback, deployment verification, price completeness, Telegram command exchange or delivered alert has been verified by this development task. CI and operations workflow files are on the review branch; operations are not scheduled or activated. Recurring maintenance requires future Codex tasks and configured Actions; it does not happen automatically merely because this chat is open.
