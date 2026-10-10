@@ -50,7 +50,7 @@ jobs:
           from pathlib import Path
           path = Path('verification-result.json')
           result = json.loads(path.read_text()) if path.exists() else {'ok': False, 'error': 'verification_did_not_run'}
-          description = ('23 verified; cache=' + result.get('production_comparison', 'unchecked') + '; changed=' + str(result.get('changed_asset_count', '?')) + '; cache_at=' + str(result.get('cache_verified_at', '?')) + '; source_at=' + str(result.get('workbook_modified_at', '?'))) if result.get('ok') else 'Read-only verification: ' + result['error']
+          description = ('23 verified; cache=' + result.get('production_comparison', 'unchecked') + '; changed=' + str(result.get('changed_asset_count', '?')) + '; precision_only=' + str(result.get('precision_only_difference_count', '?')) + '; cache_at=' + str(result.get('cache_verified_at', '?')) + '; source_at=' + str(result.get('workbook_modified_at', '?'))) if result.get('ok') else 'Read-only verification: ' + result['error']
           description = description[:140]
           subprocess.run(['gh', 'api', '--method', 'POST',
               f"repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GITHUB_SHA']}",

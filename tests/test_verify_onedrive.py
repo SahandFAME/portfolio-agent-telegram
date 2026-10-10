@@ -148,6 +148,13 @@ class ComparisonTests(unittest.TestCase):
             self.assertEqual(sync.compare_production(assets)['production_comparison'], 'matched')
             snapshot['assets']['BTC'] = 1
             self.assertEqual(sync.compare_production(assets)['changed_asset_count'], 1)
+            self.assertEqual(sync.compare_production(assets)['precision_only_difference_count'], 0)
+            assets['BTC'] = 0.00519153
+            snapshot['assets']['BTC'] = 0.005191530000000001
+            result = sync.compare_production(assets)
+            self.assertEqual(result['production_comparison'], 'different')
+            self.assertEqual(result['changed_asset_count'], 1)
+            self.assertEqual(result['precision_only_difference_count'], 1)
             for call in network.call_args_list:
                 self.assertTrue(call.args[0].endswith('?data=portfolio'))
                 self.assertNotIn('body', call.kwargs)
