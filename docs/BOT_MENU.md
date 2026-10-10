@@ -12,11 +12,12 @@ message field to reopen it.
 | طلا و سایر فلزات گرانبها | `/gold_and_other_precious_metals` |
 | رمزارز | `/crypto` |
 | نقدینگی | `/cash` |
-| تخصیص دارایی | `/allocation` |
-| به‌روزرسانی | `/refresh` |
+| Latest Allocation | `/latest_allocation` |
 | راهنما | `/help` |
 
-Slash commands still work, including the `/gold` alias. Buttons run through the
+Slash commands still work, including the `/gold` alias. The old `/allocation` and
+`/refresh` commands both invoke Latest Allocation. This operation refreshes
+OneDrive quantities, verifies the new snapshot, then fetches market prices. Buttons run through the
 same private-chat access checks and quantity freshness checks as commands.
 When asked for an EcoCoach price, type the current price in the message field;
 other menu selections continue to work while that request is pending.
@@ -29,7 +30,7 @@ The precious-metals report excludes طعام and نهال; both remain in the po
 ## Regression verification
 
 Run `node --experimental-vm-modules --test tests/*.test.mjs` from the repository
-root. The 28 passing tests cover menu routing, access control, stale snapshots,
+root. The 45 passing tests cover menu routing, access control, stale snapshots,
 EcoCoach input, report-image precision and the precious-metal pricing fixes.
 A successful preview build is separate from a successful production deployment
 and a verified menu interaction in the owner's Telegram chat.
