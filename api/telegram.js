@@ -443,8 +443,8 @@ async function getPrices(){
     "سکه تمام":{slug:"sekee",range:[1000000000,10000000000],unit:"IRR/coin"},
     "ربع سکه بانکی":{slug:"rob",range:[500000000,1500000000],unit:"IRR/coin"},
     "ربع سکه غیره":{gold18Quarter:true,unit:"IRR/coin"},
-    "آبشده (طلب)":{slug:"gold_futures",range:[500000000,2000000000],unit:"IRR/mithqal",perGram:true},
-    "آبشده (شمش زربد)":{slug:"gold_futures",range:[500000000,2000000000],unit:"IRR/mithqal",perGram:true},
+    "آبشده (طلب)":{slug:"geram18",range:[100000000,1000000000],unit:"IRR/g"},
+    "آبشده (شمش زربد)":{slug:"geram18",range:[100000000,1000000000],unit:"IRR/g"},
     "دلار":{slug:"price_dollar_rl",range:[500000,5000000],unit:"IRR/USD"}
   };
   const marketHtmls=[];
@@ -470,8 +470,7 @@ async function getPrices(){
         const gold18=await tgjuCached("geram18",[100000000,1000000000]);
         p={...gold18,priceRial:gold18.priceRial*2.03325,source:"TGJU 18K gold × quarter-coin weight",unit:"IRR/coin"};
       }else p=await tgjuCached(d.slug,d.range);
-      if(d.perGram)p.priceRial=p.priceRial/4.6083;
-      prices[asset]={...p,unit:d.perGram?"IRR/g":d.unit};
+      prices[asset]={...p,unit:d.unit};
     }catch(e){errors[asset]=e.message;console.error("Gold/metal price failed:",asset,e.message);}
   });
   jobs.push(...Object.keys(LISTED).map(async asset=>{
