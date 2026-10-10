@@ -1,0 +1,31 @@
+name: Authorize read-only Microsoft access
+on:
+  workflow_dispatch:
+    inputs:
+      client_id:
+        description: Application (client) ID from the dedicated Microsoft app Overview
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: microsoft-consent
+  cancel-in-progress: false
+jobs:
+  consent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MS_GRAPH_CLIENT_ID: ${{ inputs.client_id }}
+      GH_TOKEN: ${{ secrets.PORTFOLIO_SECRET_WRITER_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Validate actual GitHub credential, then complete Microsoft sign-in
+        run: |
+          python -m unittest discover -s tests -p 'test_microsoft_consent.py' -v
+          python -u scripts/authorize_microsoft.py
