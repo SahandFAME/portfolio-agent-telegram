@@ -816,6 +816,7 @@ async function allocationImageReply(q,blackRockPriceRial){
   });
   if(missingPrices.length){
     const otherMissing=missingPrices.filter(a=>a!=="بلک راک");
+    if(!otherMissing.length&&missingPrices.includes("بلک راک"))return {text:"برای تهیه گزارش، قیمت فعلی هر واحد صندوق بلک راک (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: "+format(q["بلک راک"])+" واحد"};
     const lines=["گزارش ارزش‌گذاری کامل تهیه نشد. برای جلوگیری از نمایش جمع و درصدهای ناقص، هیچ جمع کل یا نموداری ارائه نمی‌شود."];
     if(otherMissing.length)lines.push("قیمت ناموجود/نامعتبر: "+otherMissing.map(a=>a+" ("+(errors[a]||"قیمت دریافت نشد")+")").join("؛ "));
     if(missingPrices.includes("بلک راک"))lines.push("لطفاً قیمت فعلی هر واحد صندوق بلک راک (EcoCoach) را به تومان ارسال کنید. تعداد: "+format(q["بلک راک"])+" واحد");
