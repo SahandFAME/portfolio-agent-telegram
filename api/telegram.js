@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import path from "path";
 
+const ONEDRIVE_CLIENT_ID = '04a73ec3-340a-4cb6-a087-7fdc4dfd93e0';
 const SNAPSHOT = "portfolio/latest.json";
 const ACCESS_STATE = "portfolio/access-control.json";
 const BLACKROCK_PENDING_PREFIX = "portfolio/pending-blackrock/";
@@ -36,6 +37,7 @@ export default async function handler(req,res){
     return res.status(200).json({ok:true,service:"Portfolio Agent Telegram Bot"});
   }
   if(req.method==="POST" && req.query?.sync==="portfolio") return sync(req,res);
+  if(req.method==="POST" && req.query?.complete==="latest-allocation") return completeLatestAllocation(req,res);
   if(req.method==="POST") return telegram(req,res);
   return res.status(405).json({ok:false,error:"Method not allowed"});
 }
@@ -50,12 +52,12 @@ async function sync(req,res){
   const b=req.body||{};
   if(!b.version||!b.updated_at||!Number.isFinite(Date.parse(String(b.updated_at)))||
      (b.workbook_updated_at&&!Number.isFinite(Date.parse(String(b.workbook_updated_at))))||
-     typeof b.assets!=="object"||Array.isArray(b.assets))
+     !b.assets||typeof b.assets!=="object"||Array.isArray(b.assets))
     return res.status(400).json({ok:false,error:"Invalid portfolio payload"});
   const assets={};
   for(const [name,value] of Object.entries(b.assets)){
-    const n=Number(value);
-    if(!Number.isFinite(n)||n<0) return res.status(400).json({ok:false,error:"Invalid quantity for "+name});
+    const n=value;
+    if(typeof n!=="number"||!Number.isFinite(n)||n<0) return res.status(400).json({ok:false,error:"Invalid quantity for "+name});
     assets[name]=n;
   }
   const journalAssets=ASSETS.filter(name=>!Object.prototype.hasOwnProperty.call(MANUAL,name));
@@ -67,7 +69,7 @@ async function sync(req,res){
   }
   const snapshot={version:String(b.version),updated_at:String(b.updated_at),workbook_updated_at:b.workbook_updated_at?String(b.workbook_updated_at):null,assets};
   try{
-    const previous=await loadSnapshot().catch(()=>null);
+    const previous=await loadSnapshot();
     const incomingStamp=Date.parse(snapshot.workbook_updated_at||snapshot.updated_at);
     const previousStamp=Date.parse(previous?.workbook_updated_at||previous?.updated_at||"");
     if(Number.isFinite(previousStamp)&&incomingStamp<previousStamp){
@@ -117,6 +119,7 @@ function parseUserPrice(text){
 }
 async function telegram(req,res){
   const secret=process.env.TELEGRAM_WEBHOOK_SECRET;
+  if(!secret)return res.status(503).json({ok:false});
   if(secret&&req.headers["x-telegram-bot-api-secret-token"]!==secret)return res.status(401).json({ok:false});
   const callback=req.body?.callback_query;
   if(callback){waitUntil(handleAccessCallback(callback));return res.status(200).json({ok:true});}
@@ -147,9 +150,22 @@ async function telegram(req,res){
 
   waitUntil((async()=>{
     try{
+      const pending=await loadPendingBlackRock(message.chat.id);
+      if(command==="/latest_allocation"){
+        await sendTelegram(message.chat.id,await requestLatestAllocation(message.chat.id,userId),{menu:true});
+        return;
+      }
+      if(pending?.type==="latest_sync_pending"&&!command.startsWith("/")){
+        await sendTelegram(message.chat.id,"دریافت و تأیید مقادیر تازه در حال انجام است. لطفاً منتظر درخواست قیمت بلک راک بمانید.",{menu:true});return;
+      }
+      if(pending?.type==="latest_blackrock_price"&&!command.startsWith("/")){
+        const priceRial=parseUserPrice(command);
+        const reply=priceRial===null?"لطفاً قیمت فعلی هر واحد بلک راک (EcoCoach) را به تومان وارد کنید.":
+          await requestLatestAllocation(message.chat.id,userId,priceRial);
+        await sendTelegram(message.chat.id,reply,{menu:true});return;
+      }
       const snapshot=await safeSnapshot();
       const quantities={...(snapshot?.assets||{}),...MANUAL};
-      const pending=await loadPendingBlackRock(message.chat.id);
       let reply=null;
       const valuationCommands=["/allocation","/refresh","/gold","/gold_and_other_precious_metals","/crypto","/cash"];
       const quantityStatus=quantitySnapshotStatus(snapshot);
@@ -174,18 +190,101 @@ async function telegram(req,res){
       else if(command==="/gold_and_other_precious_metals"||command==="/gold")reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"طلا و فلزات گرانبها");
       else if(command==="/crypto")reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"رمزارز");
       else if(command==="/cash")reply=await valuationReply(quantities,["دلار"],"دلار و نقدینگی");
-      else if(command==="/allocation"||command==="/refresh"){
-        const report=await allocationImageReply(quantities,null);
-        if(report.text){
-          reply=report.text;
-          if(report.text.includes("قیمت فعلی هر واحد صندوق بلک"))await savePendingBlackRock(message.chat.id,{type:"blackrock_price",requestedAt:new Date().toISOString()});
-        }else await sendTelegramPhoto(message.chat.id,report.png,"گزارش ارزش‌گذاری پرتفوی • قیمت‌های زنده");
-      }else reply=help();
+      else reply=help();
       if(reply)await sendTelegram(message.chat.id,reply,{menu:true});
     }catch(e){console.error("Telegram handler error:",e);try{await sendTelegram(message.chat.id,"خطا در تهیه گزارش. لطفاً دوباره تلاش کنید.",{menu:true});}catch(_){}}
   })());
   return res.status(200).json({ok:true});
 }
+const ALLOCATION_REQUEST_PREFIX="portfolio/latest-allocation/requests/";
+const ALLOCATION_ACTIVE_PREFIX="portfolio/latest-allocation/active/";
+const ALLOCATION_DEADLINE_MS=10*60*1000;
+async function readPrivateJson(key){
+  const item=await get(key,{access:"private",useCache:false});
+  if(!item)return null;
+  const reader=item.stream.getReader(),chunks=[];
+  while(true){const part=await reader.read();if(part.done)break;chunks.push(Buffer.from(part.value));}
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+async function writePrivateJson(key,value){
+  await put(key,JSON.stringify(value),{access:"private",addRandomSuffix:false,allowOverwrite:true,contentType:"application/json"});
+}
+async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null){
+  const token=process.env.GITHUB_ACTIONS_TOKEN;
+  if(!token)return "دریافت تازه از OneDrive هنوز پیکربندی نشده است. گزارش قبلی به‌عنوان گزارش تازه نمایش داده نمی‌شود.";
+  const active=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+chatId+".json");
+  const prior=active?.request_id?await readPrivateJson(ALLOCATION_REQUEST_PREFIX+active.request_id+".json"):null;
+  if(prior?.status==="queued"&&Date.now()-Date.parse(prior.requested_at)<ALLOCATION_DEADLINE_MS)
+    return "درخواست دریافت تازه از OneDrive در حال انجام است. لطفاً منتظر پاسخ بمانید.";
+  const id=crypto.randomUUID();
+  const record={request_id:id,chat_id:chatId,user_id:String(userId),status:"queued",
+    requested_at:new Date().toISOString(),blackRockPriceRial};
+  await writePrivateJson(ALLOCATION_REQUEST_PREFIX+id+".json",record);
+  await writePrivateJson(ALLOCATION_ACTIVE_PREFIX+chatId+".json",{request_id:id});
+  await savePendingBlackRock(chatId,{type:"latest_sync_pending",request_id:id,requestedAt:record.requested_at});
+  try{
+    const response=await fetch("https://api.github.com/repos/SahandFAME/portfolio-agent-telegram/actions/workflows/latest-allocation-sync.yml/dispatches",{
+      method:"POST",redirect:"error",signal:AbortSignal.timeout(12000),
+      headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2022-11-28"},
+      body:JSON.stringify({ref:"main",inputs:{client_id:ONEDRIVE_CLIENT_ID,request_id:id}})
+    });
+    if(response.status!==204)throw new Error("dispatch_failed");
+  }catch(_){
+    await writePrivateJson(ALLOCATION_REQUEST_PREFIX+id+".json",{...record,status:"failed"});
+    await savePendingBlackRock(chatId,{type:"none",updatedAt:new Date().toISOString()});
+    return "شروع دریافت تازه از OneDrive ناموفق بود. هیچ گزارش قدیمی به‌عنوان گزارش تازه ارائه نشد. لطفاً دوباره تلاش کنید.";
+  }
+  return "در حال دریافت تازه‌ترین مقادیر از OneDrive و همگام‌سازی Snapshot هستم. پس از تأیید، گزارش با قیمت‌های تازه تهیه می‌شود؛ این کار ممکن است چند دقیقه طول بکشد.";
+}
+async function completeLatestAllocation(req,res){
+  if(!syncAuth(req))return res.status(401).json({ok:false});
+  const body=req.body||{},id=body.request_id;
+  if(typeof id!=="string"||! /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)||typeof body.ok!=="boolean")
+    return res.status(400).json({ok:false});
+  let record;
+  try{
+    record=await readPrivateJson(ALLOCATION_REQUEST_PREFIX+id+".json");
+    if(!record)return res.status(404).json({ok:false});
+    if(record.status!=="queued")return res.status(200).json({ok:true,ignored:true});
+    const active=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json");
+    if(active?.request_id!==id)return res.status(200).json({ok:true,ignored:true});
+    await writePrivateJson(ALLOCATION_REQUEST_PREFIX+id+".json",{...record,status:"completed"});
+  }catch(_){return res.status(500).json({ok:false});}
+  waitUntil((async()=>{
+    try{
+      const state=await loadAccessState();
+      if(!new Set([...(state.approved||[]).map(String),...adminUserIds()]).has(record.user_id))return;
+      await savePendingBlackRock(record.chat_id,{type:"none",updatedAt:new Date().toISOString()});
+      if(!body.ok||Date.now()-Date.parse(record.requested_at)>ALLOCATION_DEADLINE_MS){
+        await sendTelegram(record.chat_id,"دریافت یا تأیید مقادیر تازه OneDrive ناموفق بود. گزارش تازه تهیه نشد؛ لطفاً Latest Allocation را دوباره انتخاب کنید.",{menu:true});return;
+      }
+      const snapshot=await loadSnapshot();
+      const journal=ASSETS.filter(a=>!(a in MANUAL));
+      const assets=snapshot?.assets;
+      const now=Date.now(),stamp=Date.parse(snapshot?.updated_at);
+      if(!assets||Object.keys(assets).length!==23||journal.some(a=>typeof assets[a]!=="number"||!Number.isFinite(assets[a])||assets[a]<0)||
+         snapshot.updated_at!==body.snapshot_updated_at||snapshot.workbook_updated_at!==body.workbook_updated_at||
+         !Number.isFinite(stamp)||stamp<Date.parse(record.requested_at)||stamp>now||now-stamp>120000)
+        throw new Error("verified_snapshot_changed");
+      const quantities={...assets,...MANUAL};
+      const report=await allocationImageReply(quantities,record.blackRockPriceRial);
+      const latest=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json");
+      if(latest?.request_id!==id)return;
+      if(report.text){
+        if(report.text.includes("قیمت فعلی هر واحد صندوق بلک"))await savePendingBlackRock(record.chat_id,{
+          type:"latest_blackrock_price",requestedAt:new Date().toISOString(),request_id:id});
+        await sendTelegram(record.chat_id,report.text,{menu:true});
+      }else{
+        await savePendingBlackRock(record.chat_id,{type:"none",updatedAt:new Date().toISOString()});
+        await sendTelegramPhoto(record.chat_id,report.png,"Latest Allocation • مقادیر تازه OneDrive و قیمت‌های تازه بازار");
+      }
+    }catch(_){
+      await sendTelegram(record.chat_id,"تأیید Snapshot تازه یا تهیه گزارش ناموفق بود. لطفاً Latest Allocation را دوباره انتخاب کنید.",{menu:true});
+    }
+  })());
+  return res.status(200).json({ok:true});
+}
+
 async function fetchJson(url){
   const r=await fetch(url,{headers:{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36","Accept":"application/json,text/plain,*/*"},cache:"no-store"});
   if(!r.ok) throw new Error("HTTP "+r.status);
@@ -845,7 +944,7 @@ function formatPrice(asset,p){
 function formatToman(rial){return format(rial/10)+" toman";}
 function format(v){return Number(v).toLocaleString("en-US",{maximumFractionDigits:8});}
 function group(q,names){return names.map(n=>n+": "+(q[n]===undefined?"not synchronized":format(q[n]))).join("\n");}
-function help(){return "Portfolio Agent is online.\nبرای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n/status — portfolio status\n/assets — asset list\n/allocation — live portfolio valuation & allocation\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/cash — live cash valuation\n/refresh — refresh live market data and portfolio valuation\\n\\nFor بلک راک, the bot asks for the current EcoCoach price per unit whenever a valuation needs it.";}
+function help(){return "Portfolio Agent is online.\nبرای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n/status — portfolio status\n/assets — asset list\n/latest_allocation — Latest Allocation: fresh OneDrive quantities and live prices\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/cash — live cash valuation\\n\\nFor بلک راک, the bot asks for the current EcoCoach price per unit whenever a valuation needs it.";}
 async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return null;}}
 function quantitySnapshotStatus(snapshot){
   const stamp=snapshot?.updated_at;
@@ -862,10 +961,12 @@ function quantitySnapshotStatus(snapshot){
 const BUTTON_MENU=[
   [{text:"وضعیت",command:"/status"},{text:"دارایی‌ها",command:"/assets"}],
   [{text:"طلا و سایر فلزات گرانبها",command:"/gold_and_other_precious_metals"},{text:"رمزارز",command:"/crypto"}],
-  [{text:"نقدینگی",command:"/cash"},{text:"تخصیص دارایی",command:"/allocation"}],
-  [{text:"به‌روزرسانی",command:"/refresh"},{text:"راهنما",command:"/help"}]
+  [{text:"نقدینگی",command:"/cash"},{text:"Latest Allocation",command:"/latest_allocation"}],
+  [{text:"راهنما",command:"/help"}]
 ];
-const MENU_COMMANDS=new Map(BUTTON_MENU.flat().map(button=>[button.text,button.command]));
+const MENU_COMMANDS=new Map([...BUTTON_MENU.flat().map(button=>[button.text,button.command]),
+  ["تخصیص دارایی","/latest_allocation"],["به‌روزرسانی","/latest_allocation"],
+  ["/allocation","/latest_allocation"],["/refresh","/latest_allocation"]]);
 function portfolioKeyboard(){
   return {keyboard:BUTTON_MENU.map(row=>row.map(button=>({text:button.text}))),
     resize_keyboard:true,is_persistent:true,

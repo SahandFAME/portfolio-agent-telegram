@@ -72,15 +72,11 @@ async function app({readError=false, quoteFailure=false, env={}}={}) {
 
 
 
-for(const command of ['/allocation','/refresh']) test(`${command} restores exact EcoCoach prompt and keeps pending price input`, async()=>{
-  const a=await app();a.payload.assets['بلک راک']=15;
-  a.store.set('portfolio/latest.json',a.payload);
-  await a.request('POST',{}, {message:{chat:{id:1,type:'private'},from:{id:1},text:command}},
-    {'x-telegram-bot-api-secret-token':'fixture-webhook'});
-  assert.equal(a.sends.length,1);
-  assert.equal(JSON.parse(a.sends[0].options.body).text,
-    'برای تهیه گزارش، قیمت فعلی هر واحد صندوق بلک راک (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: 15 واحد');
-  assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'blackrock_price');
+test('EcoCoach remains the exact concise prompt when it is the only missing price', async()=>{
+  const a=await app();const quantities={...a.assets,...a.ns.MANUAL,'بلک راک':15};
+  const report=await a.ns.allocationImageReply(quantities,null);
+  assert.equal(report.text,'برای تهیه گزارش، قیمت فعلی هر واحد صندوق بلک راک (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: 15 واحد');
+  assert.equal(report.png,undefined);
 });
 
 test('other missing prices still block totals and charts with an explanation', async()=>{
@@ -105,7 +101,7 @@ test('valid EcoCoach input still completes the existing image flow', async()=>{
   a.store.set('portfolio/latest.json',a.payload);
   const message=text=>({message:{chat:{id:1,type:'private'},from:{id:1},text}});
   const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
-  await a.request('POST',{},message('/allocation'),header);
+  a.store.set('portfolio/pending-blackrock/1.json',{type:'blackrock_price'});
   await a.request('POST',{},message('۸۵۰٬۰۰۰ تومان'),header);
   assert.ok(a.sends.some(x=>x.url.endsWith('/sendPhoto')));
   assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'none');
