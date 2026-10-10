@@ -1,7 +1,7 @@
 """Read-only Graph workbook extraction and authenticated portfolio verification.
 
 No workbook, holdings, token, URL, response body, or private identifiers are logged.
-The default mode compares against production without writing to it.
+This module has no production API write or workbook save operation.
 """
 from __future__ import annotations
 
@@ -219,6 +219,7 @@ def download_workbook(token):
     return content, metadata['lastModifiedDateTime']
 
 
+
 def endpoint():
     value = required('PORTFOLIO_ENDPOINT')
     url = parse.urlsplit(value)
@@ -239,100 +240,36 @@ def read_snapshot(base, secret):
     return snapshot
 
 
-def verify_readback(snapshot, payload):
-    if (snapshot.get('assets') != payload['assets'] or
-            snapshot.get('updated_at') != payload['updated_at'] or
-            snapshot.get('workbook_updated_at') != payload['workbook_updated_at']):
-        raise SyncError('snapshot_readback_mismatch')
 
-
-def synchronize(assets, workbook_stamp, *, write=False):
-    validate_assets(assets)
-    iso(workbook_stamp)
-    if iso(workbook_stamp) > datetime.now(timezone.utc):
-        raise SyncError('future_workbook_timestamp')
-    base = endpoint()
-    secret = required('PORTFOLIO_SYNC_SECRET_AGENT')
-    previous = read_snapshot(base, secret)  # Fail closed on inaccessible/invalid state.
-    if iso(workbook_stamp) < iso(previous.get('workbook_updated_at') or previous['updated_at']):
-        raise SyncError('older_workbook_rejected')
-    payload = {'version': 'Microsoft Graph verified table totals', 'updated_at': utcnow(),
-               'workbook_updated_at': workbook_stamp, 'assets': assets}
-    if not write:
-        return {'mode': 'compare', 'matched': previous['assets'] == assets,
-                'verified_assets': len(assets), 'production_written': False}
-    if os.environ.get('PORTFOLIO_MIGRATION_APPROVED') != 'true':
-        raise SyncError('migration_not_approved')
-    response = json_request(base + '?sync=portfolio', method='POST',
-                            headers={'x-portfolio-sync-secret': secret, 'Content-Type': 'application/json'},
-                            body=json.dumps(payload, allow_nan=False).encode(), retries=0, redirect=False)
-    if response.get('ok') is not True or response.get('stored') is not True or response.get('received') != 23:
-        raise SyncError('sync_not_confirmed')
-    verify_readback(read_snapshot(base, secret), payload)
-    return {'mode': 'write', 'verified_assets': 23, 'readback_verified': True, 'production_written': True}
-
-
-def monitor():
-    base = endpoint()
-    health = json_request(base, redirect=False)
-    if health.get('ok') is not True or health.get('service') != 'Portfolio Agent Telegram Bot':
-        raise SyncError('health_check_failed')
-    snapshot = read_snapshot(base, required('PORTFOLIO_SYNC_SECRET_AGENT'))
-    now = datetime.now(timezone.utc)
-    age = (now - iso(snapshot['updated_at'])).total_seconds()
-    source_age = (now - iso(snapshot.get('workbook_updated_at') or snapshot['updated_at'])).total_seconds()
-    if age < 0 or age > 24 * 3600 or source_age < 0:
-        raise SyncError('snapshot_stale_or_future')
-    # An unchanged file may be old while a new verified read is fresh. Do not
-    # confuse workbook edit age with failed synchronization.
-    return {'health_verified': True, 'snapshot_age_hours': round(age / 3600, 2),
-            'workbook_edit_age_hours': round(source_age / 3600, 2), 'verified_assets': 23}
-
-
-def inspect_telegram():
-    # Read-only Bot API methods; no messages sent and no webhook mutation.
-    token = required('TELEGRAM_BOT_TOKEN')
-    base = 'https://api.telegram.org/bot' + token
-    identity = json_request(base + '/getMe', redirect=False)
-    webhook = json_request(base + '/getWebhookInfo', redirect=False)
-    if identity.get('ok') is not True or identity.get('result', {}).get('username') != 'SaRoPortfolioAgentBot':
-        raise SyncError('telegram_identity_mismatch')
-    if webhook.get('ok') is not True or webhook.get('result', {}).get('url') != endpoint():
-        raise SyncError('telegram_webhook_mismatch')
-    info = webhook['result']
-    # Surface backlog and error age; a historical last_error_date alone is not
-    # proof of a current outage. Bot API success is not a user command E2E test.
-    return {'telegram_identity_verified': True, 'webhook_url_verified': True,
-            'pending_update_count': info.get('pending_update_count', 0),
-            'last_error_date': info.get('last_error_date'), 'telegram_commands_verified': False}
+def compare_production(assets):
+    secret = os.environ.get('PORTFOLIO_SYNC_SECRET_AGENT')
+    if not secret:
+        return {'production_comparison': 'missing_repository_sync_secret'}
+    snapshot = read_snapshot(endpoint(), secret)
+    changed = sum(snapshot['assets'][asset] != value for asset, value in assets.items())
+    precision_only = sum(snapshot['assets'][asset] != value and
+                         math.isclose(snapshot['assets'][asset], value, rel_tol=1e-12, abs_tol=1e-12)
+                         for asset, value in assets.items())
+    return {'production_comparison': 'matched' if changed == 0 else 'different',
+            'precision_only_difference_count': precision_only,
+            'changed_asset_count': changed, 'cache_verified_at': snapshot['updated_at']}
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--write', action='store_true')
-    parser.add_argument('--monitor', action='store_true')
-    parser.add_argument('--telegram', action='store_true')
-    args = parser.parse_args()
-    if sum([args.write, args.monitor, args.telegram]) > 1:
-        parser.error('--write, --monitor and --telegram are mutually exclusive')
     try:
-        if args.telegram:
-            result = inspect_telegram()
-        elif args.monitor:
-            result = monitor()
-        else:
-            if args.write and os.environ.get('PORTFOLIO_MIGRATION_APPROVED') != 'true':
-                raise SyncError('migration_not_approved')
-            content, modified = download_workbook(graph_token())
-            result = synchronize(extract_quantities(content), modified, write=args.write)
-        print(json.dumps({'ok': True, **result}))
-        return 0
+        content, modified = download_workbook(graph_token())
+        assets = extract_quantities(content)
+        result = {'ok': True, 'verified_assets': len(assets),
+                  'workbook_modified_at': modified, 'production_written': False,
+                  **compare_production(assets)}
     except SyncError as exc:
-        print(json.dumps({'ok': False, 'error': str(exc)}))
-        return 1
+        result = {'ok': False, 'error': str(exc), 'production_written': False}
     except Exception:
-        print(json.dumps({'ok': False, 'error': 'unexpected_failure'}))
-        return 1
+        result = {'ok': False, 'error': 'unexpected_failure', 'production_written': False}
+    # Only fixed errors and aggregate verification metadata leave process memory.
+    Path('verification-result.json').write_text(json.dumps(result))
+    print(json.dumps(result))
+    return 0 if result['ok'] else 1
 
 
 if __name__ == '__main__':

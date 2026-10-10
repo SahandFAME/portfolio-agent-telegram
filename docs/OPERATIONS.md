@@ -8,18 +8,24 @@ Codex tasks maintain this repository and prepare operations changes. A Codex cha
 
 Audit date: 2026-10-10, Asia/Tehran.
 
-| Capability | Evidence | Current limit |
+| Capability | Verified evidence | Remaining limit |
 |---|---|---|
-| Source and handoff | Read AGENTS.md, CODEX_HANDOFF.md and complete Issue #1 body through GitHub web page | GitHub API calls received Forbidden |
-| Git read/write | `git ls-remote origin HEAD` succeeded, main at `1cbba41e83df55f58e8ea5632273299beff7b6d6`; ownership branch push succeeded | Actions/settings/secret permissions not established |
-| Local bot | Regression tests execute the actual source with mocked Blob/Telegram/market services; real Persian font/PNG rendering | Does not prove live quotes, private Blob or Telegram commands |
-| Production HTTP | Attempted health and protected readback | Proxy rejected the production host with 403 before reaching the application |
-| Vercel operations | Project identifiers available in handoff | No Vercel credential binding or callable connector; deployment state/logs not verified |
-| Microsoft Graph | Personal OneDrive confirmed by owner | Dedicated app/consent not supplied; actual table layout/cached totals not inspected |
-| Independent sync/monitor | Implementation and workflows pushed to review branch; 26 Node and 19 Python tests passed with no skips or TODOs | Not scheduled or run live; CI has not been observed on GitHub |
-| ChatGPT sync | Historical handoff says daily 09:00 Tehran from October 11 | No scheduler management access or verified recurring run; left untouched |
+| Repository | Git read/write, PRs, merges, Actions dispatch/status verified | Cloud GitHub proxy cannot use the Secrets API; runner secret-writer credential works |
+| Local bot | 26 actual-handler regression tests with mocked services and real Persian PNG rendering | Prepared fixes remain unmerged and are not claimed deployed |
+| Production HTTP | HTTP 200 health and authenticated cache read; 23 assets | Cache verification timestamp remains 2026-10-10T06:13:28.437Z |
+| Microsoft Graph | Independent personal-account consent, persisted refresh-token rotation, live workbook identity/eTag and all 23 explicit table totals verified in Actions | No scheduled quantity writer yet |
+| Quantity comparison | All 23 compared with production; 20 exact matches and 3 differences within 1e-12 relative/absolute tolerance | Exact floating-point equality is not claimed; no rounding or cache updates performed |
+| Telegram | Bot identity and production webhook verified, zero queued updates at inspection; owner supplied successful `/status` and `/assets` responses with all 29 assets | Other commands, pricing completeness and alerts remain unverified |
+| Manual holdings | Owner's `/assets` output confirms all six manual holdings remain unchanged | No manual updates authorized |
+| Vercel administration | Existing production API operational | Deployment/log/config administration access remains unresolved; do not infer token validity from a 403 alone |
+| Independent operations | Manual read-only workflow repeatedly succeeded; regression suites prepared | Production-write workflow, recurring sync and monitoring activation remain gated |
+| ChatGPT sync | Historical daily schedule around 09:00 Tehran from October 11 | Recurring execution not verified; left running |
 
-The handoff's October 10 authenticated production sync is historical evidence, not a new live verification. No holdings are described as current in this audit.
+Live verification evidence: [run 38062179238](https://github.com/SahandFAME/portfolio-agent-telegram/actions/runs/38062179238).
+Workbook modification time was 2026-10-09T08:00:36Z. A fresh read of an
+unchanged file verifies quantities without updating the production cache's
+freshness clock. The owner's Telegram results establish those two command
+responses; they do not prove other commands, fresh prices or recurring sync.
 
 ## Source findings and prepared fixes
 
@@ -38,17 +44,23 @@ Remaining review items, without claiming production repair: concurrent Blob read
 
 The personal Microsoft account and choice to use GitHub Actions are settled. Supply authorizations through service/environment settings, never in chat:
 
-1. **Microsoft:** create or select a dedicated Microsoft app accepting personal accounts; enable its public-client/device-code flow. Grant delegated `Files.Read` and `offline_access`. No workbook writes or `Files.ReadWrite` permission. `Files.Read` permits reading the signed-in account's files; it is not technically limited to one workbook. The implementation only requests the configured file. App-only/client-secret authentication is not suitable for this personal account. If broader account read permission is unacceptable, choose a different service with an explicitly supported narrower authorization method before activation.
-2. **GitHub:** allow this repository's Actions and give the maintainer access to branches/PRs, workflows, run logs, settings and secrets. A dedicated fine-grained credential restricted to this repo needs **Secrets: write** for refresh-token rotation; store it as `PORTFOLIO_SECRET_WRITER_TOKEN`. Standard Actions `GITHUB_TOKEN` cannot update repository secrets. Do not use a full-account PAT. Ensure Actions failure notifications are enabled for the owner. API network access must work before inferring that existing GitHub authorization is missing.
-3. **Vercel:** grant access to the existing project for deployment inspection, logs, environment settings and preview deployments. Bind `VERCEL_TOKEN` securely or provide an authorized connector. Make the existing secondary `PORTFOLIO_SYNC_SECRET_AGENT` available to the independent reader; do not rotate the original sender secret. A preview must use isolated Blob/auth configuration and must not share writable production storage. Do not blindly pull production secrets into a logged command.
-4. **Telegram:** securely bind the current bot token for read-only `getMe`/`getWebhookInfo`; identify an authorized private verification/alert chat and approve test messages. The owner can send real slash commands from that chat; a bot API credential cannot impersonate a human Telegram user. No webhook change is needed for inspection.
-5. **Network:** review the saved explicit domains for GitHub API, Vercel, production, Microsoft Graph/auth, Telegram and price providers. After authenticated metadata discovery, add the exact OneDrive download hostname returned by Graph; it cannot be derived safely from the item ID alone. Preserve existing allowed domains and verification. Cloud environment settings and GitHub Actions environment/secrets are separate configurations.
+1. **Vercel administration:** resolve access to deployment status, runtime logs, preview settings and project configuration. The production API works, but this does not establish administration access. A preview must use isolated Blob/auth configuration and must not share writable production storage.
+2. **Telegram testing:** the owner has verified `/status` and `/assets`. Verify `/gold`, `/crypto`, `/cash`, `/allocation` and `/refresh` next, including unavailable-price behavior. Select an authorized private alert chat and explicitly authorize any automated messages before sending them.
+3. **Repository operation settings:** populate nonsecret variables below, configure production-write review where supported, and verify the owner's GitHub Actions failure-notification settings. Existing Microsoft consent, refresh-token persistence and repository production-read secret are verified; do not request them again.
+4. **Migration:** approve a concrete, reviewed production-write trial and later recurring cutover only after replacement validation. No production-write approval or ChatGPT scheduler retirement has been given.
 
 The saved cloud draft declares missing service bindings and nonsecret identifiers; it does not grant permissions, create OAuth consent, populate GitHub Actions secrets, execute jobs or publish anything. Review and save changes in environment settings, then publish the environment. Access held by ChatGPT's OneDrive connector is not inherited by GitHub Actions or Codex.
 
 ## Secure consent and configuration
 
-`scripts/authorize_graph.py` implements the Microsoft device-code flow. Run it interactively after app creation, with secure `MS_GRAPH_CLIENT_ID`, `GH_TOKEN` (the dedicated Secrets-write credential) and `GITHUB_REPOSITORY` bindings. It displays only the short-lived Microsoft user sign-in code and official verification address. The owner signs in and reviews permission consent in Microsoft's browser flow. It stores the refresh token directly via `gh secret set` stdin, with command output suppressed; no token file is written. Do not run this script inside an unattended workflow.
+Microsoft consent is already complete. If it must be renewed, use the manual
+`microsoft-consent.yml` workflow and `scripts/authorize_microsoft.py`, which honors
+Microsoft's returned verification URL. Personal accounts currently use
+`https://www.microsoft.com/link`; do not substitute `devicelogin`. The old
+`authorize_graph.py` name delegates to this verified helper. Never attempt secret
+writes through the Codex GitHub proxy: it overrides GitHub authentication and
+cannot validate or use the supplied Secrets-write PAT. Run token persistence
+inside Actions, where the credential has been proven usable.
 
 The following GitHub **repository** secrets must be set securely:
 
