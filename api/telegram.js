@@ -170,7 +170,7 @@ async function telegram(req,res){
         reply=snapshot?("پورتفولیو متصل است.\n\nآخرین Snapshot معاملات: "+snapshot.updated_at+(snapshot.workbook_updated_at?"\nآخرین به‌روزرسانی فایل: "+snapshot.workbook_updated_at:"")+(status.stale?"\n\n⚠️ "+status.message:"\n\nوضعیت Snapshot: به‌روز")):"پورتفولیو متصل است، اما Snapshot معاملات هنوز همگام‌سازی نشده است.";
       }
       else if(command==="/assets")reply="دارایی‌های پرتفوی (۲۹ مورد)\n\n"+ASSETS.map((x,i)=>(i+1)+". "+x+": "+(quantities[x]===undefined?"همگام‌سازی نشده":format(quantities[x]))).join("\n")+(snapshot?"\n\nSnapshot: "+snapshot.updated_at:"");
-      else if(command==="/gold")reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","نهال","طعام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"طلا و فلزات گرانبها");
+      else if(command==="/gold")reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","نهال","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"طلا و فلزات گرانبها");
       else if(command==="/crypto")reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"رمزارز");
       else if(command==="/cash")reply=await valuationReply(quantities,["دلار"],"دلار و نقدینگی");
       else if(command==="/allocation"||command==="/refresh"){
