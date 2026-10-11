@@ -15,6 +15,9 @@ Omit `--apply` for a read-only check. Never paste the credential in the command.
 Description settings live at Telegram; a Vercel deployment alone does not update
 them. This script sends no chat messages and does not change the bot's name,
 short description, webhook or approval state.
+Telegram controls the layout of this plain-text description. Its Bot API
+offers no text-alignment setting, so centered introduction text cannot be
+enforced across clients.
 
 ## Report buttons
 
@@ -64,7 +67,9 @@ full precision. Both 18K gold gram holdings use the live TGJU `geram18` quote.
 The precious-metals report excludes طعام and نهال; both remain in the portfolio.
 
 The assets report lists all 29 quantities once under Persian category headings:
-gold and coins, silver, stocks and funds, crypto, Tether, and dollars. It uses
+gold and coins, silver, stocks and funds, crypto, Tether, and dollars. Each
+category heading is bold, italic and underlined using Telegram HTML, with a
+blank line before its asset list. It uses
 the same classification as allocation: نهال and طعام stay with funds and Tether
 has its own category. Quantities, zero balances and snapshot timestamps retain
 their existing meaning; this command displays the cached holdings, without

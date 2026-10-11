@@ -946,7 +946,7 @@ function assetsReply(quantities,snapshot){
     ["رمز ارز","رمزارزها"],["Tether","تتر"],["US Dollar","دلار"]
   ];
   let index=0;
-  const sections=categories.map(([category,title])=>title+"\n"+ASSETS
+  const sections=categories.map(([category,title])=>"<b><i><u>"+escXml(title)+"</u></i></b>\n\n"+ASSETS
     .filter(asset=>categoryName(asset)===category)
     .map(asset=>(++index)+". "+asset+": "+(quantities[asset]===undefined?"همگام‌سازی نشده":format(quantities[asset])))
     .join("\n"));
