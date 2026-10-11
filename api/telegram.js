@@ -961,10 +961,11 @@ function quantitySnapshotStatus(snapshot){
 const BUTTON_MENU=[
   [{text:"وضعیت",command:"/status"},{text:"دارایی‌ها",command:"/assets"}],
   [{text:"طلا و سایر فلزات گرانبها",command:"/gold_and_other_precious_metals"},{text:"رمزارز",command:"/crypto"}],
-  [{text:"نقدینگی",command:"/cash"},{text:"Latest Allocation",command:"/latest_allocation"}],
+  [{text:"نقدینگی",command:"/cash"},{text:"آخرین تخصیص دارایی",command:"/latest_allocation"}],
   [{text:"راهنما",command:"/help"}]
 ];
 const MENU_COMMANDS=new Map([...BUTTON_MENU.flat().map(button=>[button.text,button.command]),
+  ["Latest Allocation","/latest_allocation"],
   ["تخصیص دارایی","/latest_allocation"],["به‌روزرسانی","/latest_allocation"],
   ["/allocation","/latest_allocation"],["/refresh","/latest_allocation"]]);
 function portfolioKeyboard(){

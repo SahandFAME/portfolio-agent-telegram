@@ -12,7 +12,7 @@ message field to reopen it.
 | طلا و سایر فلزات گرانبها | `/gold_and_other_precious_metals` |
 | رمزارز | `/crypto` |
 | نقدینگی | `/cash` |
-| Latest Allocation | `/latest_allocation` |
+| آخرین تخصیص دارایی | `/latest_allocation` |
 | راهنما | `/help` |
 
 Slash commands still work, including the `/gold` alias. The old `/allocation` and

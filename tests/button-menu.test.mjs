@@ -71,7 +71,7 @@ async function app({readError=false, env={}}={}) {
 
 
 
-const buttons=[['وضعیت','/status'],['دارایی‌ها','/assets'],['طلا و سایر فلزات گرانبها','/gold_and_other_precious_metals'],['رمزارز','/crypto'],['نقدینگی','/cash'],['Latest Allocation','/latest_allocation'],['راهنما','/help']];
+const buttons=[['وضعیت','/status'],['دارایی‌ها','/assets'],['طلا و سایر فلزات گرانبها','/gold_and_other_precious_metals'],['رمزارز','/crypto'],['نقدینگی','/cash'],['آخرین تخصیص دارایی','/latest_allocation'],['راهنما','/help']];
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const message=(text,id=1,type='private')=>({message:{chat:{id,type},from:{id},text}});
 
