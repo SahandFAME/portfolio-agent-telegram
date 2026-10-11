@@ -73,7 +73,7 @@ async function app({readError=false, env={}}={}) {
 
 
 
-const buttons=[['وضعیت','/status'],['دارایی‌ها','/assets'],['طلا و سایر فلزات گرانبها','/gold_and_other_precious_metals'],['رمزارز','/crypto'],['نقدینگی','/cash'],['آخرین تخصیص دارایی','/latest_allocation'],['راهنما','/help']];
+const buttons=[['وضعیت','/status'],['دارایی‌ها','/assets'],['طلا و سایر فلزات گرانبها','/gold_and_other_precious_metals'],['رمزارز','/crypto'],['دلار نقدی','/cash_dollar'],['آخرین تخصیص دارایی','/latest_allocation'],['راهنما','/help']];
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const message=(text,id=1,type='private')=>({message:{chat:{id,type},from:{id},text}});
 
@@ -112,7 +112,7 @@ test('menu selections do not bypass private-chat or user access controls',async(
 });
 
 test('valuation buttons retain stale quantity protection',async()=>{
-  for(const label of ['طلا و سایر فلزات گرانبها','رمزارز','نقدینگی']){
+  for(const label of ['طلا و سایر فلزات گرانبها','رمزارز','دلار نقدی']){
     const a=await app();a.store.set('portfolio/latest.json',{...a.payload,updated_at:'2020-01-01T00:00:00Z'});
     await a.request('POST',{},message(label),header);
     assert.match(JSON.parse(a.sends[0].options.body).text,/Snapshot/);

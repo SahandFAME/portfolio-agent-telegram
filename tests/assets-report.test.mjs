@@ -30,7 +30,7 @@ test('assets report groups all 29 holdings exactly once using allocation categor
   assert.deepEqual(names(group('رمزارزها')),['BTC','ETH','Link','ADA','SOL','ONDO']);
   assert.deepEqual(names(group('تتر')),['Tether']);
   assert.deepEqual(names(group('دلار')),['دلار']);
-  assert.ok(text.endsWith('Snapshot: '+a.payload.updated_at));
+  assert.ok(text.endsWith('Snapshot: '+a.ns.boldPortfolioTime(a.payload.updated_at)));
   for(const [asset,quantity] of Object.entries({...a.assets,...a.ns.MANUAL})){
     assert.ok(text.includes(asset+': '+Number(quantity).toLocaleString('en-US',{maximumFractionDigits:8})),asset);
   }
@@ -53,7 +53,7 @@ test('assets button gives the same report and preserves precise cached quantitie
   const slash=await report(a);const button=await report(a,'دارایی‌ها');
   assert.equal(button.text,slash.text);
   assert.ok(button.text.includes('BTC: 0.01234567'));assert.ok(button.text.includes('ETH: 0.123456'));
-  assert.ok(button.text.includes('Snapshot: 2026-01-01T00:00:00Z'));
+  assert.ok(button.text.includes('Snapshot: <b>۱۴۰۴/۱۰/۱۱ • ۰۳:۳۰:۰۰ (تهران)</b>'));
   assert.equal(button.text.includes('به‌روز'),false);
 });
 
