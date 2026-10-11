@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import path from 'node:path';
 import sharp from 'sharp';
 import { Resvg } from '@resvg/resvg-js';
+import { BlobPreconditionFailedError } from '@vercel/blob';
 
 const source = await fs.readFile(new URL('../api/telegram.js', import.meta.url), 'utf8');
 // Evaluate the actual unmodified handler, injecting only external dependencies.
@@ -40,6 +41,7 @@ async function app({readError=false, dispatchStatus=204, env={}}={}) {
     }});
   const dependencies = {
     '@vercel/blob':{
+      BlobPreconditionFailedError,
       get:async key => {
         if(readError) throw new Error('fixture storage unavailable');
         if(!store.has(key)) return null;
