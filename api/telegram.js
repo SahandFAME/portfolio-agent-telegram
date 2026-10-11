@@ -152,17 +152,17 @@ async function telegram(req,res){
     try{
       const pending=await loadPendingBlackRock(message.chat.id);
       if(command==="/latest_allocation"){
-        await sendTelegram(message.chat.id,await requestLatestAllocation(message.chat.id,userId),{menu:true});
+        await sendTelegram(message.chat.id,await requestLatestAllocation(message.chat.id,userId),{menu:true,temporary:true});
         return;
       }
       if(pending?.type==="latest_sync_pending"&&!command.startsWith("/")){
-        await sendTelegram(message.chat.id,"دریافت و تأیید مقادیر تازه در حال انجام است. لطفاً منتظر درخواست قیمت بلک راک بمانید.",{menu:true});return;
+        await sendTelegram(message.chat.id,"دریافت و تأیید مقادیر تازه در حال انجام است. لطفاً منتظر درخواست قیمت بلک راک بمانید.",{menu:true,temporary:true});return;
       }
       if(pending?.type==="latest_blackrock_price"&&!command.startsWith("/")){
         const priceRial=parseUserPrice(command);
         const reply=priceRial===null?"لطفاً قیمت فعلی هر واحد بلک راک (EcoCoach) را به تومان وارد کنید.":
           await requestLatestAllocation(message.chat.id,userId,priceRial);
-        await sendTelegram(message.chat.id,reply,{menu:true});return;
+        await sendTelegram(message.chat.id,reply,{menu:true,temporary:true});return;
       }
       const snapshot=await safeSnapshot();
       const quantities={...(snapshot?.assets||{}),...MANUAL};
@@ -191,7 +191,7 @@ async function telegram(req,res){
       else if(command==="/crypto")reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"رمزارز");
       else if(command==="/cash")reply=await valuationReply(quantities,["دلار"],"دلار و نقدینگی");
       else reply=help();
-      if(reply)await sendTelegram(message.chat.id,reply,{menu:true});
+      if(reply)await sendTelegram(message.chat.id,reply,{menu:true,temporary:reply.includes("قیمت فعلی هر واحد بلک راک")});
     }catch(e){console.error("Telegram handler error:",e);try{await sendTelegram(message.chat.id,"خطا در تهیه گزارش. لطفاً دوباره تلاش کنید.",{menu:true});}catch(_){}}
   })());
   return res.status(200).json({ok:true});
@@ -273,7 +273,7 @@ async function completeLatestAllocation(req,res){
       if(report.text){
         if(report.text.includes("قیمت فعلی هر واحد صندوق بلک"))await savePendingBlackRock(record.chat_id,{
           type:"latest_blackrock_price",requestedAt:new Date().toISOString(),request_id:id});
-        await sendTelegram(record.chat_id,report.text,{menu:true});
+        await sendTelegram(record.chat_id,report.text,{menu:true,temporary:report.text.includes("قیمت فعلی هر واحد صندوق بلک")});
       }else{
         await savePendingBlackRock(record.chat_id,{type:"none",updatedAt:new Date().toISOString()});
         await sendTelegramPhoto(record.chat_id,report.png,"Latest Allocation • مقادیر تازه OneDrive و قیمت‌های تازه بازار");
@@ -373,9 +373,7 @@ async function handleAdminAccessCommand(chatId,command,state,adminIds){
   }
 }
 async function sendTelegramWithKeyboard(chatId,text,inlineKeyboard){
-  const token=process.env.TELEGRAM_BOT_TOKEN;if(!token)return;
-  const r=await fetch("https://api.telegram.org/bot"+token+"/sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,reply_markup:{inline_keyboard:inlineKeyboard}})});
-  if(!r.ok)console.error("Telegram access request notification failed:",r.status);
+  return deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,reply_markup:{inline_keyboard:inlineKeyboard}})});
 }
 async function answerCallback(callbackId,text){
   const token=process.env.TELEGRAM_BOT_TOKEN;if(!token)return;
@@ -974,17 +972,60 @@ function portfolioKeyboard(){
     input_field_placeholder:"یک گزینه انتخاب کنید یا قیمت بلک راک را وارد کنید"};
 }
 
-async function sendTelegram(chatId,text,{menu=false}={}){
+const TEMPORARY_REPLY_PREFIX="portfolio/temporary-replies/";
+async function deleteTemporaryReply(chatId,messageId){
+  try{
+    const r=await fetch("https://api.telegram.org/bot"+process.env.TELEGRAM_BOT_TOKEN+"/deleteMessage",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({chat_id:chatId,message_id:messageId})});
+    const result=await r.json();
+    return !!result.ok||r.status===400;
+  }catch(_){return false;}
+}
+// Store only bot-generated message IDs. Never delete user input or report history.
+async function cleanupTemporaryReplies(chatId,messageId,temporary){
+  if(!Number.isSafeInteger(messageId)||messageId<=0)return;
+  const key=TEMPORARY_REPLY_PREFIX+chatId+".json";
+  try{
+    const state=await readPrivateJson(key)||{lastDeliveredId:0,messages:[]};
+    // An older HTTP response arriving late must not replace a newer prompt.
+    if(messageId<=state.lastDeliveredId){
+      if(temporary&&messageId<state.lastDeliveredId)await deleteTemporaryReply(chatId,messageId);
+      return;
+    }
+    const remaining=[];
+    for(const old of state.messages||[]){
+      if(!Number.isSafeInteger(old.message_id)||old.message_id>=messageId){remaining.push(old);continue;}
+      if(Date.now()-Date.parse(old.created_at)>=48*60*60*1000)continue;
+      // Retry transient deletion failures without disrupting the new report.
+      if(!await deleteTemporaryReply(chatId,old.message_id))remaining.push(old);
+    }
+    if(temporary)remaining.push({message_id:messageId,created_at:new Date().toISOString()});
+    await writePrivateJson(key,{lastDeliveredId:messageId,messages:remaining.slice(-10)});
+  }catch(_){console.warn("Temporary reply cleanup unavailable");}
+}
+async function deliverTelegram(chatId,method,options,{temporary=false}={}){
+  const token=process.env.TELEGRAM_BOT_TOKEN;
+  if(!token)return false;
+  try{
+    const r=await fetch("https://api.telegram.org/bot"+token+"/"+method,options);
+    const result=await r.json();
+    if(!r.ok||!result.ok){console.warn("Telegram delivery failed",method,r.status);return false;}
+    await cleanupTemporaryReplies(chatId,result.result?.message_id,temporary);
+    return true;
+  }catch(_){console.warn("Telegram delivery unavailable",method);return false;}
+}
+
+async function sendTelegram(chatId,text,{menu=false,temporary=false}={}){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
 
   const send=async msg=>{
-    const r=await fetch("https://api.telegram.org/bot"+token+"/sendMessage",{
+    return deliverTelegram(chatId,"sendMessage",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:"HTML",...(menu?{reply_markup:portfolioKeyboard()}:{})})
-    });
-    if(!r.ok)console.error("Telegram API error:",await r.text());
+    },{temporary});
   };
 
   // Telegram limits text messages to 4096 characters. Split the audit table
@@ -1033,8 +1074,7 @@ async function sendTelegramPhoto(chatId,png,caption){
   form.append("photo",new Blob([png],{type:"image/png"}),"portfolio-report.png");
   form.append("reply_markup",JSON.stringify(portfolioKeyboard()));
   if(caption)form.append("caption",caption);
-  const r=await fetch("https://api.telegram.org/bot"+token+"/sendPhoto",{method:"POST",body:form});
-  if(!r.ok)console.error("Telegram sendPhoto error:",await r.text());
+  return deliverTelegram(chatId,"sendPhoto",{method:"POST",body:form});
 }
 
 function setup(req,res){

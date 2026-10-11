@@ -3,7 +3,7 @@
 The owner authorized on-demand OneDrive synchronization on 2026-10-10. This
 does not authorize a recurring replacement or retirement of the ChatGPT schedule.
 
-`/latest_allocation` and the **Latest Allocation** button replace the separate
+`/latest_allocation` and the **آخرین تخصیص دارایی** button replace the separate
 allocation and refresh options. Existing `/allocation`, `/refresh` and their old
 Persian buttons route to the same new operation for compatibility.
 
@@ -41,16 +41,17 @@ The six manual holdings stay separate and unchanged. The workbook is never
 saved, edited or uploaded. No credentials, quantities, prices or chat IDs are
 printed by the sync worker. Workbook total validation is fail-closed.
 
-## One remaining production credential
+## Production dispatch credential
 
 Existing Microsoft authorization, token rotation and repository
 `PORTFOLIO_SYNC_SECRET_AGENT` are verified. Do not recreate or rotate them.
 
-Create a dedicated fine-grained GitHub token for only
+The owner configured a dedicated fine-grained GitHub token for only
 `SahandFAME/portfolio-agent-telegram`, with **Actions: read and write** and the
 mandatory **Metadata: read-only** permission. It does not need Contents write
 or Secrets permissions. Save it as the **Vercel Production** environment variable
-`GITHUB_ACTIONS_TOKEN`. Do not put its value in chat or source control.
+`GITHUB_ACTIONS_TOKEN`. Its presence and on-demand dispatch have been verified;
+do not recreate it or put its value in chat or source control.
 
 This permits the existing bot to dispatch the reviewed workflow. Repository
 workflow changes are a trust boundary because Actions can use repository secrets;
@@ -74,7 +75,8 @@ dispatch, aliases, callback authentication/correlation, replay, expiration,
 revoked access, failed/mismatched refreshes, delayed EcoCoach input, exact sync
 readback, quantity extraction, pricing and decimal presentation.
 
-The Telegram integration must not be called fully operational until the Vercel
-dispatch credential is configured, the intended production deployment succeeds,
-and the owner invokes Latest Allocation and receives the verified image. The
-existing production commands remain in place until that integration is deployed.
+Production deployment and protected snapshot readback were verified for main
+`7000aaf3e87033c948af19372ecd4635e3d6dd20`. A subsequent independent worker
+trial verified a snapshot at `2026-10-11T02:55:13.704394Z`. The owner then confirmed
+the Latest Allocation Telegram flow was working. This confirms the on-demand
+integration; it does not verify or authorize a recurring scheduler migration.
