@@ -21,7 +21,7 @@ async function fixture(options){
 
 test('opening and navigating the panel leaves only the current screen tracked',async()=>{
   const a=await fixture();await a.request('POST',{},message('/admin'),header);
-  assert.equal(removed(a).length,1); // remove the redundant keyboard heading
+  assert.equal(removed(a).length,0); // retain the message that supplies the main keyboard
   for(const data of ['admin:users:0','admin:pending:0','admin:admins:0','admin:status','admin:audit','admin:home']){
     const previous=panelState(a).messages[0].message_id;
     const before=a.sends.length;

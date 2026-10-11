@@ -29,7 +29,7 @@ test('owner dashboard provides access requests, users, roles, system status and 
   const dashboard=bodies(a).at(-1);
   assert.match(dashboard.text,/مالک/);
   assert.deepEqual(dashboard.reply_markup.inline_keyboard.flat().map(x=>x.callback_data),
-    ['admin:users:0','admin:pending:0','admin:status','admin:audit','admin:admins:0']);
+    ['admin:users:0','admin:pending:0','admin:status','admin:audit','admin:admins:0','admin:main_menu']);
 });
 
 test('chosen admin dashboard excludes owner-only role management',async()=>{

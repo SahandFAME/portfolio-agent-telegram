@@ -397,6 +397,11 @@ async function handleAccessCallback(callback){
     if(!isBotAdmin(uid,state)){await answerCallback(callback.id,"دسترسی مدیریت ندارید.");return;}
     const data=String(callback.data||"");
     const previousPanel=callbackPanelToReplace(callback);
+    if(data==="admin:main_menu"){
+      await answerCallback(callback.id,"");
+      await trackPreviousAdminPanel(chat.id,previousPanel);
+      await sendMainMenu(chat.id);return;
+    }
     const legacy=data.match(/^access:(approve|reject):([1-9]\d*)$/);
     if(legacy){
       if(!state.pending[legacy[2]]){await answerCallback(callback.id,"این درخواست دیگر در انتظار نیست.");return;}
@@ -433,7 +438,7 @@ async function handleAdminAccessCommand(chatId,command,uid){
     if(!isBotAdmin(uid,state)){await sendTelegram(chatId,"دسترسی مدیریت ندارید.",{
       menu:state.approved.includes(uid),removeMenu:!state.approved.includes(uid)});return;}
     if(/^\/admin(?:@\w+)?$/.test(command)){
-      await sendTelegram(chatId,"پنل مدیریت",{menu:true,temporary:true});await showAdminDashboard(chatId,uid);return;
+      await sendMainMenu(chatId);await showAdminDashboard(chatId,uid);return;
     }
     if(/^\/users(?:@\w+)?$/.test(command)){await showAdminDashboard(chatId,uid,"users");return;}
     const action=command.match(/^\/(approve|revoke)(?:@\w+)?\s+([1-9]\d*)$/);
@@ -566,8 +571,7 @@ function callbackPanelToReplace(callback){
   return {message_id:message.message_id,created_at:message.date?
     new Date(message.date*1000).toISOString():new Date().toISOString()};
 }
-async function sendTelegramWithKeyboard(chatId,text,inlineKeyboard,{temporary=true,previousPanel=null}={}){
-  if(!isBotAdmin(String(chatId),await loadAccessState()))return false;
+async function trackPreviousAdminPanel(chatId,previousPanel){
   if(previousPanel){
     try{
       const key=TEMPORARY_REPLY_PREFIX+chatId+".json";
@@ -577,7 +581,15 @@ async function sendTelegramWithKeyboard(chatId,text,inlineKeyboard,{temporary=tr
       }
     }catch(_){console.warn("Previous admin panel tracking unavailable");}
   }
-  return deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,reply_markup:{inline_keyboard:inlineKeyboard}})},{temporary});
+}
+async function sendTelegramWithKeyboard(chatId,text,inlineKeyboard,{temporary=true,previousPanel=null}={}){
+  if(!isBotAdmin(String(chatId),await loadAccessState()))return false;
+  await trackPreviousAdminPanel(chatId,previousPanel);
+  const keyboard=temporary?[...inlineKeyboard,[{text:"بازگشت به منوی اصلی",callback_data:"admin:main_menu"}]]:inlineKeyboard;
+  return deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,reply_markup:{inline_keyboard:keyboard}})},{temporary});
+}
+async function sendMainMenu(chatId){
+  await sendTelegram(chatId,"منوی اصلی پرتفوی\nبرای انتخاب گزارش، از دکمه‌های زیر استفاده کنید.",{menu:true,menuAnchor:true});
 }
 async function answerCallback(callbackId,text){
   const token=process.env.TELEGRAM_BOT_TOKEN;if(!token)return;
@@ -1178,7 +1190,7 @@ async function portfolioKeyboard(chatId){
   if(!isOwner(String(chatId))&&!state.approved.includes(String(chatId)))return null;
   if(isBotAdmin(String(chatId),state))keyboard.push([{text:"پنل مدیریت"}]);
   return {keyboard,
-    resize_keyboard:true,is_persistent:true,
+    resize_keyboard:true,is_persistent:false,one_time_keyboard:false,
     input_field_placeholder:"یک گزینه انتخاب کنید یا قیمت بلک راک را وارد کنید"};
 }
 
@@ -1214,7 +1226,21 @@ async function cleanupTemporaryReplies(chatId,messageId,temporary){
     await writePrivateJson(key,{lastDeliveredId:messageId,messages:remaining.slice(-10)});
   }catch(_){console.warn("Temporary reply cleanup unavailable");}
 }
-async function deliverTelegram(chatId,method,options,{temporary=false}={}){
+async function replaceMainMenuAnchor(chatId,messageId){
+  if(!Number.isSafeInteger(messageId)||messageId<=0)return;
+  const key="portfolio/main-menu/"+chatId+".json";
+  try{
+    const previous=await readPrivateJson(key);
+    if(previous?.message_id>=messageId){
+      if(previous.message_id>messageId)await deleteTemporaryReply(chatId,messageId);
+      return;
+    }
+    await writePrivateJson(key,{message_id:messageId,created_at:new Date().toISOString()});
+    if(Number.isSafeInteger(previous?.message_id)&&previous.message_id>0&&
+      Date.now()-Date.parse(previous.created_at)<48*60*60*1000)await deleteTemporaryReply(chatId,previous.message_id);
+  }catch(_){console.warn("Main menu message tracking unavailable");}
+}
+async function deliverTelegram(chatId,method,options,{temporary=false,menuAnchor=false}={}){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token)return false;
   try{
@@ -1222,11 +1248,12 @@ async function deliverTelegram(chatId,method,options,{temporary=false}={}){
     const result=await r.json();
     if(!r.ok||!result.ok){console.warn("Telegram delivery failed",method,r.status);return false;}
     await cleanupTemporaryReplies(chatId,result.result?.message_id,temporary);
+    if(menuAnchor)await replaceMainMenuAnchor(chatId,result.result?.message_id);
     return true;
   }catch(_){console.warn("Telegram delivery unavailable",method);return false;}
 }
 
-async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=false}={}){
+async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=false,menuAnchor=false}={}){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
 
@@ -1237,7 +1264,7 @@ async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=f
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:"HTML",...(markup?{reply_markup:markup}:{})})
-    },{temporary});
+    },{temporary,menuAnchor});
   };
 
   // Telegram limits text messages to 4096 characters. Split the audit table

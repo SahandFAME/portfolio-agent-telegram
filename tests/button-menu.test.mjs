@@ -88,12 +88,12 @@ for(const [label,command] of buttons) test(`button ${label} runs ${command} with
   assert.ok(a.sends.length);
   for(const sent of a.sends){
     const keyboard=JSON.parse(sent.options.body).reply_markup;
-    assert.equal(keyboard.is_persistent,true);assert.equal(keyboard.resize_keyboard,true);
+    assert.equal(keyboard.is_persistent,false);assert.equal(keyboard.one_time_keyboard,false);assert.equal(keyboard.resize_keyboard,true);
     assert.deepEqual(keyboard.keyboard.flat().map(x=>x.text),[...buttons.map(x=>x[0]),'پنل مدیریت']);
   }
 });
 
-for(const command of ['/start','/help','/menu']) test(`${command} exposes the persistent menu`,async()=>{
+for(const command of ['/start','/help','/menu']) test(`${command} exposes the reusable menu`,async()=>{
   const a=await app();await a.request('POST',{},message(command),header);
   const reply=JSON.parse(a.sends[0].options.body);
   assert.ok(reply.reply_markup.keyboard.length===5);assert.match(reply.text,/دکمه‌های منو/);
@@ -129,6 +129,6 @@ test('buttons work while waiting for EcoCoach and numeric input still sends a ph
   await a.request('POST',{},message('۸۵۰٬۰۰۰ تومان'),header);
   const photo=a.sends.find(x=>x.url.endsWith('/sendPhoto'));
   assert.ok(photo);
-  assert.equal(JSON.parse(photo.options.body.get('reply_markup')).is_persistent,true);
+  assert.equal(JSON.parse(photo.options.body.get('reply_markup')).is_persistent,false);
   assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'none');
 });

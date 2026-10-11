@@ -1,9 +1,20 @@
 # Telegram report menu
 
 In an authorized private chat, send `/start`, `/help` or `/menu` once to display
-the persistent button keyboard. It also accompanies subsequent report replies
+the report button keyboard. It also accompanies subsequent report replies
 and images. If Telegram hides the keyboard, use the keyboard icon beside its
 message field to reopen it.
+
+The menu stays reusable after a selection (`one_time_keyboard: false`), while
+`is_persistent: false` permits normal dismissal instead of asking Telegram to
+keep it open. Phone Back and chat re-entry behavior are controlled by Telegram;
+the bot receives no event when the user leaves or returns to a chat.
+
+Admin screens include **بازگشت به منوی اصلی** to restore the report keyboard
+without `/start`. One separate main-menu message supplies the reply keyboard
+and survives temporary admin-screen cleanup. When another explicit main-menu
+message is delivered successfully, it replaces the previous menu message;
+financial reports and user messages are never removed as menu replacements.
 
 | Button | Existing command |
 |---|---|

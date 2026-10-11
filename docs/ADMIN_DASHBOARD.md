@@ -11,6 +11,14 @@ cleanup feature. Unanswered access-request notifications are excluded from panel
 cleanup; clicking their approval/rejection buttons replaces that notification.
 Telegram's 48-hour deletion limit still applies to old messages.
 
+Each admin screen includes **بازگشت به منوی اصلی** to exit to the report
+dashboard without `/start`. The report keyboard is supplied by a separate,
+retained main-menu message. Cleanup deletes the old inline admin screen, not
+that keyboard source. Explicit menu returns/reopening keep only the newest
+main-menu message, within Telegram's deletion limit, using private message-ID
+metadata in `portfolio/main-menu/{chatId}.json`. The menu can be dismissed
+normally; Telegram controls behavior on the phone Back button and chat re-entry.
+
 | Control | Function |
 |---|---|
 | کاربران مجاز | Paginated user list, names/IDs/roles, access revocation with confirmation |
