@@ -85,7 +85,7 @@ async function complete(a,id,{mismatch=false,ok=true}={}){
     {request_id:id,ok,snapshot_updated_at:mismatch?'different':snapshot.updated_at,workbook_updated_at:snapshot.workbook_updated_at},callbackHeader);
 }
 
-for(const command of ['/latest_allocation','Latest Allocation','/allocation','/refresh','تخصیص دارایی','به‌روزرسانی'])
+for(const command of ['/latest_allocation','آخرین تخصیص دارایی','Latest Allocation','/allocation','/refresh','تخصیص دارایی','به‌روزرسانی'])
   test(`${command} requires a fresh OneDrive workflow before any market fetch`,async()=>{
     const a=await app();await a.request('POST',{},message(command),header);
     assert.equal(a.dispatches.length,1);assert.equal(a.marketCalls.length,0);
