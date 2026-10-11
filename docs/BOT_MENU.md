@@ -1,5 +1,23 @@
 # Telegram report menu
 
+## Introduction before Start
+
+Telegram's public pre-Start bot description is stored in
+[`config/bot-description.fa.txt`](../config/bot-description.fa.txt). It is set
+for the default language and Persian, so clients in other languages also show
+the owner's Persian introduction. It is visible before access approval and
+contains no private holdings. The existing Start/access-request flow is unchanged.
+
+With `TELEGRAM_BOT_TOKEN` provided securely in the environment, run
+`python scripts/configure_bot_description.py --apply` to update it. The script
+checks the bot identity and verifies both descriptions through Telegram readback.
+Omit `--apply` for a read-only check. Never paste the credential in the command.
+Description settings live at Telegram; a Vercel deployment alone does not update
+them. This script sends no chat messages and does not change the bot's name,
+short description, webhook or approval state.
+
+## Report buttons
+
 In an authorized private chat, send `/start`, `/help` or `/menu` once to display
 the report button keyboard. It also accompanies subsequent report replies
 and images. If Telegram hides the keyboard, use the keyboard icon beside its
@@ -44,6 +62,13 @@ The image table displays ETH quantities to three decimal places and BTC to four.
 Only presentation is rounded; stored quantities and valuation arithmetic retain
 full precision. Both 18K gold gram holdings use the live TGJU `geram18` quote.
 The precious-metals report excludes طعام and نهال; both remain in the portfolio.
+
+The assets report lists all 29 quantities once under Persian category headings:
+gold and coins, silver, stocks and funds, crypto, Tether, and dollars. It uses
+the same classification as allocation: نهال and طعام stay with funds and Tether
+has its own category. Quantities, zero balances and snapshot timestamps retain
+their existing meaning; this command displays the cached holdings, without
+requesting market prices or claiming a new OneDrive synchronization.
 
 The [admin dashboard](ADMIN_DASHBOARD.md) is visible only to the configured
 owner and chosen admins who still have approved portfolio access. The owner
