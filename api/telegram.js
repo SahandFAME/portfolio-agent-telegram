@@ -15,6 +15,18 @@ const ASSETS = [
   "سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","دلار"
 ];
 const MANUAL = {"سکه تمام":3,"ربع سکه غیره":3,"ربع سکه بانکی":1,"آبشده (طلب)":1.37,"آبشده (شمش زربد)":20,"دلار":3030};
+const PORTFOLIO_TIME_FORMAT=new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
+  timeZone:"Asia/Tehran",year:"numeric",month:"2-digit",day:"2-digit",
+  hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"
+});
+function portfolioTime(value){
+  if(!value)return "نامشخص";
+  const date=new Date(value);
+  if(!Number.isFinite(date.getTime()))return "نامشخص";
+  const parts=Object.fromEntries(PORTFOLIO_TIME_FORMAT.formatToParts(date).map(part=>[part.type,part.value]));
+  return parts.year+"/"+parts.month+"/"+parts.day+" • "+parts.hour+":"+parts.minute+":"+parts.second+" (تهران)";
+}
+function boldPortfolioTime(value){return "<b>"+portfolioTime(value)+"</b>";}
 
 const LISTED = {
   "طلا":"طلا","عیار":"عیار","گوهر":"گوهر","آلتون":"آلتون","امرالد":"امرالد",
@@ -207,7 +219,7 @@ async function telegram(req,res){
       const snapshot=await safeSnapshot();
       const quantities={...(snapshot?.assets||{}),...MANUAL};
       let reply=null;
-      const valuationCommands=["/allocation","/refresh","/gold","/gold_and_other_precious_metals","/crypto","/cash"];
+      const valuationCommands=["/allocation","/refresh","/gold","/gold_and_other_precious_metals","/crypto","/cash_dollar"];
       const quantityStatus=quantitySnapshotStatus(snapshot);
       if((valuationCommands.includes(command)||(pending?.type==="blackrock_price"&&!command.startsWith("/")))&&quantityStatus.stale){
         reply=quantityStatus.message;
@@ -224,12 +236,12 @@ async function telegram(req,res){
       }else if(command==="/start"||command==="/help"||command==="/menu")reply=help();
       else if(command==="/status"){
         const status=quantitySnapshotStatus(snapshot);
-        reply=snapshot?("پورتفولیو متصل است.\n\nآخرین Snapshot معاملات: "+snapshot.updated_at+(snapshot.workbook_updated_at?"\nآخرین به‌روزرسانی فایل: "+snapshot.workbook_updated_at:"")+(status.stale?"\n\n⚠️ "+status.message:"\n\nوضعیت Snapshot: به‌روز")):"پورتفولیو متصل است، اما Snapshot معاملات هنوز همگام‌سازی نشده است.";
+        reply=snapshot?("پورتفولیو متصل است.\n\nآخرین Snapshot معاملات: "+boldPortfolioTime(snapshot.updated_at)+(snapshot.workbook_updated_at?"\nآخرین به‌روزرسانی فایل: "+boldPortfolioTime(snapshot.workbook_updated_at):"")+(status.stale?"\n\n⚠️ "+status.message:"\n\nوضعیت Snapshot: به‌روز")):"پورتفولیو متصل است، اما Snapshot معاملات هنوز همگام‌سازی نشده است.";
       }
       else if(command==="/assets")reply=assetsReply(quantities,snapshot);
       else if(command==="/gold_and_other_precious_metals"||command==="/gold")reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"طلا و فلزات گرانبها");
       else if(command==="/crypto")reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"رمزارز");
-      else if(command==="/cash")reply=await valuationReply(quantities,["دلار"],"دلار و نقدینگی");
+      else if(command==="/cash_dollar")reply=await valuationReply(quantities,["دلار"],"دلار نقدی");
       else reply=help();
       if(reply)await sendTelegram(message.chat.id,reply,{menu:true,temporary:reply.includes("قیمت فعلی هر واحد بلک راک")});
     }catch(e){console.error("Telegram handler error:",e);try{await sendTelegram(message.chat.id,"خطا در تهیه گزارش. لطفاً دوباره تلاش کنید.",{menu:true});}catch(_){}}
@@ -520,24 +532,23 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
     const job=active?.request_id?await readPrivateJson(ALLOCATION_REQUEST_PREFIX+active.request_id+".json"):null;
     const queued=job?.status==="queued"&&Date.now()-Date.parse(job.requested_at)<ALLOCATION_DEADLINE_MS;
     const expired=job?.status==="queued"&&!queued;
-    const date=value=>value&&Number.isFinite(Date.parse(value))?new Date(value).toLocaleString("fa-IR",{timeZone:"Asia/Tehran"}):"نامشخص";
     await sendTelegramWithKeyboard(chatId,"وضعیت سامانه\n\nذخیره‌سازی دسترسی: متصل\nSnapshot مقادیر: "+
       (snapshot?(status.stale?"قدیمی یا نامعتبر":"به‌روز"):"موجود نیست")+
       "\nتعداد دارایی‌های همگام‌شده: "+Object.keys(snapshot?.assets||{}).length+" از ۲۳"+
-      "\nآخرین همگام‌سازی (تهران): "+date(snapshot?.updated_at)+
-      "\nآخرین تغییر فایل (تهران): "+date(snapshot?.workbook_updated_at)+
+      "\nآخرین همگام‌سازی (تهران): "+boldPortfolioTime(snapshot?.updated_at)+
+      "\nآخرین تغییر فایل (تهران): "+boldPortfolioTime(snapshot?.workbook_updated_at)+
       "\nدریافت مستقل OneDrive: "+(process.env.GITHUB_ACTIONS_TOKEN?"پیکربندی شده":"پیکربندی نشده")+
       "\nاحراز هویت وب‌هوک: "+(process.env.TELEGRAM_WEBHOOK_SECRET?"پیکربندی شده":"پیکربندی نشده")+
       "\nدرخواست آخر شما: "+(queued?"در حال دریافت":expired?"منقضی شده؛ دوباره درخواست دهید":job?.status==="failed"?"ناموفق":job?.status==="completed"?"پاسخ همگام‌سازی دریافت شده":"درخواستی ثبت نشده")+
       "\n\nوضعیت قیمت‌های بازار هنگام درخواست هر گزارش بررسی می‌شود.",[
-      [{text:"بررسی دوباره",callback_data:"admin:status"},{text:"آزمون ذخیره‌سازی",callback_data:"admin:storage_check"}],adminBack()],{previousPanel});return;
+      [{text:"بررسی دوباره",callback_data:"admin:status"},{text:"آزمون ذخیره‌سازی",callback_data:"admin:storage_check"}],adminBack()],{previousPanel,html:true});return;
   }
   if(section==="audit"){
     const labels={approve:"تأیید دسترسی",reject:"رد درخواست",revoke:"لغو دسترسی",grant:"افزودن مدیر",demote:"حذف نقش مدیر"};
     const lines=state.audit.slice(-10).reverse().map(event=>
-      new Date(event.at).toLocaleString("fa-IR",{timeZone:"Asia/Tehran"})+" • "+(labels[event.action]||"تغییر دسترسی")+
-      "\nکاربر: "+event.target_id+" • مدیر: "+event.actor_id);
-    await sendTelegramWithKeyboard(chatId,"آخرین رویدادهای مدیریت (تهران)\n\n"+(lines.join("\n\n")||"رویدادی ثبت نشده است."),[adminBack()],{previousPanel});return;
+      boldPortfolioTime(event.at)+" • "+(labels[event.action]||"تغییر دسترسی")+
+      "\nکاربر: "+escXml(event.target_id)+" • مدیر: "+escXml(event.actor_id));
+    await sendTelegramWithKeyboard(chatId,"آخرین رویدادهای مدیریت (تهران)\n\n"+(lines.join("\n\n")||"رویدادی ثبت نشده است."),[adminBack()],{previousPanel,html:true});return;
   }
   if(section==="admins"&&!owner)throw new Error("owner_permission_required");
   const ids=section==="pending"?Object.keys(state.pending):section==="admins"?state.approved.filter(id=>!isOwner(id)):
@@ -582,11 +593,11 @@ async function trackPreviousAdminPanel(chatId,previousPanel){
     }catch(_){console.warn("Previous admin panel tracking unavailable");}
   }
 }
-async function sendTelegramWithKeyboard(chatId,text,inlineKeyboard,{temporary=true,previousPanel=null}={}){
+async function sendTelegramWithKeyboard(chatId,text,inlineKeyboard,{temporary=true,previousPanel=null,html=false}={}){
   if(!isBotAdmin(String(chatId),await loadAccessState()))return false;
   await trackPreviousAdminPanel(chatId,previousPanel);
   const keyboard=temporary?[...inlineKeyboard,[{text:"بازگشت به منوی اصلی",callback_data:"admin:main_menu"}]]:inlineKeyboard;
-  return deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,reply_markup:{inline_keyboard:keyboard}})},{temporary});
+  return deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,...(html?{parse_mode:"HTML"}:{}),reply_markup:{inline_keyboard:keyboard}})},{temporary});
 }
 async function sendMainMenu(chatId){
   await sendTelegram(chatId,"منوی اصلی پرتفوی\nبرای انتخاب گزارش، از دکمه‌های زیر استفاده کنید.",{menu:true,menuAnchor:true});
@@ -834,7 +845,7 @@ async function valuationReply(q,names,title){
   }else{
     lines.push("\nSubtotal: "+formatToman(total));
   }
-  lines.push("\nPrices retrieved: "+new Date().toISOString());
+  lines.push("\nPrices retrieved: "+boldPortfolioTime(new Date()));
   return lines.join("\n");
 }
 
@@ -911,7 +922,7 @@ async function allocationReply(q,blackRockPriceRial=null){
   const lines=["<b>Portfolio valuation — live prices</b>","","<b>Total:</b> "+formatToman(total)+" | <b>USD:</b> $"+format(valueUsd(total,usdIrr)),"","<i>Unit prices and sources are shown below.</i>","",table];
   if(missing.length)lines.push("\n<b>Not valued:</b> "+missing.join(", "));
   lines.push("\n<b>Price sources:</b> "+sources);
-  lines.push("<b>Retrieved:</b> "+new Date().toISOString());
+  lines.push("<b>Retrieved:</b> "+boldPortfolioTime(new Date()));
   return lines.join("\n");
 }
 
@@ -951,7 +962,7 @@ function assetsReply(quantities,snapshot){
     .map(asset=>(++index)+". "+asset+": "+(quantities[asset]===undefined?"همگام‌سازی نشده":format(quantities[asset])))
     .join("\n"));
   return "دارایی‌های پرتفوی (۲۹ مورد)\n\n"+sections.join("\n\n")+
-    (snapshot?"\n\nSnapshot: "+snapshot.updated_at:"");
+    (snapshot?"\n\nSnapshot: "+boldPortfolioTime(snapshot.updated_at):"");
 }
 function escXml(s){return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function svgText(x,y,text,size,opts={}){
@@ -963,6 +974,7 @@ function moneyFa(n){return compactNumber(n)+" تومان";}
 function usdFa(n){return "$"+Number(n).toLocaleString("en-US",{maximumFractionDigits:2});}
 
 function buildPortfolioSvg(q,vals,total,prices,usdIrr){
+  const priceTime=portfolioTime(new Date());
   const assetEn={
     "طلا":"Tala Gold Fund","عیار":"Ayar Gold Fund","گوهر":"Gohar Gold Fund","آلتون":"Alton Gold Fund",
     "امرالد":"Emerald Gold Fund","زرفام":"Zarfam Gold Fund","نهال":"Nahal Commodity Fund","طعام":"Taam Sector Fund",
@@ -1041,7 +1053,7 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   let svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'"><rect width="100%" height="100%" fill="#f7fafc"/>';
   svg+='<rect x="20" y="20" width="1760" height="245" rx="22" fill="#123b5d"/>';
   svg+=svgText(1730,78,"Portfolio Valuation Report",38,{anchor:"end",weight:700,fill:"#ffffff"});
-  svg+=svgText(1730,120,"Live market prices • "+new Date().toLocaleString("en-US"),21,{anchor:"end",fill:"#dce9f4"});
+  svg+=svgText(1730,120,"Live market prices • "+priceTime,21,{anchor:"end",weight:700,fill:"#dce9f4"});
   svg+=svgText(70,78,toman(total/10),34,{anchor:"start",weight:700,fill:"#ffffff"});
   svg+=svgText(70,120,usdText(valueUsd(total,usdIrr)),25,{anchor:"start",fill:"#dce9f4"});
   svg+=svgText(70,160,"USD/IRR: "+Math.round(usdIrr/10).toLocaleString("en-US"),18,{anchor:"start",fill:"#dce9f4"});
@@ -1094,11 +1106,11 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   const tx=40,ty=425,tw=850;
   svg+='<rect x="'+tx+'" y="'+ty+'" width="'+tw+'" height="330" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
   svg+=svgText(tx+tw-25,ty+42,"Portfolio Summary",25,{anchor:"end",weight:700});
-  const summary=[["Total Value",toman(total/10)],["Total USD",usdText(valueUsd(total,usdIrr))],["Assets",String(rows.length)],["USD/IRR",Math.round(usdIrr/10).toLocaleString("en-US")],["Price Time",new Date().toLocaleString("en-US")]];
+  const summary=[["Total Value",toman(total/10)],["Total USD",usdText(valueUsd(total,usdIrr))],["Assets",String(rows.length)],["USD/IRR",Math.round(usdIrr/10).toLocaleString("en-US")],["Price Time",priceTime]];
   summary.forEach(([k,v],i)=>{
     const yy=ty+92+i*48;
     svg+=svgText(tx+tw-25,yy,k,17,{anchor:"end",weight:600});
-    svg+=svgText(tx+25,yy,v,16,{anchor:"start",fill:"#526579"});
+    svg+=svgText(tx+25,yy,v,16,{anchor:"start",weight:k==="Price Time"?700:400,fill:"#526579"});
   });
 
   // Table: full-width, below all dashboard content.
@@ -1161,7 +1173,8 @@ async function allocationImageReply(q,blackRockPriceRial){
   const reportPrices={...prices};if(blackRockPriceRial!==null)reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
   const svg=buildPortfolioSvg(q,vals,total,reportPrices,usdIrr);
   const fontPath=path.join(process.cwd(),"node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf");
-  const rendered=new Resvg(svg,{font:{fontFiles:[fontPath],loadSystemFonts:false,defaultFontFamily:"DejaVu Sans",sansSerifFamily:"DejaVu Sans"}}).render();
+  const boldFontPath=path.join(process.cwd(),"node_modules/dejavu-fonts-ttf/ttf/DejaVuSans-Bold.ttf");
+  const rendered=new Resvg(svg,{font:{fontFiles:[fontPath,boldFontPath],loadSystemFonts:false,defaultFontFamily:"DejaVu Sans",sansSerifFamily:"DejaVu Sans"}}).render();
   const png=rendered.asPng();
   return {png,total};
 }
@@ -1172,7 +1185,7 @@ function formatPrice(asset,p){
 function formatToman(rial){return format(rial/10)+" toman";}
 function format(v){return Number(v).toLocaleString("en-US",{maximumFractionDigits:8});}
 function group(q,names){return names.map(n=>n+": "+(q[n]===undefined?"not synchronized":format(q[n]))).join("\n");}
-function help(){return "Portfolio Agent is online.\nبرای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n/status — portfolio status\n/assets — asset list\n/latest_allocation — Latest Allocation: fresh OneDrive quantities and live prices\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/cash — live cash valuation\\n\\nFor بلک راک, the bot asks for the current EcoCoach price per unit whenever a valuation needs it.";}
+function help(){return "Portfolio Agent is online.\nبرای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n/status — portfolio status\n/assets — asset list\n/latest_allocation — Latest Allocation: fresh OneDrive quantities and live prices\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/cash_dollar — Cash Dollar (دلار نقدی)\\n\\nFor بلک راک, the bot asks for the current EcoCoach price per unit whenever a valuation needs it.";}
 async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return null;}}
 function quantitySnapshotStatus(snapshot){
   const stamp=snapshot?.updated_at;
@@ -1180,7 +1193,7 @@ function quantitySnapshotStatus(snapshot){
   const age=Date.now()-ms;
   const maxAgeMs=24*60*60*1000;
   if(!snapshot||!Number.isFinite(ms)||age<0||age>maxAgeMs){
-    const when=stamp||"نامشخص";
+    const when=boldPortfolioTime(stamp);
     return {stale:true,message:"Snapshot مقادیر پرتفوی قدیمی یا نامعتبر است (آخرین زمان ثبت‌شده: "+when+"). برای جلوگیری از ارزش‌گذاری با مقادیر قدیمی، گزارش ارزش‌گذاری متوقف شد. ابتدا همگام‌سازی Trading Journal را اجرا و سپس /status را بررسی کنید."};
   }
   return {stale:false,message:""};
@@ -1189,12 +1202,13 @@ function quantitySnapshotStatus(snapshot){
 const BUTTON_MENU=[
   [{text:"وضعیت",command:"/status"},{text:"دارایی‌ها",command:"/assets"}],
   [{text:"طلا و سایر فلزات گرانبها",command:"/gold_and_other_precious_metals"},{text:"رمزارز",command:"/crypto"}],
-  [{text:"نقدینگی",command:"/cash"},{text:"آخرین تخصیص دارایی",command:"/latest_allocation"}],
+  [{text:"دلار نقدی",command:"/cash_dollar"},{text:"آخرین تخصیص دارایی",command:"/latest_allocation"}],
   [{text:"راهنما",command:"/help"}]
 ];
 const MENU_COMMANDS=new Map([...BUTTON_MENU.flat().map(button=>[button.text,button.command]),
   ["پنل مدیریت","/admin"],
   ["Latest Allocation","/latest_allocation"],
+  ["Cash Dollar","/cash_dollar"],["/cash","/cash_dollar"],["نقدینگی","/cash_dollar"],
   ["تخصیص دارایی","/latest_allocation"],["به‌روزرسانی","/latest_allocation"],
   ["/allocation","/latest_allocation"],["/refresh","/latest_allocation"]]);
 async function portfolioKeyboard(chatId){

@@ -43,12 +43,14 @@ financial reports and user messages are never removed as menu replacements.
 | دارایی‌ها | `/assets` |
 | طلا و سایر فلزات گرانبها | `/gold_and_other_precious_metals` |
 | رمزارز | `/crypto` |
-| نقدینگی | `/cash` |
+| دلار نقدی | `/cash_dollar` (Cash Dollar) |
 | آخرین تخصیص دارایی | `/latest_allocation` |
 | راهنما | `/help` |
 | پنل مدیریت (مالک و مدیران منتخب) | `/admin` |
 
-Slash commands still work, including the `/gold` alias. The old `/allocation` and
+Slash commands still work, including the `/gold` alias. `/cash`, the old
+نقدینگی button text, and English `Cash Dollar` remain aliases for `/cash_dollar`;
+the current button and report title are دلار نقدی. The old `/allocation` and
 `/refresh` commands both invoke Latest Allocation. This operation refreshes
 OneDrive quantities, verifies the new snapshot, then fetches market prices. Buttons run through the
 same private-chat access checks and quantity freshness checks as commands.
@@ -74,6 +76,14 @@ the same classification as allocation: نهال and طعام stay with funds and
 has its own category. Quantities, zero balances and snapshot timestamps retain
 their existing meaning; this command displays the cached holdings, without
 requesting market prices or claiming a new OneDrive synchronization.
+
+All displayed timestamps use the Solar Hijri (Persian) calendar, Persian digits,
+24-hour time including seconds, and the `Asia/Tehran` time zone, explicitly labeled
+تهران. Timestamp values are bold in status, assets, stale-data warnings, price
+reports, admin status and access audit. The allocation image shows the same bold
+price timestamp in its header and summary. Missing or invalid timestamps display
+نامشخص. Internal snapshot, quote, request, API and audit timestamps remain UTC ISO
+values; freshness comparisons and synchronization contracts are unchanged.
 
 The [admin dashboard](ADMIN_DASHBOARD.md) is visible only to the configured
 owner and chosen admins who still have approved portfolio access. The owner
