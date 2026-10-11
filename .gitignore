@@ -5,3 +5,6 @@ node_modules
 .DS_Store
 __pycache__/
 *.py[cod]
+latest-allocation-result.json
+verification-result.json
+*.xlsm

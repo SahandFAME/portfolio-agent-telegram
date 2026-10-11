@@ -46,6 +46,31 @@ jobs:
           PORTFOLIO_ONDEMAND_ENABLED: 'true'
           ALLOCATION_REQUEST_ID: ${{ inputs.request_id }}
         run: python scripts/latest_allocation_sync.py
+      - name: Notify bot if setup failed before the sync worker could start
+        if: ${{ always() && inputs.request_id != '' }}
+        env:
+          ALLOCATION_REQUEST_ID: ${{ inputs.request_id }}
+          PORTFOLIO_SYNC_SECRET_AGENT: ${{ secrets.PORTFOLIO_SYNC_SECRET_AGENT }}
+        run: |
+          python - <<'PY'
+          import json, os, uuid
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          if Path('latest-allocation-result.json').exists():
+              raise SystemExit(0)
+          try:
+              request_id = str(uuid.UUID(os.environ['ALLOCATION_REQUEST_ID']))
+              request = Request('https://portfolio-agent-telegram.vercel.app/api/telegram?complete=latest-allocation',
+                  data=json.dumps({'request_id':request_id,'ok':False,'error':'workflow_setup_failed'}).encode(),
+                  headers={'Content-Type':'application/json','x-portfolio-sync-secret':os.environ['PORTFOLIO_SYNC_SECRET_AGENT']})
+              with urlopen(request,timeout=30) as response:
+                  if json.load(response).get('ok') is not True:
+                      raise ValueError()
+              print('Bot notified of workflow setup failure.')
+          except Exception:
+              print('Unable to deliver workflow setup failure notice.')
+              raise SystemExit(1)
+          PY
       - name: Publish aggregate verification result
         if: always()
         env:

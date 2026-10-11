@@ -71,7 +71,7 @@ async function app({readError=false, env={}}={}) {
 
 
 
-const buttons=[['وضعیت','/status'],['دارایی‌ها','/assets'],['طلا و سایر فلزات گرانبها','/gold_and_other_precious_metals'],['رمزارز','/crypto'],['نقدینگی','/cash'],['تخصیص دارایی','/allocation'],['به‌روزرسانی','/refresh'],['راهنما','/help']];
+const buttons=[['وضعیت','/status'],['دارایی‌ها','/assets'],['طلا و سایر فلزات گرانبها','/gold_and_other_precious_metals'],['رمزارز','/crypto'],['نقدینگی','/cash'],['Latest Allocation','/latest_allocation'],['راهنما','/help']];
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const message=(text,id=1,type='private')=>({message:{chat:{id,type},from:{id},text}});
 
@@ -110,7 +110,7 @@ test('menu selections do not bypass private-chat or user access controls',async(
 });
 
 test('valuation buttons retain stale quantity protection',async()=>{
-  for(const label of ['طلا و سایر فلزات گرانبها','رمزارز','نقدینگی','تخصیص دارایی','به‌روزرسانی']){
+  for(const label of ['طلا و سایر فلزات گرانبها','رمزارز','نقدینگی']){
     const a=await app();a.store.set('portfolio/latest.json',{...a.payload,updated_at:'2020-01-01T00:00:00Z'});
     await a.request('POST',{},message(label),header);
     assert.match(JSON.parse(a.sends[0].options.body).text,/Snapshot/);
@@ -119,7 +119,7 @@ test('valuation buttons retain stale quantity protection',async()=>{
 
 test('buttons work while waiting for EcoCoach and numeric input still sends a photo with a menu',async()=>{
   const a=await app();a.payload.assets['بلک راک']=15;a.store.set('portfolio/latest.json',a.payload);
-  await a.request('POST',{},message('تخصیص دارایی'),header);
+  a.store.set('portfolio/pending-blackrock/1.json',{type:'blackrock_price'});
   assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'blackrock_price');
   await a.request('POST',{},message('دارایی‌ها'),header);
   assert.match(JSON.parse(a.sends.at(-1).options.body).text,/۲۹/);
