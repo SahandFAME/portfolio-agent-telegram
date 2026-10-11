@@ -97,9 +97,9 @@ test('the image table shows the same 18K unit price for both gold holdings',asyn
   const values=Object.fromEntries([...a.ns.ASSETS].map(asset=>[asset,a.ns.valueRial(asset,q[asset],prices[asset],prices['دلار'].priceRial)]));
   const total=Object.values(values).reduce((sum,value)=>sum+value,0);
   const svg=a.ns.buildPortfolioSvg(q,values,total,prices,prices['دلار'].priceRial);
-  assert.ok(svg.includes('Gold Receivable'));
-  assert.ok(svg.includes('Zarbed Gold Bar'));
-  assert.equal(svg.split('26,500,000').length-1,2);
+  assert.ok(svg.includes('آبشده (طلب)'));
+  assert.ok(svg.includes('آبشده (شمش زربد)'));
+  assert.equal(svg.split('۲۶٬۵۰۰٬۰۰۰').length-1,2);
   const report=await a.ns.allocationImageReply(q,8500000);
   assert.ok(report.png.length>1000);
 });

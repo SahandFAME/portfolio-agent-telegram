@@ -83,8 +83,8 @@ test('image table shows ETH to three decimals and BTC to four without rounding v
   const values=Object.fromEntries([...a.ns.ASSETS].map(asset=>[asset,a.ns.valueRial(asset,q[asset],prices[asset],prices['دلار'].priceRial)]));
   const total=Object.values(values).reduce((sum,value)=>sum+value,0);
   const svg=a.ns.buildPortfolioSvg(q,values,total,prices,prices['دلار'].priceRial);
-  assert.ok(svg.includes('>0.0052</text>'));
-  assert.ok(svg.includes('>0.406</text>'));
+  assert.ok(svg.includes('>۰٫۰۰۵۲</text>'));
+  assert.ok(svg.includes('>۰٫۴۰۶</text>'));
   assert.equal(q.BTC,0.00519153);assert.equal(q.ETH,0.40602);
   assert.equal(values.BTC,0.00519153*prices.BTC.priceUsd*prices['دلار'].priceRial);
   assert.equal(values.ETH,0.40602*prices.ETH.priceUsd*prices['دلار'].priceRial);

@@ -3,14 +3,21 @@
 The owner authorized on-demand OneDrive synchronization on 2026-10-10. This
 does not authorize a recurring replacement or retirement of the ChatGPT schedule.
 
-`/latest_allocation` and the **آخرین تخصیص دارایی** button replace the separate
+`/latest_allocation` and the **آخرین ترکیب دارایی** button replace the separate
 allocation and refresh options. Existing `/allocation`, `/refresh` and their old
-Persian buttons route to the same new operation for compatibility.
+Persian buttons (including آخرین تخصیص دارایی) open the same format submenu for
+compatibility. Choose a Persian pictured report or detailed text report; the
+text option sends category percentages in a separate final message.
+**نمودار ترکیب دارایی** (`/allocation_chart`) directly requests a 3D-style pie
+chart through the same fresh-quantity and fresh-price workflow.
 
 ## Verified worker and report flow
 
-1. The bot authenticates the private Telegram user and records an opaque request
-   UUID privately in Vercel Blob. The approved chat ID stays in private storage.
+1. The bot authenticates the private Telegram user. Latest composition opens a
+   picture/text submenu with a private, expiring, single-use selection UUID and
+   a return-to-menu option. Opening it does not fetch data. A format choice (or
+   direct chart command) records an opaque request UUID and output format
+   privately in Vercel Blob. The approved chat ID stays in private storage.
 2. It dispatches `latest-allocation-sync.yml` using a dedicated Actions credential.
    There is no schedule. The bot acknowledges the request and does not render
    an old cached allocation while waiting.
@@ -25,17 +32,28 @@ Persian buttons route to the same new operation for compatibility.
    before fetching market prices. Replayed or superseded callbacks are ignored.
 6. If EcoCoach requires a price, the bot shows the original concise prompt.
    When that price is entered, it reads and synchronizes OneDrive again, then
-   fetches market prices again and produces the image. This second read avoids
+   fetches market prices again and produces the chosen picture, text or chart.
+   This second read avoids
    an old quantity snapshot if the owner waits before entering the price.
 
 Errors stop report generation; an old cached report is not substituted. Requests
 expire after ten minutes, and a snapshot must be at most two minutes old when a
 successful callback begins report generation. Repeated taps while a request is
-queued do not dispatch another job. GitHub runner queues can add delay; if a
+queued with the same format do not dispatch another job. Choosing a different
+format supersedes the old job with a new fresh request; the old callback cannot
+deliver the previous format. GitHub runner queues can add delay; if a
 request expires, invoke Latest Allocation again. Blob state has no atomic
 compare-and-swap: simultaneous requests are protected against stale report
 completion by current-request and snapshot checks, but are not a distributed
 transaction with the external ChatGPT sender.
+
+Every output format uses one shared complete-valuation check and the same group
+classification. Missing prices/quantities stop totals and percentages. Text
+chunks retain complete asset blocks, and access/current-request checks run
+before each chunk and its final percentage message. The pictured report uses
+bundled Persian-capable regular/bold fonts and a right-to-left table. The chart
+uses actual group values for slice angles and two-decimal labels, including
+zero-category and single-category handling.
 
 The six manual holdings stay separate and unchanged. The workbook is never
 saved, edited or uploaded. No credentials, quantities, prices or chat IDs are
@@ -70,7 +88,8 @@ verified all 23 quantities, stored the new production snapshot and confirmed
 exact authenticated readback at 2026-10-10T19:12:05.834307Z
 (22:42:05 Asia/Tehran). No Telegram message was sent by this trial.
 
-Local checks: 45 Node actual-handler tests and 26 Python tests pass. Tests cover
+At the initial on-demand rollout, 45 Node actual-handler tests and 26 Python
+tests passed. These historical checks covered
 dispatch, aliases, callback authentication/correlation, replay, expiration,
 revoked access, failed/mismatched refreshes, delayed EcoCoach input, exact sync
 readback, quantity extraction, pricing and decimal presentation.
@@ -80,3 +99,11 @@ Production deployment and protected snapshot readback were verified for main
 trial verified a snapshot at `2026-10-11T02:55:13.704394Z`. The owner then confirmed
 the Latest Allocation Telegram flow was working. This confirms the on-demand
 integration; it does not verify or authorize a recurring scheduler migration.
+
+Current output-format regression tests additionally cover the private submenu,
+its expiry/replay/access guards, persistent format selection through the second
+sync, complete text/toman/group arithmetic, failed or superseded text delivery,
+Persian PNG rendering, and 3D chart angles/labels/zero groups. Run the full Node
+and Python suites documented in [BOT_MENU.md](BOT_MENU.md) and the repository CI.
+Automated renderer/handler checks and production deployment/API readback remain
+distinct from a user's actual Telegram interaction.

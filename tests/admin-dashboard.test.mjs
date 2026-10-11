@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {app} from './helpers/app-fixture.mjs';
+import {app,startLatest} from './helpers/app-fixture.mjs';
 
 const KEY='portfolio/access-control.json';
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
@@ -20,7 +20,7 @@ test('dashboard button appears only for the owner and currently approved chosen 
     const a=await fixture();await a.request('POST',{},message('/start',id),header);
     const keyboard=bodies(a).find(x=>x.chat_id===id).reply_markup.keyboard.flat().map(x=>x.text);
     assert.equal(keyboard.includes('پنل مدیریت'),visible);
-    assert.ok(keyboard.includes('آخرین تخصیص دارایی'));
+    assert.ok(keyboard.includes('آخرین ترکیب دارایی'));
   }
 });
 
@@ -143,7 +143,7 @@ test('owner revocation also removes dashboard role and clears pending price inte
 });
 
 test('revoked users cannot receive completion of a previously queued allocation',async()=>{
-  const a=await fixture();await a.request('POST',{},message('/latest_allocation',3),header);
+  const a=await fixture();await startLatest(a,{id:3});
   const id=JSON.parse(a.dispatches.at(-1).options.body).inputs.request_id;
   await click(a,'admin:confirm_revoke:3');a.sends.length=0;
   const result=await a.request('POST',{complete:'latest-allocation'},
@@ -153,7 +153,7 @@ test('revoked users cannot receive completion of a previously queued allocation'
 
 test('revocation while market prices are loading blocks the image at delivery',async()=>{
   const a=await fixture({beforeMarketFetch:(url,store)=>store.set(KEY,{...state(),approved:['2'],delegatedAdmins:[]})});
-  await a.request('POST',{},message('/latest_allocation',3),header);
+  await startLatest(a,{id:3});
   const id=JSON.parse(a.dispatches.at(-1).options.body).inputs.request_id;
   const key='portfolio/latest-allocation/requests/'+id+'.json';
   a.store.set(key,{...a.store.get(key),blackRockPriceRial:8500000});

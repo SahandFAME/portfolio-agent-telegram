@@ -79,7 +79,7 @@ test('allocation image uses one bold Persian Tehran price time in its header and
   const times=[...svg.matchAll(/<text[^>]*>([^<]*\(تهران\))<\/text>/g)];
   assert.equal(times.length,2);
   for(const stamp of times){assert.match(stamp[0],/font-weight="700"/);assert.match(stamp[1],timePattern);}
-  assert.equal(times[0][1].replace('Live market prices • ',''),times[1][1]);
+  assert.equal(times[0][1].replace('قیمت‌های زنده بازار • ',''),times[1][1]);
   assert.doesNotMatch(svg,/\d{1,2}\/\d{1,2}\/2026|\d{4}-\d{2}-\d{2}T/);
   const report=await a.ns.allocationImageReply(q,100000);assert.equal(report.total,total);assert.ok(report.png.length>1000);
   const text=await a.ns.allocationReply(q,100000);assert.match(text,new RegExp('<b>Retrieved:</b> '+boldPattern.source));

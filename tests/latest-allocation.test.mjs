@@ -1,3 +1,4 @@
+import {startLatest} from './helpers/app-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -87,9 +88,9 @@ async function complete(a,id,{mismatch=false,ok=true}={}){
     {request_id:id,ok,snapshot_updated_at:mismatch?'different':snapshot.updated_at,workbook_updated_at:snapshot.workbook_updated_at},callbackHeader);
 }
 
-for(const command of ['/latest_allocation','آخرین تخصیص دارایی','Latest Allocation','/allocation','/refresh','تخصیص دارایی','به‌روزرسانی'])
-  test(`${command} requires a fresh OneDrive workflow before any market fetch`,async()=>{
-    const a=await app();await a.request('POST',{},message(command),header);
+for(const command of ['/latest_allocation','آخرین ترکیب دارایی','آخرین تخصیص دارایی','Latest Allocation','/allocation','/refresh','تخصیص دارایی','به‌روزرسانی'])
+  test(`${command} picture selection requires a fresh OneDrive workflow before any market fetch`,async()=>{
+    const a=await app();await startLatest(a,{command});
     assert.equal(a.dispatches.length,1);assert.equal(a.marketCalls.length,0);
     const payload=JSON.parse(a.dispatches[0].options.body);
     assert.equal(payload.ref,'main');assert.match(payload.inputs.request_id,/^[a-f0-9-]{36}$/);
@@ -99,26 +100,26 @@ for(const command of ['/latest_allocation','آخرین تخصیص دارایی',
 
 test('missing dispatch credential fails closed with no cached allocation',async()=>{
   const a=await app({env:{GITHUB_ACTIONS_TOKEN:''}});a.store.set('portfolio/latest.json',a.payload);
-  await a.request('POST',{},message('/latest_allocation'),header);
+  await startLatest(a);
   assert.equal(a.dispatches.length,0);assert.equal(a.marketCalls.length,0);
-  assert.match(JSON.parse(a.sends[0].options.body).text,/پیکربندی نشده/);
+  assert.match(JSON.parse(a.sends.filter(x=>x.url.endsWith('/sendMessage')).at(-1).options.body).text,/پیکربندی نشده/);
 });
 
 test('dispatch failure reports failure and releases the queued request',async()=>{
-  const a=await app({dispatchStatus:403});await a.request('POST',{},message('/latest_allocation'),header);
+  const a=await app({dispatchStatus:403});await startLatest(a);
   const id=dispatchedId(a);
   assert.equal(a.store.get('portfolio/latest-allocation/requests/'+id+'.json').status,'failed');
-  assert.match(JSON.parse(a.sends[0].options.body).text,/ناموفق/);
+  assert.match(JSON.parse(a.sends.filter(x=>x.url.endsWith('/sendMessage')).at(-1).options.body).text,/ناموفق/);
   assert.equal(a.marketCalls.length,0);
 });
 
 test('repeated taps reuse the queued request without dispatching duplicate jobs',async()=>{
-  const a=await app();await a.request('POST',{},message('/latest_allocation'),header);
-  await a.request('POST',{},message('Latest Allocation'),header);assert.equal(a.dispatches.length,1);
+  const a=await app();await startLatest(a);
+  await startLatest(a,{command:'Latest Allocation'});assert.equal(a.dispatches.length,1);
 });
 
 test('only verified callback resumes EcoCoach prompt; price input refreshes quantities again and renders',async()=>{
-  const a=await app();await a.request('POST',{},message('/latest_allocation'),header);const id=dispatchedId(a);
+  const a=await app();await startLatest(a);const id=dispatchedId(a);
   const result=await complete(a,id);assert.equal(result.code,200);
   assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'latest_blackrock_price');
   assert.equal(JSON.parse(a.sends.at(-1).options.body).text,'برای تهیه گزارش، قیمت فعلی هر واحد صندوق بلک راک (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: 15 واحد');
@@ -140,7 +141,7 @@ test('callback authentication and request correlation are required',async()=>{
 });
 
 for(const scenario of ['failure','mismatch','expired','revoked'])test(`${scenario} never renders a cached allocation`,async()=>{
-  const a=await app();await a.request('POST',{},message('/latest_allocation'),header);const id=dispatchedId(a);
+  const a=await app();await startLatest(a);const id=dispatchedId(a);
   if(scenario==='expired')a.store.get('portfolio/latest-allocation/requests/'+id+'.json').requested_at='2020-01-01T00:00:00Z';
   if(scenario==='revoked'){
     a.store.get('portfolio/latest-allocation/requests/'+id+'.json').user_id='2';
@@ -152,7 +153,7 @@ for(const scenario of ['failure','mismatch','expired','revoked'])test(`${scenari
 });
 
 test('duplicate callback does not send a second prompt or fetch quotes again',async()=>{
-  const a=await app();await a.request('POST',{},message('/latest_allocation'),header);const id=dispatchedId(a);
+  const a=await app();await startLatest(a);const id=dispatchedId(a);
   await complete(a,id);const sent=a.sends.length,calls=a.marketCalls.length;
   const result=await complete(a,id);assert.equal(result.data.ignored,true);
   assert.equal(a.sends.length,sent);assert.equal(a.marketCalls.length,calls);
@@ -176,7 +177,7 @@ test('strict synchronization and unavailable prior storage fail closed',async()=
 test('an older EcoCoach prompt cannot render cached holdings during the fresh sync',async()=>{
   const a=await app();a.store.set('portfolio/latest.json',a.payload);
   a.store.set('portfolio/pending-blackrock/1.json',{type:'blackrock_price'});
-  await a.request('POST',{},message('/latest_allocation'),header);
+  await startLatest(a);
   await a.request('POST',{},message('850000'),header);
   assert.equal(a.marketCalls.length,0);assert.equal(a.dispatches.length,1);
   assert.match(JSON.parse(a.sends.at(-1).options.body).text,/منتظر درخواست قیمت/);

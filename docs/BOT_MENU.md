@@ -44,18 +44,46 @@ financial reports and user messages are never removed as menu replacements.
 | طلا و سایر فلزات گرانبها | `/gold_and_other_precious_metals` |
 | رمزارز | `/crypto` |
 | دلار نقدی | `/cash_dollar` (Cash Dollar) |
-| آخرین تخصیص دارایی | `/latest_allocation` |
+| آخرین ترکیب دارایی | `/latest_allocation` |
+| نمودار ترکیب دارایی | `/allocation_chart` |
 | راهنما | `/help` |
 | پنل مدیریت (مالک و مدیران منتخب) | `/admin` |
 
 Slash commands still work, including the `/gold` alias. `/cash`, the old
 نقدینگی button text, and English `Cash Dollar` remain aliases for `/cash_dollar`;
 the current button and report title are دلار نقدی. The old `/allocation` and
-`/refresh` commands both invoke Latest Allocation. This operation refreshes
+`/refresh` commands and the old آخرین تخصیص دارایی label open the latest-composition
+submenu. Select **گزارش تصویری** or **گزارش متنی**, or use its return button.
+Opening the submenu starts no sync or market retrieval. Choosing a format refreshes
 OneDrive quantities, verifies the new snapshot, then fetches market prices. Buttons run through the
 same private-chat access checks and quantity freshness checks as commands.
 When asked for an EcoCoach price, type the current price in the message field;
 other menu selections continue to work while that request is pending.
+
+The selected format stays with the independent request and EcoCoach prompt.
+The text report lists every asset's row number, exact quantity/unit, group,
+value in toman, unit price and source. Complete asset blocks are sent in bounded
+messages; a separate final message lists six category percentages from the same
+valuation. A delivery failure, access revocation or superseding request stops
+remaining text messages and percentages. Incomplete data produces no totals
+or percentages.
+
+The pictured report is Persian, with right-to-left table columns, Persian
+digits, translated headings/units and the existing bold Solar Hijri/Tehran
+timestamps. Standard crypto symbols and price-provider names retain their
+recognized names. Bundled DejaVu regular/bold fonts support Persian shaping in
+the serverless renderer; no host font installation or new service is needed.
+
+**نمودار ترکیب دارایی** independently refreshes quantities and prices and
+requests EcoCoach input through the same flow, then delivers a Persian 3D-style
+pie chart. Its slice angles and percentage labels come from the complete current
+toman valuation. It uses the same six categories/colors as the pictured report,
+shows zero categories as 0% without drawing zero-size slices, and includes the
+price and quantity-sync timestamps. Percentages are rounded to two decimal
+places. No chart values are copied from the owner's reference image.
+
+`/help` separates the EcoCoach explanation from the final command using real
+blank lines, rather than displaying literal `\n` text.
 
 Progress notices and EcoCoach price prompts are temporary. After the next text
 reply or report image is confirmed delivered, the bot deletes the old notice.
