@@ -65,7 +65,7 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
     '@vercel/functions':{waitUntil:promise=>background.push(promise)},
     sharp:{default:sharp},'@resvg/resvg-js':{Resvg},path:{default:path}
   };
-  const module = new vm.SourceTextModule(source + '\nexport {ASSETS,MANUAL,parseUserPrice,valueRial,quantitySnapshotStatus,getPrices,buildPortfolioSvg,allocationImageReply,sendTelegram,sendTelegramPhoto,portfolioTime,boldPortfolioTime,allocationReply};', {context});
+  const module = new vm.SourceTextModule(source + '\nexport {ASSETS,MANUAL,parseUserPrice,valueRial,quantitySnapshotStatus,getPrices,buildPortfolioSvg,allocationImageReply,sendTelegram,sendTelegramPhoto,portfolioTime,boldPortfolioTime,allocationReply,latestAllocationReport,prepareAllocation,allocationGroups,renderAllocationSvg,buildAllocationPieSvg};', {context});
   await module.link(async specifier => {
     const exports = dependencies[specifier];
     assert.ok(exports, `unexpected dependency ${specifier}`);
@@ -85,4 +85,15 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
     return res;
   }
   return {ns,store,writes,sends,request,payload,assets,dispatches,marketCalls};
+}
+
+// Simulate the explicit format choice now required after opening the submenu.
+export async function startLatest(a,{command='/latest_allocation',id=1,format='image'}={}){
+  const headers={'x-telegram-bot-api-secret-token':'fixture-webhook'};
+  const prior=a.sends.length;
+  await a.request('POST',{}, {message:{chat:{id,type:'private'},from:{id},text:command}},headers);
+  const menus=a.sends.slice(prior).filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body));
+  const button=menus.filter(x=>x.chat_id===id).flatMap(x=>x.reply_markup?.inline_keyboard?.flat()||[])
+    .find(x=>x.callback_data?.startsWith('allocation:pick:')&&x.callback_data.endsWith(':'+format));
+  if(button)await a.request('POST',{}, {callback_query:{id:'fixture-format-choice',data:button.callback_data,from:{id},message:{chat:{id,type:'private'}}}},headers);
 }

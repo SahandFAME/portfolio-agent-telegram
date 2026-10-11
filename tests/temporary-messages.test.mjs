@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {app} from './helpers/app-fixture.mjs';
+import {app,startLatest} from './helpers/app-fixture.mjs';
 
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const callbackHeader={'x-portfolio-sync-secret':'fixture-secondary'};
@@ -93,11 +93,11 @@ test('complete fresh allocation flow removes both waiting notices and the EcoCoa
     await a.request('POST',{complete:'latest-allocation'},
       {request_id:id,ok:true,snapshot_updated_at:snapshot.updated_at,workbook_updated_at:snapshot.workbook_updated_at},callbackHeader);
   };
-  await a.request('POST',{},message('آخرین تخصیص دارایی'),header);await complete();
+  await startLatest(a,{command:'آخرین ترکیب دارایی'});await complete();
   const prompt=a.sends.filter(x=>method(x)==='sendMessage').at(-1);
   assert.match(body(prompt).text,/قیمت فعلی هر واحد صندوق بلک/);
   await a.request('POST',{},message('۸۵۰٬۰۰۰ تومان'),header);await complete();
-  assert.equal(deleted(a).length,3);
+  assert.equal(deleted(a).length,4);
   assert.equal(a.store.get('portfolio/temporary-replies/1.json').messages.length,0);
   assert.equal(a.sends.filter(x=>method(x)==='sendPhoto').length,1);
 });

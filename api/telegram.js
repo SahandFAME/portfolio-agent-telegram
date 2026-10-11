@@ -172,7 +172,7 @@ async function telegram(req,res){
   if(!secret)return res.status(503).json({ok:false});
   if(secret&&req.headers["x-telegram-bot-api-secret-token"]!==secret)return res.status(401).json({ok:false});
   const callback=req.body?.callback_query;
-  if(callback){waitUntil(handleAccessCallback(callback));return res.status(200).json({ok:true});}
+  if(callback){waitUntil(String(callback.data||"").startsWith("allocation:")?handleAllocationCallback(callback):handleAccessCallback(callback));return res.status(200).json({ok:true});}
   const message=req.body?.message;
   if(!message?.chat?.id)return res.status(200).json({ok:true});
   const userId=message.from?.id;
@@ -204,8 +204,14 @@ async function telegram(req,res){
     try{
       const pending=await loadPendingBlackRock(message.chat.id);
       if(command==="/latest_allocation"){
-        await sendTelegram(message.chat.id,await requestLatestAllocation(message.chat.id,userId),{menu:true,temporary:true});
+        await showAllocationMenu(message.chat.id);
         return;
+      }
+      if(command==="/allocation_chart"){
+        await sendTelegram(message.chat.id,await requestLatestAllocation(message.chat.id,userId,null,"chart"),{menu:true,temporary:true});return;
+      }
+      if(pending?.type==="allocation_format_selection"&&!command.startsWith("/")){
+        await showAllocationMenu(message.chat.id);return;
       }
       if(pending?.type==="latest_sync_pending"&&!command.startsWith("/")){
         await sendTelegram(message.chat.id,"دریافت و تأیید مقادیر تازه در حال انجام است. لطفاً منتظر درخواست قیمت بلک راک بمانید.",{menu:true,temporary:true});return;
@@ -213,7 +219,7 @@ async function telegram(req,res){
       if(pending?.type==="latest_blackrock_price"&&!command.startsWith("/")){
         const priceRial=parseUserPrice(command);
         const reply=priceRial===null?"لطفاً قیمت فعلی هر واحد بلک راک (EcoCoach) را به تومان وارد کنید.":
-          await requestLatestAllocation(message.chat.id,userId,priceRial);
+          await requestLatestAllocation(message.chat.id,userId,priceRial,pending.report_format||"image");
         await sendTelegram(message.chat.id,reply,{menu:true,temporary:true});return;
       }
       const snapshot=await safeSnapshot();
@@ -250,7 +256,45 @@ async function telegram(req,res){
 }
 const ALLOCATION_REQUEST_PREFIX="portfolio/latest-allocation/requests/";
 const ALLOCATION_ACTIVE_PREFIX="portfolio/latest-allocation/active/";
+const ALLOCATION_SELECTION_PREFIX="portfolio/latest-allocation/selections/";
 const ALLOCATION_DEADLINE_MS=10*60*1000;
+async function showAllocationMenu(chatId){
+  if(!await portfolioKeyboard(chatId))return;
+  const selection={selection_id:crypto.randomUUID(),created_at:new Date().toISOString(),used:false};
+  await writePrivateJson(ALLOCATION_SELECTION_PREFIX+chatId+".json",selection);
+  await savePendingBlackRock(chatId,{type:"allocation_format_selection",selection_id:selection.selection_id});
+  await sendMainMenu(chatId);
+  if(!await portfolioKeyboard(chatId))return;
+  const data=format=>"allocation:pick:"+selection.selection_id+":"+format;
+  await deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+    chat_id:chatId,text:"آخرین ترکیب دارایی\n\nنوع گزارش را انتخاب کنید. پس از انتخاب، مقادیر تازه از OneDrive و قیمت‌های تازه بازار دریافت می‌شوند.",
+    reply_markup:{inline_keyboard:[[{text:"گزارش تصویری",callback_data:data("image")},{text:"گزارش متنی",callback_data:data("text")}],
+      [{text:"بازگشت به منوی اصلی",callback_data:data("menu")}]]}
+  })},{temporary:true});
+}
+async function handleAllocationCallback(callback){
+  const uid=String(callback.from?.id||""),chat=callback.message?.chat;
+  if(chat?.type!=="private"||String(chat.id)!==uid){await answerCallback(callback.id,"دسترسی غیرمجاز.");return;}
+  try{
+    const state=await loadAccessState({strict:true});
+    if(!isOwner(uid)&&!state.approved.includes(uid)){await answerCallback(callback.id,"دسترسی ندارید.");return;}
+    const match=String(callback.data||"").match(/^allocation:pick:([0-9a-f-]{36}):(image|text|menu)$/);
+    const selection=await readPrivateJson(ALLOCATION_SELECTION_PREFIX+chat.id+".json");
+    const age=Date.now()-Date.parse(selection?.created_at);
+    if(!match||selection?.selection_id!==match[1]||selection.used||!Number.isFinite(age)||age<0||age>ALLOCATION_DEADLINE_MS){
+      await answerCallback(callback.id,"این منو منقضی شده است؛ آخرین ترکیب دارایی را دوباره انتخاب کنید.");return;
+    }
+    await writePrivateJson(ALLOCATION_SELECTION_PREFIX+chat.id+".json",{...selection,used:true});
+    await answerCallback(callback.id,"");
+    await trackPreviousAdminPanel(chat.id,callbackPanelToReplace(callback));
+    if(match[2]==="menu"){
+      const pending=await loadPendingBlackRock(chat.id);
+      if(pending?.type==="allocation_format_selection")await savePendingBlackRock(chat.id,{type:"none"});
+      await sendMainMenu(chat.id);return;
+    }
+    await sendTelegram(chat.id,await requestLatestAllocation(chat.id,uid,null,match[2]),{menu:true,temporary:true});
+  }catch(_){await answerCallback(callback.id,"انتخاب گزارش ناموفق بود؛ دوباره تلاش کنید.");}
+}
 async function readPrivateJson(key){
   const item=await get(key,{access:"private",useCache:false});
   if(!item)return null;
@@ -261,16 +305,16 @@ async function readPrivateJson(key){
 async function writePrivateJson(key,value){
   await put(key,JSON.stringify(value),{access:"private",addRandomSuffix:false,allowOverwrite:true,contentType:"application/json"});
 }
-async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null){
+async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null,reportFormat="image"){
   const token=process.env.GITHUB_ACTIONS_TOKEN;
   if(!token)return "دریافت تازه از OneDrive هنوز پیکربندی نشده است. گزارش قبلی به‌عنوان گزارش تازه نمایش داده نمی‌شود.";
   const active=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+chatId+".json");
   const prior=active?.request_id?await readPrivateJson(ALLOCATION_REQUEST_PREFIX+active.request_id+".json"):null;
-  if(prior?.status==="queued"&&Date.now()-Date.parse(prior.requested_at)<ALLOCATION_DEADLINE_MS)
+  if(prior?.status==="queued"&&Date.now()-Date.parse(prior.requested_at)<ALLOCATION_DEADLINE_MS&&(prior.report_format||"image")===reportFormat)
     return "درخواست دریافت تازه از OneDrive در حال انجام است. لطفاً منتظر پاسخ بمانید.";
   const id=crypto.randomUUID();
   const record={request_id:id,chat_id:chatId,user_id:String(userId),status:"queued",
-    requested_at:new Date().toISOString(),blackRockPriceRial};
+    requested_at:new Date().toISOString(),blackRockPriceRial,report_format:reportFormat};
   await writePrivateJson(ALLOCATION_REQUEST_PREFIX+id+".json",record);
   await writePrivateJson(ALLOCATION_ACTIVE_PREFIX+chatId+".json",{request_id:id});
   await savePendingBlackRock(chatId,{type:"latest_sync_pending",request_id:id,requestedAt:record.requested_at});
@@ -319,16 +363,22 @@ async function completeLatestAllocation(req,res){
          !Number.isFinite(stamp)||stamp<Date.parse(record.requested_at)||stamp>now||now-stamp>120000)
         throw new Error("verified_snapshot_changed");
       const quantities={...assets,...MANUAL};
-      const report=await allocationImageReply(quantities,record.blackRockPriceRial);
+      const report=await latestAllocationReport(quantities,record.blackRockPriceRial,record.report_format||"image",snapshot);
       const latest=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json");
       if(latest?.request_id!==id)return;
       if(report.text){
         if(report.text.includes("قیمت فعلی هر واحد صندوق بلک"))await savePendingBlackRock(record.chat_id,{
-          type:"latest_blackrock_price",requestedAt:new Date().toISOString(),request_id:id});
+          type:"latest_blackrock_price",requestedAt:new Date().toISOString(),request_id:id,report_format:record.report_format||"image"});
         await sendTelegram(record.chat_id,report.text,{menu:true,temporary:report.text.includes("قیمت فعلی هر واحد صندوق بلک")});
+      }else if(report.messages){
+        await savePendingBlackRock(record.chat_id,{type:"none",updatedAt:new Date().toISOString()});
+        for(const text of [...report.messages,report.percentages]){
+          const current=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json");
+          if(current?.request_id!==id||!await sendTelegram(record.chat_id,text,{menu:true}))return;
+        }
       }else{
         await savePendingBlackRock(record.chat_id,{type:"none",updatedAt:new Date().toISOString()});
-        await sendTelegramPhoto(record.chat_id,report.png,"Latest Allocation • مقادیر تازه OneDrive و قیمت‌های تازه بازار");
+        await sendTelegramPhoto(record.chat_id,report.png,(record.report_format==="chart"?"نمودار ترکیب دارایی":"آخرین ترکیب دارایی")+" • مقادیر تازه OneDrive و قیمت‌های تازه بازار");
       }
     }catch(_){
       await sendTelegram(record.chat_id,"تأیید Snapshot تازه یا تهیه گزارش ناموفق بود. لطفاً Latest Allocation را دوباره انتخاب کنید.",{menu:true});
@@ -930,7 +980,7 @@ async function allocationReply(q,blackRockPriceRial=null){
 function cryptoAsset(asset){return ["BTC","ETH","Tether","Link","ADA","SOL","ONDO"].includes(asset);}
 function qSafe(v){const n=Number(v);return Number.isFinite(n)?n:0;}
 function sourceFa(s){
-  const m={"CoinGecko":"CoinGecko","Shakhesban":"شاخص‌بان","TGJU":"TGJU","User input":"ورودی کاربر","TGJU 18K gold × quarter-coin weight":"TGJU × وزن ربع سکه"};
+  const m={"CoinGecko":"CoinGecko","Shakhesban":"شاخص‌بان","Shakhesban IME":"شاخص‌بان (بورس کالا)","TGJU":"TGJU","User input":"ورودی کاربر","TGJU 18K gold × quarter-coin weight":"TGJU × وزن ربع سکه"};
   return m[s]||s||"-";
 }
 function unitPriceDisplay(asset,p){
@@ -950,6 +1000,15 @@ function categoryName(asset){
   if(asset==="شمش نقره 999")return "نقره";
   if(["سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","طلا","عیار","گوهر","آلتون","امرالد","زرفام"].includes(asset))return "طلا و سکه";
   return "سهام و صندوق";
+}
+const ALLOCATION_CATEGORIES=["طلا و سکه","نقره","سهام و صندوق","رمز ارز","Tether","US Dollar"];
+const ALLOCATION_LABELS={"طلا و سکه":"طلا و سکه","نقره":"نقره","سهام و صندوق":"سهام و صندوق‌ها","رمز ارز":"رمزارز","Tether":"تتر","US Dollar":"دلار نقدی"};
+const ALLOCATION_COLORS={"طلا و سکه":"#e9c51d","نقره":"#8799a8","سهام و صندوق":"#4c79b7","رمز ارز":"#e15353","Tether":"#00a767","US Dollar":"#98c87c"};
+function allocationGroups(vals,total){
+  return ALLOCATION_CATEGORIES.map(category=>{
+    const value=Object.entries(vals).filter(([asset])=>categoryName(asset)===category).reduce((sum,[,amount])=>sum+amount,0);
+    return {category,label:ALLOCATION_LABELS[category],value,percentage:value/total*100};
+  });
 }
 function assetsReply(quantities,snapshot){
   const categories=[
@@ -975,24 +1034,12 @@ function usdFa(n){return "$"+Number(n).toLocaleString("en-US",{maximumFractionDi
 
 function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   const priceTime=portfolioTime(new Date());
-  const assetEn={
-    "طلا":"Tala Gold Fund","عیار":"Ayar Gold Fund","گوهر":"Gohar Gold Fund","آلتون":"Alton Gold Fund",
-    "امرالد":"Emerald Gold Fund","زرفام":"Zarfam Gold Fund","نهال":"Nahal Commodity Fund","طعام":"Taam Sector Fund",
-    "استیل":"Steel Equity Fund","فلز فارابی":"Felez Farabi Fund","پتروآگاه":"PetroAgaah Fund","خودران":"Khodro Fund",
-    "بلک راک":"EcoCoach Fund","سجام":"Sejam","فملی":"Fameli","شمش نقره 999":"999 Silver Certificate",
-    "BTC":"BTC","ETH":"ETH","Tether":"Tether","Link":"LINK","ADA":"ADA","SOL":"SOL","ONDO":"ONDO",
-    "سکه تمام":"Full Coin","ربع سکه غیره":"Non-bank Quarter Coin","ربع سکه بانکی":"Bank Quarter Coin",
-    "آبشده (طلب)":"Gold Receivable","آبشده (شمش زربد)":"Zarbed Gold Bar","دلار":"US Dollar"
-  };
-  const groupEn={
-    "طلا":"Gold","صندوق طلا":"Gold","گواهی سپرده":"Commodity Certificate","صندوق کالایی":"Commodity Fund",
-    "صندوق بخشی":"Sector Fund","صندوق سهامی":"Equity Fund","صندوق":"Fund","سهام":"Stock","رمز ارز":"Crypto","فیات":"Fiat"
-  };
-  const unitEn={"عدد":"units","گرم":"g","سهم":"shares","واحد":"certificate","-":"-"};
-  const sourceEn={"CoinGecko":"CoinGecko","Shakhesban":"Shakhesban","TGJU":"TGJU","User input":"User input","TGJU 18K gold × quarter-coin weight":"TGJU × quarter-coin weight"};
-  const enNum=n=>Number(n).toLocaleString("en-US",{maximumFractionDigits:2});
-  const toman=n=>(Math.round(Number(n)/1000)*1000).toLocaleString("en-US")+" toman";
-  const usdText=n=>"$"+Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const enNum=n=>Number(n).toLocaleString("fa-IR",{maximumFractionDigits:2});
+  const toman=n=>(Math.round(Number(n)/1000)*1000).toLocaleString("fa-IR")+" تومان";
+  const usdText=n=>Number(n).toLocaleString("fa-IR",{minimumFractionDigits:2,maximumFractionDigits:2})+" دلار";
+  const unitPriceFa=(asset,p)=>cryptoAsset(asset)
+    ? Number(p.priceUsd).toLocaleString("fa-IR",{maximumFractionDigits:8})+" دلار"
+    : Number(p.priceRial/10).toLocaleString("fa-IR",{maximumFractionDigits:8})+" تومان";
   const categoryRank={"طلا و سکه":0,"نقره":1,"سهام و صندوق":2,"رمز ارز":3,"Tether":4,"US Dollar":5};
   function subgroupRank(asset){
     const category=categoryName(asset);
@@ -1017,10 +1064,10 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
     const crypto=cryptoAsset(a);
     const usd=crypto?qSafe(q[a])*qSafe(p.priceUsd):(a==="دلار"?qSafe(q[a]):valueUsd(v,usdIrr));
     return {
-      rank:i+1,asset:assetEn[a]||a,group:groupEn[REPORT_GROUP[a]]||REPORT_GROUP[a]||"-",
-      qty:qSafe(q[a]),qtyDecimals:a==="ETH"?3:a==="BTC"?4:null,unit:unitEn[REPORT_UNIT[a]]||REPORT_UNIT[a]||"-",
-      unitPrice:unitPriceDisplay(a,p),valueToman:v/10,valueUsd:usd,pct:total?v/total*100:0,
-      source:sourceEn[p.source]||p.source||"-"
+      rank:i+1,asset:a,group:REPORT_GROUP[a]||"-",
+      qty:qSafe(q[a]),qtyDecimals:a==="ETH"?3:a==="BTC"?4:null,unit:cryptoAsset(a)?a:REPORT_UNIT[a]||"-",
+      unitPrice:unitPriceFa(a,p),valueToman:v/10,valueUsd:usd,pct:total?v/total*100:0,
+      source:sourceFa(p.source)
     };
   });
 
@@ -1029,10 +1076,10 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   const W=1800,H=2160;
   const tableX=40,tableW=1720,rowH=37,headerY=790,headerH=48;
   const cols=[
-    ["rank","#",45],["asset","Asset",245],["group","Group",175],["qty","Qty",105],["unit","Unit",100],
-    ["unitPrice","Unit Price",205],["valueToman","Value (toman)",250],["valueUsd","Value (USD)",205],["pct","%",70],["source","Source",320]
+    ["rank","ردیف",45],["asset","دارایی",245],["group","گروه",175],["qty","مقدار",105],["unit","واحد",100],
+    ["unitPrice","قیمت واحد",205],["valueToman","ارزش (تومان)",250],["valueUsd","ارزش (دلار)",205],["pct","درصد",70],["source","منبع",320]
   ];
-  let cx=tableX;const xmap={};for(const [k,,w] of cols){xmap[k]=cx;cx+=w;}
+  let cx=tableX+tableW;const xmap={};for(const [k,,w] of cols){cx-=w;xmap[k]=cx;}
 
   const cats={};
   for(const [a,v] of Object.entries(vals)){
@@ -1040,8 +1087,8 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
     cats[k]=(cats[k]||0)+v;
   }
   const catOrder=["طلا و سکه","نقره","سهام و صندوق","رمز ارز","Tether","US Dollar"];
-  const catColors={"طلا و سکه":"#d9a400","رمز ارز":"#7250d5","Tether":"#26a17b","US Dollar":"#43a866","سهام و صندوق":"#2f9ea4","نقره":"#718096"};
-  const catEn={"طلا و سکه":"Gold & Coins","رمز ارز":"Crypto","Tether":"Tether","US Dollar":"US Dollar","سهام و صندوق":"Stocks & Funds","نقره":"Silver"};
+  const catColors=ALLOCATION_COLORS;
+  const catEn=ALLOCATION_LABELS;
 
   // Conservative text truncation keeps every cell inside its column.
   const fit=(text,width,font=13)=>{
@@ -1052,30 +1099,30 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
 
   let svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'"><rect width="100%" height="100%" fill="#f7fafc"/>';
   svg+='<rect x="20" y="20" width="1760" height="245" rx="22" fill="#123b5d"/>';
-  svg+=svgText(1730,78,"Portfolio Valuation Report",38,{anchor:"end",weight:700,fill:"#ffffff"});
-  svg+=svgText(1730,120,"Live market prices • "+priceTime,21,{anchor:"end",weight:700,fill:"#dce9f4"});
+  svg+=svgText(1730,78,"گزارش ارزش‌گذاری و ترکیب دارایی",38,{anchor:"end",weight:700,fill:"#ffffff"});
+  svg+=svgText(1730,120,"قیمت‌های زنده بازار • "+priceTime,21,{anchor:"end",weight:700,fill:"#dce9f4"});
   svg+=svgText(70,78,toman(total/10),34,{anchor:"start",weight:700,fill:"#ffffff"});
   svg+=svgText(70,120,usdText(valueUsd(total,usdIrr)),25,{anchor:"start",fill:"#dce9f4"});
-  svg+=svgText(70,160,"USD/IRR: "+Math.round(usdIrr/10).toLocaleString("en-US"),18,{anchor:"start",fill:"#dce9f4"});
-  svg+=svgText(70,200,"Crypto unit prices are shown in USD",18,{anchor:"start",fill:"#dce9f4"});
+  svg+=svgText(70,160,"قیمت دلار: "+Math.round(usdIrr/10).toLocaleString("fa-IR")+" تومان",18,{anchor:"start",fill:"#dce9f4"});
+  svg+=svgText(70,200,"قیمت واحد رمزارزها به دلار است",18,{anchor:"start",fill:"#dce9f4"});
 
   const cards=catOrder.map(name=>[name,cats[name]||0]);
   let cardX=20;
   for(const [name,val] of cards){
     const pct=total?val/total*100:0;
     const cardW=285;
-    const cardToman=(Math.round((val/10)/1000)*1000).toLocaleString("en-US");
+    const cardToman=(Math.round((val/10)/1000)*1000).toLocaleString("fa-IR");
     svg+='<rect x="'+cardX+'" y="285" width="'+cardW+'" height="105" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
     svg+=svgText(cardX+cardW-14,320,catEn[name],17,{anchor:"end",weight:700});
-    svg+=svgText(cardX+cardW-14,360,pct.toFixed(1)+"%",25,{anchor:"end",weight:700,fill:catColors[name]});
-    svg+=svgText(cardX+14,360,cardToman+" toman",14,{anchor:"start",fill:"#526579"});
+    svg+=svgText(cardX+cardW-14,360,pct.toLocaleString("fa-IR",{minimumFractionDigits:1,maximumFractionDigits:1})+"٪",25,{anchor:"end",weight:700,fill:catColors[name]});
+    svg+=svgText(cardX+14,360,cardToman+" تومان",14,{anchor:"start",fill:"#526579"});
     cardX+=295;
   }
 
   // Top-right dashboard: larger, more graphical donut chart.
   const sx=940,sy=425,sw=820;
   svg+='<rect x="'+sx+'" y="'+sy+'" width="'+sw+'" height="330" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
-  svg+=svgText(sx+sw-25,sy+42,"Asset Allocation",25,{anchor:"end",weight:700});
+  svg+=svgText(sx+sw-25,sy+42,"ترکیب دارایی",25,{anchor:"end",weight:700});
 
   const cx0=sx+215,cy0=sy+190,R=112,r0=64;let angle=-Math.PI/2;
   for(const [name,val] of cards){
@@ -1091,26 +1138,26 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   }
   // Keep the total value in the donut center on a clean two-line label.
   svg+=svgText(cx0,cy0-7,enNum(Math.round(total/10/1000)*1000),17,{anchor:"middle",weight:700});
-  svg+=svgText(cx0,cy0+20,"toman",12,{anchor:"middle",fill:"#607080"});
+  svg+=svgText(cx0,cy0+20,"تومان",12,{anchor:"middle",fill:"#607080"});
 
   // Legend is deliberately shifted to the right of the donut.
   cards.forEach(([name,val],i)=>{
     const yy=sy+82+i*47;
-    const lx=sx+490;
+    const lx=sx+790;
     svg+='<rect x="'+lx+'" y="'+(yy-15)+'" width="20" height="20" rx="5" fill="'+catColors[name]+'"/>';
-    svg+=svgText(lx+32,yy,catEn[name],16,{anchor:"start",weight:600});
-    svg+=svgText(sx+775,yy,(total?val/total*100:0).toFixed(1)+"%",16,{anchor:"end",weight:700});
+    svg+=svgText(sx+775,yy,catEn[name],16,{anchor:"end",weight:600});
+    svg+=svgText(sx+525,yy,(total?val/total*100:0).toLocaleString("fa-IR",{minimumFractionDigits:1,maximumFractionDigits:1})+"٪",16,{anchor:"end",weight:700});
   });
 
   // Top-left dashboard: summary.
   const tx=40,ty=425,tw=850;
   svg+='<rect x="'+tx+'" y="'+ty+'" width="'+tw+'" height="330" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
-  svg+=svgText(tx+tw-25,ty+42,"Portfolio Summary",25,{anchor:"end",weight:700});
-  const summary=[["Total Value",toman(total/10)],["Total USD",usdText(valueUsd(total,usdIrr))],["Assets",String(rows.length)],["USD/IRR",Math.round(usdIrr/10).toLocaleString("en-US")],["Price Time",priceTime]];
+  svg+=svgText(tx+tw-25,ty+42,"خلاصه پرتفوی",25,{anchor:"end",weight:700});
+  const summary=[["ارزش کل",toman(total/10)],["ارزش دلاری",usdText(valueUsd(total,usdIrr))],["تعداد دارایی‌ها",enNum(rows.length)],["نرخ دلار (تومان)",Math.round(usdIrr/10).toLocaleString("fa-IR")],["زمان قیمت‌ها",priceTime]];
   summary.forEach(([k,v],i)=>{
     const yy=ty+92+i*48;
     svg+=svgText(tx+tw-25,yy,k,17,{anchor:"end",weight:600});
-    svg+=svgText(tx+25,yy,v,16,{anchor:"start",weight:k==="Price Time"?700:400,fill:"#526579"});
+    svg+=svgText(tx+25,yy,v,16,{anchor:"start",weight:k==="زمان قیمت‌ها"?700:400,fill:"#526579"});
   });
 
   // Table: full-width, below all dashboard content.
@@ -1123,10 +1170,11 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
     if(i%2===0)svg+='<rect x="'+tableX+'" y="'+y+'" width="'+tableW+'" height="'+rowH+'" fill="#f2f7fa"/>';
     for(const [k,,w] of cols){
       let v=r[k];
-      if(k==="valueToman")v=(Math.round(Number(v)/1000)*1000).toLocaleString("en-US");
+      if(k==="rank")v=enNum(v);
+      if(k==="valueToman")v=(Math.round(Number(v)/1000)*1000).toLocaleString("fa-IR");
       else if(k==="valueUsd")v=usdText(v);
-      else if(k==="pct")v=r.pct.toFixed(1)+"%";
-      else if(k==="qty")v=r.qtyDecimals===null?enNum(v):Number(v).toLocaleString("en-US",{minimumFractionDigits:r.qtyDecimals,maximumFractionDigits:r.qtyDecimals});
+      else if(k==="pct")v=r.pct.toLocaleString("fa-IR",{minimumFractionDigits:1,maximumFractionDigits:1})+"٪";
+      else if(k==="qty")v=r.qtyDecimals===null?enNum(v):Number(v).toLocaleString("fa-IR",{minimumFractionDigits:r.qtyDecimals,maximumFractionDigits:r.qtyDecimals});
       const font=(k==="asset"||k==="group"||k==="source")?12:13;
       v=fit(v,w,font);
       svg+=svgText(xmap[k]+w-8,y+25,String(v),font,{anchor:"end",fill:"#243b53"});
@@ -1135,15 +1183,15 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
 
   const noteY=1965;
   svg+='<rect x="40" y="'+noteY+'" width="1720" height="155" rx="16" fill="#edf4f8" stroke="#d7e2eb"/>';
-  svg+=svgText(1730,noteY+38,"Notes",19,{anchor:"end",weight:700});
-  svg+=svgText(1730,noteY+70,"• Crypto unit prices are displayed in USD.",14,{anchor:"end"});
-  svg+=svgText(1730,noteY+98,"• Non-crypto USD values = toman value ÷ current USD/IRR.",14,{anchor:"end"});
-  svg+=svgText(1730,noteY+126,"• Crypto USD values = quantity × current USD price.",14,{anchor:"end"});
-  svg+=svgText(1730,noteY+150,"• EcoCoach Fund is the private fund; BlackRock Inc. is not used.",14,{anchor:"end"});
+  svg+=svgText(1730,noteY+38,"توضیحات",19,{anchor:"end",weight:700});
+  svg+=svgText(1730,noteY+70,"• قیمت واحد رمزارزها به دلار نمایش داده می‌شود.",14,{anchor:"end"});
+  svg+=svgText(1730,noteY+98,"• ارزش دلاری سایر دارایی‌ها از تقسیم ارزش تومانی بر نرخ دلار آزاد به دست می‌آید.",14,{anchor:"end"});
+  svg+=svgText(1730,noteY+126,"• ارزش دلاری رمزارزها حاصل ضرب مقدار در قیمت دلاری هر واحد است.",14,{anchor:"end"});
+  svg+=svgText(1730,noteY+150,"• بلک راک صندوق خصوصی EcoCoach است و قیمت آن را کاربر وارد می‌کند.",14,{anchor:"end"});
   svg+='</svg>';
   return svg;
 }
-async function allocationImageReply(q,blackRockPriceRial){
+async function prepareAllocation(q,blackRockPriceRial){
   const {prices,errors}=await getPrices();
   const usdIrr=prices["دلار"]?.priceRial;
   if(!usdIrr)return {text:"دریافت نرخ دلار آزاد ناموفق بود؛ ارزش‌گذاری انجام نشد."};
@@ -1171,12 +1219,123 @@ async function allocationImageReply(q,blackRockPriceRial){
   if(blackRockPriceRial!==null){const v=qSafe(q["بلک راک"])*blackRockPriceRial;vals["بلک راک"]=v;total+=v;delete errors["بلک راک"];}
   if(!total)return {text:"هیچ قیمت معتبر فعلی برای ارزش‌گذاری دریافت نشد."};
   const reportPrices={...prices};if(blackRockPriceRial!==null)reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
-  const svg=buildPortfolioSvg(q,vals,total,reportPrices,usdIrr);
+  if(!Number.isFinite(total)||total<=0||Object.values(vals).some(value=>!Number.isFinite(value)||value<0))
+    return {text:"ارزش‌گذاری کامل و معتبر نیست؛ هیچ جمع کل، درصد یا نموداری ارائه نمی‌شود."};
+  return {vals,total,prices:reportPrices,usdIrr,priceTime:new Date().toISOString()};
+}
+function renderAllocationSvg(svg){
   const fontPath=path.join(process.cwd(),"node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf");
   const boldFontPath=path.join(process.cwd(),"node_modules/dejavu-fonts-ttf/ttf/DejaVuSans-Bold.ttf");
   const rendered=new Resvg(svg,{font:{fontFiles:[fontPath,boldFontPath],loadSystemFonts:false,defaultFontFamily:"DejaVu Sans",sansSerifFamily:"DejaVu Sans"}}).render();
-  const png=rendered.asPng();
-  return {png,total};
+  return rendered.asPng();
+}
+function allocationTextReport(q,report,snapshot){
+  const number=value=>Number(value).toLocaleString("fa-IR",{maximumFractionDigits:8});
+  const header="<b>گزارش تفصیلی آخرین ترکیب دارایی</b>\n"+
+    (snapshot?"همگام‌سازی مقادیر: "+boldPortfolioTime(snapshot.updated_at)+"\n":"")+
+    "قیمت‌های بازار: "+boldPortfolioTime(report.priceTime)+"\n"+
+    "ارزش کل پرتفوی: <b>"+number(report.total/10)+" تومان</b>";
+  const messages=[];let chunk=header;
+  ASSETS.forEach((asset,index)=>{
+    const quote=report.prices[asset];
+    const unit=cryptoAsset(asset)?asset:REPORT_UNIT[asset];
+    const price=quote.priceUsd!==undefined?number(quote.priceUsd)+" دلار":number(quote.priceRial/10)+" تومان";
+    const block=number(index+1)+". <b>"+escXml(asset)+"</b>\n"+
+      "مقدار: "+number(q[asset])+" "+escXml(unit)+" • گروه: "+escXml(REPORT_GROUP[asset])+"\n"+
+      "ارزش: <b>"+number(report.vals[asset]/10)+" تومان</b>\n"+
+      "قیمت واحد: "+price+" • منبع: "+escXml(sourceFa(quote.source));
+    if((chunk+"\n\n"+block).length>3500){messages.push(chunk);chunk="<b>ادامه گزارش ترکیب دارایی</b>";}
+    chunk+="\n\n"+block;
+  });
+  messages.push(chunk);
+  const percentages="<b>درصد گروه‌های دارایی</b>\n\n"+allocationGroups(report.vals,report.total).map(group=>
+    "<b>"+group.label+"</b>: "+group.percentage.toLocaleString("fa-IR",{minimumFractionDigits:2,maximumFractionDigits:2})+"٪"
+  ).join("\n")+"\n\nقیمت‌های بازار: "+boldPortfolioTime(report.priceTime);
+  return {messages,percentages,total:report.total};
+}
+async function latestAllocationReport(q,blackRockPriceRial,format="image",snapshot=null){
+  const report=await prepareAllocation(q,blackRockPriceRial);
+  if(report.text)return report;
+  if(format==="text")return allocationTextReport(q,report,snapshot);
+  if(format==="chart")return {png:renderAllocationSvg(buildAllocationPieSvg(report,snapshot)),total:report.total};
+  return {png:renderAllocationSvg(buildPortfolioSvg(q,report.vals,report.total,report.prices,report.usdIrr)),total:report.total};
+}
+async function allocationImageReply(q,blackRockPriceRial){
+  return latestAllocationReport(q,blackRockPriceRial,"image");
+}
+
+function buildAllocationPieSvg(report,snapshot=null){
+  const groups=allocationGroups(report.vals,report.total);
+  if(!Number.isFinite(report.total)||report.total<=0||groups.some(group=>!Number.isFinite(group.value)||group.value<0)||
+    Math.abs(groups.reduce((sum,group)=>sum+group.value,0)-report.total)>Math.max(1,report.total)*1e-10)
+    throw new Error("invalid_allocation_chart");
+  const cx=800,cy=550,rx=500,ry=240,depth=70;
+  const point=(angle,offset=0)=>[cx+rx*Math.cos(angle),cy+ry*Math.sin(angle)+offset];
+  const xy=point=>point.map(value=>value.toFixed(3)).join(" ");
+  const shade=(color,factor)=>"#"+color.slice(1).match(/../g).map(value=>Math.min(255,Math.round(parseInt(value,16)*factor)).toString(16).padStart(2,"0")).join("");
+  const percent=group=>group.percentage.toLocaleString("fa-IR",{minimumFractionDigits:2,maximumFractionDigits:2})+"٪";
+  let angle=-Math.PI/2;
+  const slices=groups.map((group,index)=>{
+    const start=angle,end=start+group.percentage/100*Math.PI*2;angle=end;
+    return {...group,index,start,end,color:ALLOCATION_COLORS[group.category]};
+  });
+  let svg='<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1160" viewBox="0 0 1600 1160">'+
+    '<defs><filter id="shadow" x="-20%" y="-30%" width="140%" height="160%"><feGaussianBlur stdDeviation="14"/></filter>';
+  for(const slice of slices){
+    svg+='<radialGradient id="top'+slice.index+'" cx="45%" cy="25%" r="80%"><stop offset="0" stop-color="'+shade(slice.color,1.14)+'"/><stop offset="1" stop-color="'+slice.color+'"/></radialGradient>'+
+      '<linearGradient id="side'+slice.index+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+shade(slice.color,.78)+'"/><stop offset="1" stop-color="'+shade(slice.color,.53)+'"/></linearGradient>';
+  }
+  svg+='</defs><rect width="1600" height="1160" fill="#f6f9fc"/>';
+  svg+=svgText(800,70,"نمودار ترکیب دارایی",42,{anchor:"middle",weight:700});
+  svg+=svgText(800,115,"قیمت‌های بازار: "+portfolioTime(report.priceTime),22,{anchor:"middle",weight:700,fill:"#526579"});
+  if(snapshot)svg+=svgText(800,152,"همگام‌سازی مقادیر: "+portfolioTime(snapshot.updated_at),19,{anchor:"middle",weight:700,fill:"#526579"});
+  svg+='<ellipse cx="800" cy="620" rx="510" ry="248" fill="#18324a" opacity=".16" filter="url(#shadow)"/>';
+  // Only the front-facing outer arcs have visible vertical walls.
+  for(const slice of slices){
+    if(slice.value===0)continue;
+    for(const turn of [-1,0,1]){
+      const start=Math.max(slice.start,turn*2*Math.PI),end=Math.min(slice.end,turn*2*Math.PI+Math.PI);
+      if(end-start<1e-10)continue;
+      const path='M '+xy(point(start))+' A '+rx+' '+ry+' 0 0 1 '+xy(point(end))+
+        ' L '+xy(point(end,depth))+' A '+rx+' '+ry+' 0 0 0 '+xy(point(start,depth))+' Z';
+      svg+='<path data-layer="side" d="'+path+'" fill="url(#side'+slice.index+')"/>';
+    }
+  }
+  for(const slice of slices){
+    if(slice.value===0)continue;
+    let path;
+    if(slice.end-slice.start>=2*Math.PI-1e-10){
+      path='M '+(cx-rx)+' '+cy+' A '+rx+' '+ry+' 0 1 1 '+(cx+rx)+' '+cy+' A '+rx+' '+ry+' 0 1 1 '+(cx-rx)+' '+cy+' Z';
+    }else{
+      path='M '+cx+' '+cy+' L '+xy(point(slice.start))+' A '+rx+' '+ry+' 0 '+(slice.end-slice.start>Math.PI?1:0)+' 1 '+xy(point(slice.end))+' Z';
+    }
+    svg+='<path data-layer="top" data-category="'+escXml(slice.category)+'" data-percentage="'+slice.percentage+'" d="'+path+'" fill="url(#top'+slice.index+')" stroke="#ffffff" stroke-width="2"/>';
+  }
+  const labels=slices.map(slice=>{
+    const middle=(slice.start+slice.end)/2;
+    return {...slice,side:slice.value>0?(Math.cos(middle)<0?"left":"right"):(slice.index%2?"left":"right"),
+      wantedY:slice.value>0?cy+(ry+60)*Math.sin(middle):280+slice.index*90,middle};
+  });
+  for(const side of ["left","right"]){
+    const nodes=labels.filter(label=>label.side===side).sort((a,b)=>a.wantedY-b.wantedY);
+    let previous=150;
+    nodes.forEach((label,index)=>{
+      const y=Math.min(850-(nodes.length-1-index)*100,Math.max(240+index*100,previous+100,label.wantedY));previous=y;
+      const x=side==="left"?30:1360,edge=side==="left"?240:1360;
+      if(label.value>0){
+        const p=point(label.middle),elbow=side==="left"?260:1340;
+        svg+='<polyline points="'+xy(p)+' '+elbow+' '+y+' '+edge+' '+y+'" fill="none" stroke="'+shade(label.color,.75)+'" stroke-width="2"/>';
+      }
+      svg+='<rect x="'+x+'" y="'+(y-42)+'" width="210" height="84" rx="14" fill="#ffffff" stroke="'+label.color+'" stroke-width="2"/>';
+      svg+=svgText(x+194,y-9,label.label,20,{anchor:"end",weight:700});
+      svg+=svgText(x+194,y+24,percent(label),29,{anchor:"end",weight:700,fill:shade(label.color,.62)});
+    });
+  }
+  svg+='<rect x="300" y="950" width="1000" height="100" rx="20" fill="#123b5d"/>';
+  svg+=svgText(800,990,"ارزش کل پرتفوی",22,{anchor:"middle",weight:700,fill:"#dce9f4"});
+  svg+=svgText(800,1030,moneyFa(report.total/10),31,{anchor:"middle",weight:700,fill:"#ffffff"});
+  svg+=svgText(800,1100,"درصد گروه‌ها بر اساس ارزش تومانی است و تا دو رقم اعشار گرد شده است.",20,{anchor:"middle",fill:"#526579"});
+  return svg+'</svg>';
 }
 
 function formatPrice(asset,p){
@@ -1185,7 +1344,7 @@ function formatPrice(asset,p){
 function formatToman(rial){return format(rial/10)+" toman";}
 function format(v){return Number(v).toLocaleString("en-US",{maximumFractionDigits:8});}
 function group(q,names){return names.map(n=>n+": "+(q[n]===undefined?"not synchronized":format(q[n]))).join("\n");}
-function help(){return "Portfolio Agent is online.\nبرای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n/status — portfolio status\n/assets — asset list\n/latest_allocation — Latest Allocation: fresh OneDrive quantities and live prices\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/cash_dollar — Cash Dollar (دلار نقدی)\\n\\nFor بلک راک, the bot asks for the current EcoCoach price per unit whenever a valuation needs it.";}
+function help(){return "Portfolio Agent is online.\nبرای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n/status — portfolio status\n/assets — asset list\n/latest_allocation — آخرین ترکیب دارایی: انتخاب گزارش تصویری یا متنی با مقادیر و قیمت‌های تازه\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/allocation_chart — نمودار سه‌بعدی ترکیب دارایی با مقادیر و قیمت‌های تازه\n/cash_dollar — Cash Dollar (دلار نقدی)\n\nبلک راک صندوق خصوصی EcoCoach است. برای تهیه گزارش ارزش‌گذاری، ربات قیمت فعلی هر واحد این صندوق را به تومان از شما می‌پرسد.";}
 async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return null;}}
 function quantitySnapshotStatus(snapshot){
   const stamp=snapshot?.updated_at;
@@ -1202,12 +1361,13 @@ function quantitySnapshotStatus(snapshot){
 const BUTTON_MENU=[
   [{text:"وضعیت",command:"/status"},{text:"دارایی‌ها",command:"/assets"}],
   [{text:"طلا و سایر فلزات گرانبها",command:"/gold_and_other_precious_metals"},{text:"رمزارز",command:"/crypto"}],
-  [{text:"دلار نقدی",command:"/cash_dollar"},{text:"آخرین تخصیص دارایی",command:"/latest_allocation"}],
-  [{text:"راهنما",command:"/help"}]
+  [{text:"دلار نقدی",command:"/cash_dollar"},{text:"آخرین ترکیب دارایی",command:"/latest_allocation"}],
+  [{text:"نمودار ترکیب دارایی",command:"/allocation_chart"},{text:"راهنما",command:"/help"}]
 ];
 const MENU_COMMANDS=new Map([...BUTTON_MENU.flat().map(button=>[button.text,button.command]),
   ["پنل مدیریت","/admin"],
   ["Latest Allocation","/latest_allocation"],
+  ["آخرین تخصیص دارایی","/latest_allocation"],
   ["Cash Dollar","/cash_dollar"],["/cash","/cash_dollar"],["نقدینگی","/cash_dollar"],
   ["تخصیص دارایی","/latest_allocation"],["به‌روزرسانی","/latest_allocation"],
   ["/allocation","/latest_allocation"],["/refresh","/latest_allocation"]]);
@@ -1297,7 +1457,7 @@ async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=f
   // Telegram limits text messages to 4096 characters. Split the audit table
   // into balanced HTML <pre> blocks so large portfolio reports are delivered
   // instead of silently failing.
-  if(String(text).length<=3900){await send(text);return;}
+  if(String(text).length<=3900)return send(text);
 
   const raw=String(text);
   const preStart=raw.indexOf("<pre>");

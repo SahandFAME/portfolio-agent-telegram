@@ -51,7 +51,7 @@ test('return to main menu restores report buttons and removes only old panel and
   const oldAnchor=anchor(a),oldPanel=pendingPanel(a);
   await a.request('POST',{},click('admin:main_menu'),header);
   const reply=sent(a).at(-1);assert.match(reply.text,/منوی اصلی پرتفوی/);
-  assert.ok(reply.reply_markup.keyboard.flat().some(x=>x.text==='آخرین تخصیص دارایی'));
+  assert.ok(reply.reply_markup.keyboard.flat().some(x=>x.text==='آخرین ترکیب دارایی'));
   assert.ok(deleted(a).some(x=>x.message_id===oldPanel));assert.ok(deleted(a).some(x=>x.message_id===oldAnchor));
   assert.equal(deleted(a).some(x=>x.message_id===reportId),false);
   assert.equal(a.store.get('portfolio/temporary-replies/1.json').messages.length,0);

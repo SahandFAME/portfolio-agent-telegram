@@ -73,7 +73,7 @@ async function app({readError=false, env={}}={}) {
 
 
 
-const buttons=[['وضعیت','/status'],['دارایی‌ها','/assets'],['طلا و سایر فلزات گرانبها','/gold_and_other_precious_metals'],['رمزارز','/crypto'],['دلار نقدی','/cash_dollar'],['آخرین تخصیص دارایی','/latest_allocation'],['راهنما','/help']];
+const buttons=[['وضعیت','/status'],['دارایی‌ها','/assets'],['طلا و سایر فلزات گرانبها','/gold_and_other_precious_metals'],['رمزارز','/crypto'],['دلار نقدی','/cash_dollar'],['آخرین ترکیب دارایی','/latest_allocation'],['نمودار ترکیب دارایی','/allocation_chart'],['راهنما','/help']];
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const message=(text,id=1,type='private')=>({message:{chat:{id,type},from:{id},text}});
 
@@ -97,6 +97,8 @@ for(const command of ['/start','/help','/menu']) test(`${command} exposes the re
   const a=await app();await a.request('POST',{},message(command),header);
   const reply=JSON.parse(a.sends[0].options.body);
   assert.ok(reply.reply_markup.keyboard.length===5);assert.match(reply.text,/دکمه‌های منو/);
+  assert.ok(reply.text.includes('/cash_dollar — Cash Dollar (دلار نقدی)\n\nبلک راک صندوق خصوصی EcoCoach است.'));
+  assert.equal(reply.text.includes('\\n'),false);
 });
 
 test('menu selections do not bypass private-chat or user access controls',async()=>{
