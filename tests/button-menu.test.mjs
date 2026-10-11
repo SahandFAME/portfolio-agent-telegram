@@ -97,7 +97,8 @@ for(const command of ['/start','/help','/menu']) test(`${command} exposes the re
   const a=await app();await a.request('POST',{},message(command),header);
   const reply=JSON.parse(a.sends[0].options.body);
   assert.ok(reply.reply_markup.keyboard.length===5);assert.match(reply.text,/دکمه‌های منو/);
-  assert.ok(reply.text.includes('/cash_dollar — Cash Dollar (دلار نقدی)\n\nبلک راک صندوق خصوصی EcoCoach است.'));
+  assert.ok(reply.text.includes('/cash_dollar — Cash Dollar (دلار نقدی)\n\nبرای تهیه گزارش ارزش‌گذاری'));
+  assert.ok(reply.text.includes('بلک راک* (EcoCoach)'));
   assert.equal(reply.text.includes('\\n'),false);
 });
 

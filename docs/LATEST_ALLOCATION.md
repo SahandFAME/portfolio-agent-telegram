@@ -73,6 +73,23 @@ the renderer does not need runtime font downloads or system fonts. Telegram's
 ordinary text messages use the client-selected font; the Estedad setting applies
 to generated images.
 
+### Asset comments and footnotes (2026-10-11)
+
+Display labels for assets with comments carry `*`; canonical asset names remain
+unchanged in snapshots, price mappings and arithmetic. The four existing comments
+cover بلک راک (EcoCoach), the receivable and Zarbod gold, and historical cash-dollar
+purchases. Historical comments are transcribed from the handoff and never used
+as current prices or quantity updates.
+
+The assets list and category valuations end with only their related comments.
+Detailed text ends with its asset footnotes before the separate group-percentage
+message. Pictured tables include all their relevant comments in an expanded,
+wrapped footer; its EcoCoach explanation is entirely Persian to avoid mixed
+English/Persian bidirectional ordering. The composition chart carries the full
+portfolio's notes in its plain-text photo caption. Image height grows to fit
+the footnotes, while the chart remains 1600×1160. Prices, stored quantities,
+on-demand sync, user access checks and report precision are unchanged.
+
 The six manual holdings stay separate and unchanged. The workbook is never
 saved, edited or uploaded. No credentials, quantities, prices or chat IDs are
 printed by the sync worker. Workbook total validation is fail-closed.
