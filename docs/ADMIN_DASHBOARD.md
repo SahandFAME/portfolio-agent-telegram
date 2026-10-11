@@ -3,6 +3,14 @@
 In the owner's private bot chat, send `/start` to refresh the keyboard, then
 choose **پنل مدیریت**. `/admin` also opens it. All dashboard text is Persian.
 
+Panel screens, page navigation, confirmation prompts and storage-test results
+are temporary. A successfully delivered next reply removes the preceding panel
+screen; failed delivery leaves it usable. Clicking an existing bot-owned panel
+also retires that screen after replacement, including panels created before this
+cleanup feature. Unanswered access-request notifications are excluded from panel
+cleanup; clicking their approval/rejection buttons replaces that notification.
+Telegram's 48-hour deletion limit still applies to old messages.
+
 | Control | Function |
 |---|---|
 | کاربران مجاز | Paginated user list, names/IDs/roles, access revocation with confirmation |

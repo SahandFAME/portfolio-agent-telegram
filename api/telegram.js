@@ -384,7 +384,7 @@ async function requestAccess(uid,user){
   const display=[user.first_name,user.last_name].filter(Boolean).join(" ")||"Telegram user";
   const who=display+(user.username?" (@"+user.username+")":"")+"\nUser ID: "+uid;
   for(const adminId of adminIds){
-    await sendTelegramWithKeyboard(adminId,"New portfolio bot access request\n\n"+who,[[{text:"Approve",callback_data:"access:approve:"+uid},{text:"Reject",callback_data:"access:reject:"+uid}]]);
+    await sendTelegramWithKeyboard(adminId,"New portfolio bot access request\n\n"+who,[[{text:"Approve",callback_data:"access:approve:"+uid},{text:"Reject",callback_data:"access:reject:"+uid}]],{temporary:false});
   }
   return "Your access request has been sent to the bot admin. You will receive a message when it is reviewed.";
 }
@@ -396,19 +396,20 @@ async function handleAccessCallback(callback){
     const state=await loadAccessState({strict:true});
     if(!isBotAdmin(uid,state)){await answerCallback(callback.id,"دسترسی مدیریت ندارید.");return;}
     const data=String(callback.data||"");
+    const previousPanel=callbackPanelToReplace(callback);
     const legacy=data.match(/^access:(approve|reject):([1-9]\d*)$/);
     if(legacy){
       if(!state.pending[legacy[2]]){await answerCallback(callback.id,"این درخواست دیگر در انتظار نیست.");return;}
       await changeAccess(uid,legacy[2],legacy[1],state);changed=true;
-      await answerCallback(callback.id,"انجام شد.");await showAdminDashboard(chat.id,uid);return;
+      await answerCallback(callback.id,"انجام شد.");await showAdminDashboard(chat.id,uid,"home",0,previousPanel);return;
     }
     if(data==="admin:storage_check"){
       await answerCallback(callback.id,"");const result=await verifyAccessStorage();
       await sendTelegramWithKeyboard(chat.id,result.ok?"آزمون ذخیره‌سازی موفق بود: ثبت، بازخوانی و جلوگیری از بازنویسی هم‌زمان تأیید شد.":
-        "آزمون ذخیره‌سازی موفق نبود. هیچ مجوز کاربری یا اطلاعات پرتفوی تغییر نکرد.",[adminBack()]);return;
+        "آزمون ذخیره‌سازی موفق نبود. هیچ مجوز کاربری یا اطلاعات پرتفوی تغییر نکرد.",[adminBack()],{previousPanel});return;
     }
     const page=data.match(/^admin:(home|users|pending|admins|status|audit)(?::(\d+))?$/);
-    if(page){await answerCallback(callback.id,"");await showAdminDashboard(chat.id,uid,page[1],Number(page[2]||0));return;}
+    if(page){await answerCallback(callback.id,"");await showAdminDashboard(chat.id,uid,page[1],Number(page[2]||0),previousPanel);return;}
     const action=data.match(/^admin:(approve|reject|revoke|confirm_revoke|grant|demote):([1-9]\d*)$/);
     if(!action){await answerCallback(callback.id,"گزینه نامعتبر.");return;}
     const [_,operation,target]=action;
@@ -418,10 +419,10 @@ async function handleAccessCallback(callback){
       await answerCallback(callback.id,"");
       await sendTelegramWithKeyboard(chat.id,"دسترسی کاربر "+target+" به پرتفوی لغو شود؟",[
         [{text:"بله، لغو دسترسی",callback_data:"admin:confirm_revoke:"+target}],
-        [{text:"انصراف",callback_data:"admin:users:0"}]]);return;
+        [{text:"انصراف",callback_data:"admin:users:0"}]],{previousPanel});return;
     }
     await changeAccess(uid,target,operation==="confirm_revoke"?"revoke":operation,state);changed=true;
-    await answerCallback(callback.id,"انجام شد.");await showAdminDashboard(chat.id,uid);
+    await answerCallback(callback.id,"انجام شد.");await showAdminDashboard(chat.id,uid,"home",0,previousPanel);
   }catch(_){await answerCallback(callback.id,changed?"تغییر ثبت شد. برای نمایش وضعیت جدید، پنل را دوباره باز کنید.":
     "عملیات انجام نشد. مجوزها یا وضعیت تغییر کرده است؛ پنل را دوباره باز کنید.");}
 }
@@ -432,7 +433,7 @@ async function handleAdminAccessCommand(chatId,command,uid){
     if(!isBotAdmin(uid,state)){await sendTelegram(chatId,"دسترسی مدیریت ندارید.",{
       menu:state.approved.includes(uid),removeMenu:!state.approved.includes(uid)});return;}
     if(/^\/admin(?:@\w+)?$/.test(command)){
-      await sendTelegram(chatId,"پنل مدیریت",{menu:true});await showAdminDashboard(chatId,uid);return;
+      await sendTelegram(chatId,"پنل مدیریت",{menu:true,temporary:true});await showAdminDashboard(chatId,uid);return;
     }
     if(/^\/users(?:@\w+)?$/.test(command)){await showAdminDashboard(chatId,uid,"users");return;}
     const action=command.match(/^\/(approve|revoke)(?:@\w+)?\s+([1-9]\d*)$/);
@@ -495,7 +496,7 @@ async function memberLabel(id,state){
 }
 const ADMIN_PAGE_SIZE=8;
 const adminBack=()=>[{text:"بازگشت به پنل",callback_data:"admin:home"}];
-async function showAdminDashboard(chatId,uid,section="home",page=0){
+async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel=null){
   const state=await loadAccessState({strict:true});
   if(!isBotAdmin(uid,state))throw new Error("admin_permission_required");
   const owner=isOwner(uid);
@@ -506,7 +507,7 @@ async function showAdminDashboard(chatId,uid,section="home",page=0){
     await sendTelegramWithKeyboard(chatId,"پنل مدیریت • "+(owner?"مالک":"مدیر منتخب")+
       "\n\nکاربران مجاز: "+new Set([...state.approved,...adminUserIds()]).size+
       "\nدرخواست‌های در انتظار: "+Object.keys(state.pending).length+
-      "\nمدیران منتخب: "+state.delegatedAdmins.length,buttons);return;
+      "\nمدیران منتخب: "+state.delegatedAdmins.length,buttons,{previousPanel});return;
   }
   if(section==="status"){
     const snapshot=await safeSnapshot(),status=quantitySnapshotStatus(snapshot);
@@ -524,14 +525,14 @@ async function showAdminDashboard(chatId,uid,section="home",page=0){
       "\nاحراز هویت وب‌هوک: "+(process.env.TELEGRAM_WEBHOOK_SECRET?"پیکربندی شده":"پیکربندی نشده")+
       "\nدرخواست آخر شما: "+(queued?"در حال دریافت":expired?"منقضی شده؛ دوباره درخواست دهید":job?.status==="failed"?"ناموفق":job?.status==="completed"?"پاسخ همگام‌سازی دریافت شده":"درخواستی ثبت نشده")+
       "\n\nوضعیت قیمت‌های بازار هنگام درخواست هر گزارش بررسی می‌شود.",[
-      [{text:"بررسی دوباره",callback_data:"admin:status"},{text:"آزمون ذخیره‌سازی",callback_data:"admin:storage_check"}],adminBack()]);return;
+      [{text:"بررسی دوباره",callback_data:"admin:status"},{text:"آزمون ذخیره‌سازی",callback_data:"admin:storage_check"}],adminBack()],{previousPanel});return;
   }
   if(section==="audit"){
     const labels={approve:"تأیید دسترسی",reject:"رد درخواست",revoke:"لغو دسترسی",grant:"افزودن مدیر",demote:"حذف نقش مدیر"};
     const lines=state.audit.slice(-10).reverse().map(event=>
       new Date(event.at).toLocaleString("fa-IR",{timeZone:"Asia/Tehran"})+" • "+(labels[event.action]||"تغییر دسترسی")+
       "\nکاربر: "+event.target_id+" • مدیر: "+event.actor_id);
-    await sendTelegramWithKeyboard(chatId,"آخرین رویدادهای مدیریت (تهران)\n\n"+(lines.join("\n\n")||"رویدادی ثبت نشده است."),[adminBack()]);return;
+    await sendTelegramWithKeyboard(chatId,"آخرین رویدادهای مدیریت (تهران)\n\n"+(lines.join("\n\n")||"رویدادی ثبت نشده است."),[adminBack()],{previousPanel});return;
   }
   if(section==="admins"&&!owner)throw new Error("owner_permission_required");
   const ids=section==="pending"?Object.keys(state.pending):section==="admins"?state.approved.filter(id=>!isOwner(id)):
@@ -554,11 +555,29 @@ async function showAdminDashboard(chatId,uid,section="home",page=0){
   if(navigation.length)keyboard.push(navigation);
   keyboard.push(adminBack());
   await sendTelegramWithKeyboard(chatId,title+"\nصفحه "+(page+1)+"\n\n"+(lines.join("\n\n")||"موردی وجود ندارد.")+
-    (section==="admins"?"\n\nحذف نقش مدیر، دسترسی عادی کاربر را حفظ می‌کند.":""),keyboard);
+    (section==="admins"?"\n\nحذف نقش مدیر، دسترسی عادی کاربر را حفظ می‌کند.":""),keyboard,{previousPanel});
 }
-async function sendTelegramWithKeyboard(chatId,text,inlineKeyboard){
+function callbackPanelToReplace(callback){
+  const message=callback.message;
+  const botId=String(process.env.TELEGRAM_BOT_TOKEN||"").split(":")[0];
+  if(!message?.from?.is_bot||String(message.from.id)!==botId||
+    !Number.isSafeInteger(message.message_id)||message.message_id<=0||
+    !message.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data===callback.data))return null;
+  return {message_id:message.message_id,created_at:message.date?
+    new Date(message.date*1000).toISOString():new Date().toISOString()};
+}
+async function sendTelegramWithKeyboard(chatId,text,inlineKeyboard,{temporary=true,previousPanel=null}={}){
   if(!isBotAdmin(String(chatId),await loadAccessState()))return false;
-  return deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,reply_markup:{inline_keyboard:inlineKeyboard}})});
+  if(previousPanel){
+    try{
+      const key=TEMPORARY_REPLY_PREFIX+chatId+".json";
+      const state=await readPrivateJson(key)||{lastDeliveredId:0,messages:[]};
+      if(!state.messages.some(item=>item.message_id===previousPanel.message_id)){
+        state.messages.push(previousPanel);await writePrivateJson(key,state);
+      }
+    }catch(_){console.warn("Previous admin panel tracking unavailable");}
+  }
+  return deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,reply_markup:{inline_keyboard:inlineKeyboard}})},{temporary});
 }
 async function answerCallback(callbackId,text){
   const token=process.env.TELEGRAM_BOT_TOKEN;if(!token)return;
