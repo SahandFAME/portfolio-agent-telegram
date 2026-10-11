@@ -7,7 +7,7 @@ async function report(a,text='/assets',id=1){
   await a.request('POST',{}, {message:{chat:{id,type:'private'},from:{id},text}},headers);
   return a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body)).at(-1);
 }
-const names=text=>[...text.matchAll(/^\d+\. (.*?): /gm)].map(x=>x[1]);
+const names=text=>[...text.matchAll(/^\d+\. (.*?): /gm)].map(x=>x[1].replace(/\*$/,''));
 
 test('assets report groups all 29 holdings exactly once using allocation categories',async()=>{
   const a=await app();a.store.set('portfolio/latest.json',a.payload);
@@ -30,9 +30,9 @@ test('assets report groups all 29 holdings exactly once using allocation categor
   assert.deepEqual(names(group('رمزارزها')),['BTC','ETH','Link','ADA','SOL','ONDO']);
   assert.deepEqual(names(group('تتر')),['Tether']);
   assert.deepEqual(names(group('دلار')),['دلار']);
-  assert.ok(text.endsWith('Snapshot: '+a.ns.boldPortfolioTime(a.payload.updated_at)));
+  assert.ok(text.includes('Snapshot: '+a.ns.boldPortfolioTime(a.payload.updated_at)));
   for(const [asset,quantity] of Object.entries({...a.assets,...a.ns.MANUAL})){
-    assert.ok(text.includes(asset+': '+Number(quantity).toLocaleString('en-US',{maximumFractionDigits:8})),asset);
+    assert.ok(text.includes(a.ns.assetLabel(asset)+': '+Number(quantity).toLocaleString('en-US',{maximumFractionDigits:8})),asset);
   }
   assert.equal(JSON.stringify(a.store.get('portfolio/latest.json')),before);
   assert.equal(a.marketCalls.length,0);assert.equal(a.dispatches.length,0);
@@ -43,7 +43,7 @@ test('missing snapshot keeps categories and manual quantities without turning mi
   const a=await app();const {text}=await report(a);
   assert.equal(names(text).length,29);
   assert.equal((text.match(/همگام‌سازی نشده/g)||[]).length,23);
-  assert.ok(text.includes('سکه تمام: 3'));assert.ok(text.includes('آبشده (طلب): 1.37'));
+  assert.ok(text.includes('سکه تمام: 3'));assert.ok(text.includes('آبشده (طلب)*: 1.37'));
   assert.equal(text.includes('Snapshot:'),false);
 });
 

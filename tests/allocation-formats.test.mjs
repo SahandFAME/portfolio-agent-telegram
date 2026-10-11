@@ -41,7 +41,8 @@ test('text choice survives the EcoCoach prompt and refreshes quantities again be
   const details=messages(a).filter(x=>/گزارش تفصیلی|ادامه گزارش/.test(x.text));
   assert.ok(details.length>=1);assert.ok(details.every(x=>x.text.length<=3500&&x.parse_mode==='HTML'));
   const full=details.map(x=>x.text).join('\n');
-  for(const asset of a.ns.ASSETS){assert.equal(full.split('<b>'+asset+'</b>').length-1,1,asset);}
+  const listed=[...full.matchAll(/^[۰-۹]+\. <b>([^<]+)<\/b>$/gm)].map(match=>match[1].replace(/\*$/,''));
+  assert.deepEqual(listed,[...a.ns.ASSETS]);
   assert.equal((full.match(/مقدار:/g)||[]).length,29);assert.equal((full.match(/گروه:/g)||[]).length,29);
   assert.equal((full.match(/ارزش: <b>/g)||[]).length,29);
   const percentages=messages(a).at(-1);assert.ok(percentages.text.startsWith('<b>درصد گروه‌های دارایی</b>'));
