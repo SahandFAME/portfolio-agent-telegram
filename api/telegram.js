@@ -1443,10 +1443,11 @@ function quantitySnapshotStatus(snapshot){
 }
 
 const BUTTON_MENU=[
+  [{text:"آخرین ترکیب دارایی",command:"/latest_allocation"}],
   [{text:"وضعیت",command:"/status"},{text:"دارایی‌ها",command:"/assets"}],
   [{text:"طلا و سایر فلزات گرانبها",command:"/gold_and_other_precious_metals"},{text:"رمزارز",command:"/crypto"}],
-  [{text:"دلار نقدی",command:"/cash_dollar"},{text:"آخرین ترکیب دارایی",command:"/latest_allocation"}],
-  [{text:"نمودار ترکیب دارایی",command:"/allocation_chart"},{text:"راهنما",command:"/help"}]
+  [{text:"دلار نقدی",command:"/cash_dollar"},{text:"نمودار ترکیب دارایی",command:"/allocation_chart"}],
+  [{text:"راهنما",command:"/help"}]
 ];
 const MENU_COMMANDS=new Map([...BUTTON_MENU.flat().map(button=>[button.text,button.command]),
   ["پنل مدیریت","/admin"],
@@ -1459,7 +1460,7 @@ async function portfolioKeyboard(chatId){
   const keyboard=BUTTON_MENU.map(row=>row.map(button=>({text:button.text})));
   const state=await loadAccessState();
   if(!isOwner(String(chatId))&&!state.approved.includes(String(chatId)))return null;
-  if(isBotAdmin(String(chatId),state))keyboard.push([{text:"پنل مدیریت"}]);
+  if(isBotAdmin(String(chatId),state))keyboard.at(-1).push({text:"پنل مدیریت"});
   return {keyboard,
     resize_keyboard:true,is_persistent:false,one_time_keyboard:false,
     input_field_placeholder:"یک گزینه انتخاب کنید یا قیمت "+assetLabel("بلک راک")+" را وارد کنید"};
