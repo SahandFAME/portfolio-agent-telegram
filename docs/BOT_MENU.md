@@ -71,13 +71,14 @@ or percentages.
 The pictured report is Persian, with right-to-left table columns, Persian
 digits, translated headings/units and the existing bold Solar Hijri/Tehran
 timestamps. Standard crypto symbols and price-provider names retain their
-recognized names. Bundled DejaVu regular/bold fonts support Persian shaping in
+recognized names. Bundled Estedad regular/bold fonts support Persian shaping in
 the serverless renderer; no host font installation or new service is needed.
 
 **نمودار ترکیب دارایی** independently refreshes quantities and prices and
 requests EcoCoach input through the same flow, then delivers a Persian 3D-style
 pie chart. Its slice angles and percentage labels come from the complete current
-toman valuation. It uses the same six categories/colors as the pictured report,
+toman valuation. It uses the same six categories as the pictured report, with
+the owner's navy style B palette, rounded edges and slice-connected callouts;
 shows zero categories as 0% without drawing zero-size slices, and includes the
 price and quantity-sync timestamps. Percentages are rounded to two decimal
 places. No chart values are copied from the owner's reference image.

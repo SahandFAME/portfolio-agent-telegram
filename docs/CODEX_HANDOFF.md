@@ -8,6 +8,12 @@
 **ChatGPT project:** Portfolio Agent  
 **Status:** Source, bot, authenticated sync and snapshot readback verified; a daily external automation has been scheduled, but its first recurring run and a fresh end-to-end Telegram /status exchange are **not** independently verified.
 
+**Presentation update, 2026-10-11:** the owner selected Estedad for generated
+images and navy style B for the rounded 3D composition chart, with each positive
+group connected to its slice by a leader line. Current implementation and
+bundled font/deployment details are documented in [LATEST_ALLOCATION.md](LATEST_ALLOCATION.md).
+The original command/rendering descriptions below preserve the Oct 10 handoff.
+
 This document reconstructs the work that can be established from project instructions, historical conversation summaries, the live GitHub source, Vercel inspection, and a 2026-10-10 OneDrive workbook read. It does **not** claim to be a verbatim transcript of every historic chat or a backup of private service credentials. When history and current source differ, current source and live checks take precedence, with the discrepancy noted.
 
 ## 1. Mission
