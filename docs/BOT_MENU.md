@@ -26,6 +26,11 @@ the report button keyboard. It also accompanies subsequent report replies
 and images. If Telegram hides the keyboard, use the keyboard icon beside its
 message field to reopen it.
 
+**آخرین ترکیب دارایی** occupies the first row by itself as a wide primary
+button. Other reports use two-button rows. For the owner and approved delegated
+admins, **پنل مدیریت** shares the last row with **راهنما**, giving it the same
+width as the regular buttons. Ordinary approved users see no admin button.
+
 The menu stays reusable after a selection (`one_time_keyboard: false`), while
 `is_persistent: false` permits normal dismissal instead of asking Telegram to
 keep it open. Phone Back and chat re-entry behavior are controlled by Telegram;
@@ -39,12 +44,12 @@ financial reports and user messages are never removed as menu replacements.
 
 | Button | Existing command |
 |---|---|
+| آخرین ترکیب دارایی (ردیف اول، تمام‌عرض) | `/latest_allocation` |
 | وضعیت | `/status` |
 | دارایی‌ها | `/assets` |
 | طلا و سایر فلزات گرانبها | `/gold_and_other_precious_metals` |
 | رمزارز | `/crypto` |
 | دلار نقدی | `/cash_dollar` (Cash Dollar) |
-| آخرین ترکیب دارایی | `/latest_allocation` |
 | نمودار ترکیب دارایی | `/allocation_chart` |
 | راهنما | `/help` |
 | پنل مدیریت (مالک و مدیران منتخب) | `/admin` |

@@ -18,9 +18,14 @@ async function click(a,data,id=1){return a.request('POST',{},callback(data,id),h
 test('dashboard button appears only for the owner and currently approved chosen admins',async()=>{
   for(const [id,visible] of [[1,true],[2,false],[3,true]]){
     const a=await fixture();await a.request('POST',{},message('/start',id),header);
-    const keyboard=bodies(a).find(x=>x.chat_id===id).reply_markup.keyboard.flat().map(x=>x.text);
+    const rows=bodies(a).find(x=>x.chat_id===id).reply_markup.keyboard;
+    const keyboard=rows.flat().map(x=>x.text);
     assert.equal(keyboard.includes('پنل مدیریت'),visible);
     assert.ok(keyboard.includes('آخرین ترکیب دارایی'));
+    assert.deepEqual(rows[0],[{text:'آخرین ترکیب دارایی'}]);
+    assert.equal(rows.at(-1).length,visible?2:1);
+    assert.equal(rows.at(-1)[0].text,'راهنما');
+    assert.equal(keyboard.filter(label=>label==='آخرین ترکیب دارایی').length,1);
   }
 });
 
