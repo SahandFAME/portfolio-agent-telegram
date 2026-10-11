@@ -22,6 +22,12 @@ same private-chat access checks and quantity freshness checks as commands.
 When asked for an EcoCoach price, type the current price in the message field;
 other menu selections continue to work while that request is pending.
 
+Progress notices and EcoCoach price prompts are temporary. After the next text
+reply or report image is confirmed delivered, the bot deletes the old notice.
+Failed delivery preserves it; report messages, images and user input remain.
+Only bot-created IDs are stored privately. Telegram cannot delete messages older
+than 48 hours; temporary deletion errors are retried on a later successful reply.
+
 The image table displays ETH quantities to three decimal places and BTC to four.
 Only presentation is rounded; stored quantities and valuation arithmetic retain
 full precision. Both 18K gold gram holdings use the live TGJU `geram18` quote.
