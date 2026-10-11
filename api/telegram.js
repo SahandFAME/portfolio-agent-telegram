@@ -1,4 +1,4 @@
-import { put, get } from "@vercel/blob";
+import { put, get, BlobPreconditionFailedError } from "@vercel/blob";
 import { waitUntil } from "@vercel/functions";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
@@ -34,10 +34,15 @@ export default async function handler(req,res){
   if(req.method==="GET"){
     if(req.query?.setup==="webhook") return setup(req,res);
     if(req.query?.data==="portfolio") return readSnapshot(req,res);
+    if(req.query?.data==="access-health") return readAccessHealth(req,res);
     return res.status(200).json({ok:true,service:"Portfolio Agent Telegram Bot"});
   }
   if(req.method==="POST" && req.query?.sync==="portfolio") return sync(req,res);
   if(req.method==="POST" && req.query?.complete==="latest-allocation") return completeLatestAllocation(req,res);
+  if(req.method==="POST" && req.query?.verify==="access-storage"){
+    if(!syncAuth(req))return res.status(401).json({ok:false});
+    const result=await verifyAccessStorage();return res.status(result.ok?200:503).json(result);
+  }
   if(req.method==="POST") return telegram(req,res);
   return res.status(405).json({ok:false,error:"Method not allowed"});
 }
@@ -91,8 +96,41 @@ async function loadSnapshot(){
 
 async function readSnapshot(req,res){
   if(!syncAuth(req))return res.status(401).json({ok:false,error:"Unauthorized"});
-  try{const snapshot=await loadSnapshot();if(!snapshot)return res.status(404).json({ok:false,error:"No portfolio snapshot available"});return res.status(200).json({ok:true,snapshot,latest_allocation_configured:!!process.env.GITHUB_ACTIONS_TOKEN});}
+  try{const snapshot=await loadSnapshot();if(!snapshot)return res.status(404).json({ok:false,error:"No portfolio snapshot available"});return res.status(200).json({ok:true,snapshot,latest_allocation_configured:!!process.env.GITHUB_ACTIONS_TOKEN,admin_dashboard_configured:adminUserIds().length>0});}
   catch(e){console.error(e);return res.status(404).json({ok:false,error:"No portfolio snapshot available"});}
+}
+async function readAccessHealth(req,res){
+  if(!syncAuth(req))return res.status(401).json({ok:false});
+  try{
+    const state=await loadAccessState({strict:true});
+    return res.status(200).json({ok:true,owner_count:adminUserIds().length,
+      approved_count:state.approved.length,pending_count:Object.keys(state.pending).length,
+      delegated_admin_count:state.delegatedAdmins.length,audit_count:state.audit.length,
+      conditional_updates_ready:!state._exists||!!state._etag});
+  }catch(_){return res.status(503).json({ok:false,error:"Access storage unavailable"});}
+}
+async function verifyAccessStorage(){
+  // Exercise conditional writes on a separate private canary, never on user
+  // permissions or portfolio data. The same small path is reused each time.
+  const key="portfolio/diagnostics/access-storage.json",id=crypto.randomUUID();
+  try{
+    await writePrivateJson(key,{check_id:id,stage:1});
+    const initial=await get(key,{access:"private",useCache:false});
+    const etag=initial?.blob?.etag;
+    await initial?.stream?.cancel();
+    if(!etag)throw new Error("missing_etag");
+    const options={access:"private",addRandomSuffix:false,contentType:"application/json",ifMatch:etag};
+    await put(key,JSON.stringify({check_id:id,stage:2}),options);
+    const readback=await readPrivateJson(key);
+    if(readback?.check_id!==id||readback.stage!==2)throw new Error("canary_readback_failed");
+    try{
+      await put(key,JSON.stringify({check_id:id,stage:3}),options);
+      return {ok:false,conditional_writes_verified:false};
+    }catch(error){
+      if(!(error instanceof BlobPreconditionFailedError))throw new Error("unexpected_canary_error");
+    }
+    return {ok:true,conditional_writes_verified:true};
+  }catch(_){return {ok:false,conditional_writes_verified:false};}
 }
 
 async function loadPendingBlackRock(chatId){
@@ -133,17 +171,19 @@ async function telegram(req,res){
   const adminIds=adminUserIds();
   const state=await loadAccessState();
   const approved=new Set([...(state.approved||[]).map(String),...adminIds]);
-  const isAdmin=adminIds.includes(uid);
-  if(isAdmin&&(/^\/users(?:@\w+)?$/.test(command)||/^\/revoke(?:@\w+)?\s+\d+$/.test(command)||/^\/approve(?:@\w+)?\s+\d+$/.test(command))){
-    waitUntil(handleAdminAccessCommand(message.chat.id,command,state,adminIds));
+  const isAdmin=isBotAdmin(uid,state);
+  if(/^\/admin(?:@\w+)?$/.test(command)||(isAdmin&&(/^\/users(?:@\w+)?$/.test(command)||/^\/revoke(?:@\w+)?\s+\d+$/.test(command)||/^\/approve(?:@\w+)?\s+\d+$/.test(command)))){
+    waitUntil(handleAdminAccessCommand(message.chat.id,command,uid));
     return res.status(200).json({ok:true});
   }
   if(!approved.has(uid)){
     if(/^\/(start|request|help)(?:@\w+)?$/.test(command)){
-      const result=await requestAccess(uid,message.from,adminIds,state);
-      waitUntil(sendTelegram(message.chat.id,result));
+      let result;
+      try{result=await requestAccess(uid,message.from);}
+      catch(_){result="ثبت درخواست دسترسی فعلاً ممکن نیست. لطفاً دوباره تلاش کنید.";}
+      waitUntil(sendTelegram(message.chat.id,result,{removeMenu:true}));
     }else{
-      waitUntil(sendTelegram(message.chat.id,"This bot is private. Send /start to request access."));
+      waitUntil(sendTelegram(message.chat.id,"This bot is private. Send /start to request access.",{removeMenu:true}));
     }
     return res.status(200).json({ok:true});
   }
@@ -299,22 +339,42 @@ async function fetchText(url){
 
 
 function adminUserIds(){
-  return [...new Set(String(process.env.TELEGRAM_ADMIN_USER_IDS||"").split(/[\s,]+/).map(x=>x.trim()).filter(x=>/^\d+$/.test(x)))];
+  return [...new Set(String(process.env.TELEGRAM_ADMIN_USER_IDS||"").split(/[\s,]+/).map(x=>x.trim()).filter(x=>/^[1-9]\d*$/.test(x)&&Number.isSafeInteger(Number(x))))];
 }
-async function loadAccessState(){
+function isOwner(uid){return adminUserIds().includes(String(uid));}
+function isBotAdmin(uid,state){
+  uid=String(uid);
+  return isOwner(uid)||((state.approved||[]).includes(uid)&&(state.delegatedAdmins||[]).includes(uid));
+}
+function emptyAccessState(){return {approved:[],pending:{},delegatedAdmins:[],users:{},audit:[]};}
+async function loadAccessState({strict=false}={}){
   try{
     const r=await get(ACCESS_STATE,{access:"private",useCache:false});
-    if(!r)return {approved:[],pending:{}};
+    if(!r)return emptyAccessState();
     const reader=r.stream.getReader(),chunks=[];
     while(true){const x=await reader.read();if(x.done)break;chunks.push(Buffer.from(x.value));}
-    const state=JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    return {approved:Array.isArray(state.approved)?state.approved.map(String):[],pending:state.pending&&typeof state.pending==="object"?state.pending:{}};
-  }catch(e){return {approved:[],pending:{}};}
+    const raw=JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if(!raw||!Array.isArray(raw.approved)||!raw.pending||typeof raw.pending!=="object"||Array.isArray(raw.pending))throw new Error("invalid_access_state");
+    const approved=[...new Set(raw.approved.map(String).filter(x=>/^[1-9]\d*$/.test(x)&&Number.isSafeInteger(Number(x))))];
+    const state={approved,pending:raw.pending,
+      delegatedAdmins:[...new Set((Array.isArray(raw.delegatedAdmins)?raw.delegatedAdmins:[]).map(String))].filter(x=>approved.includes(x)&&!isOwner(x)),
+      users:raw.users&&typeof raw.users==="object"&&!Array.isArray(raw.users)?raw.users:{},
+      audit:Array.isArray(raw.audit)?raw.audit.slice(-100):[]};
+    Object.defineProperties(state,{_etag:{value:r.blob?.etag},_exists:{value:true}});
+    return state;
+  }catch(_){
+    if(strict)throw new Error("access_state_unavailable");
+    const state=emptyAccessState();Object.defineProperty(state,"_unavailable",{value:true});return state;
+  }
 }
 async function saveAccessState(state){
-  await put(ACCESS_STATE,JSON.stringify(state,null,2),{access:"private",addRandomSuffix:false,allowOverwrite:true,contentType:"application/json"});
+  if(state._unavailable||(state._exists&&!state._etag))throw new Error("access_state_unavailable");
+  await put(ACCESS_STATE,JSON.stringify(state,null,2),{access:"private",addRandomSuffix:false,
+    ...(state._etag?{ifMatch:state._etag}:{allowOverwrite:false}),contentType:"application/json"});
 }
-async function requestAccess(uid,user,adminIds,state){
+async function requestAccess(uid,user){
+  const state=await loadAccessState({strict:true});
+  const adminIds=[...new Set([...adminUserIds(),...state.delegatedAdmins])];
   if(!adminIds.length)return "Access requests are not configured yet. Your Telegram user ID is "+uid+". Ask the bot owner to configure admin access.";
   if((state.approved||[]).map(String).includes(uid)||adminIds.includes(uid))return "You are already authorised. Send /help to see available commands.";
   state.pending=state.pending||{};
@@ -329,55 +389,181 @@ async function requestAccess(uid,user,adminIds,state){
   return "Your access request has been sent to the bot admin. You will receive a message when it is reviewed.";
 }
 async function handleAccessCallback(callback){
-  const m=String(callback.data||"").match(/^access:(approve|reject):(\d+)$/);
-  const uid=String(callback.from?.id||"");
-  if(!m||!adminUserIds().includes(uid)){await answerCallback(callback.id,"Not authorised.");return;}
-  const state=await loadAccessState(),target=m[2],action=m[1],request=state.pending?.[target];
-  if(!request){await answerCallback(callback.id,"Request no longer pending.");return;}
-  if(action==="approve"){
-    state.approved=[...new Set([...(state.approved||[]).map(String),target])];
-    delete state.pending[target];await saveAccessState(state);
-    await answerCallback(callback.id,"User approved.");
-    await sendTelegram(callback.message.chat.id,"Approved user ID "+target+".");
-    await sendTelegram(Number(target),"Your access request was approved. Send /help to see available commands.");
-  }else{
-    delete state.pending[target];await saveAccessState(state);
-    await answerCallback(callback.id,"Request rejected.");
-    await sendTelegram(callback.message.chat.id,"Rejected user ID "+target+".");
-    await sendTelegram(Number(target),"Your access request was rejected.");
-  }
+  const uid=String(callback.from?.id||""),chat=callback.message?.chat;
+  if(chat?.type!=="private"||String(chat.id)!==uid){await answerCallback(callback.id,"دسترسی غیرمجاز.");return;}
+  let changed=false;
+  try{
+    const state=await loadAccessState({strict:true});
+    if(!isBotAdmin(uid,state)){await answerCallback(callback.id,"دسترسی مدیریت ندارید.");return;}
+    const data=String(callback.data||"");
+    const legacy=data.match(/^access:(approve|reject):([1-9]\d*)$/);
+    if(legacy){
+      if(!state.pending[legacy[2]]){await answerCallback(callback.id,"این درخواست دیگر در انتظار نیست.");return;}
+      await changeAccess(uid,legacy[2],legacy[1],state);changed=true;
+      await answerCallback(callback.id,"انجام شد.");await showAdminDashboard(chat.id,uid);return;
+    }
+    if(data==="admin:storage_check"){
+      await answerCallback(callback.id,"");const result=await verifyAccessStorage();
+      await sendTelegramWithKeyboard(chat.id,result.ok?"آزمون ذخیره‌سازی موفق بود: ثبت، بازخوانی و جلوگیری از بازنویسی هم‌زمان تأیید شد.":
+        "آزمون ذخیره‌سازی موفق نبود. هیچ مجوز کاربری یا اطلاعات پرتفوی تغییر نکرد.",[adminBack()]);return;
+    }
+    const page=data.match(/^admin:(home|users|pending|admins|status|audit)(?::(\d+))?$/);
+    if(page){await answerCallback(callback.id,"");await showAdminDashboard(chat.id,uid,page[1],Number(page[2]||0));return;}
+    const action=data.match(/^admin:(approve|reject|revoke|confirm_revoke|grant|demote):([1-9]\d*)$/);
+    if(!action){await answerCallback(callback.id,"گزینه نامعتبر.");return;}
+    const [_,operation,target]=action;
+    if((operation==="approve"||operation==="reject")&&!state.pending[target])throw new Error("request_not_pending");
+    if(operation==="revoke"){
+      validateAccessChange(uid,target,"revoke",state);
+      await answerCallback(callback.id,"");
+      await sendTelegramWithKeyboard(chat.id,"دسترسی کاربر "+target+" به پرتفوی لغو شود؟",[
+        [{text:"بله، لغو دسترسی",callback_data:"admin:confirm_revoke:"+target}],
+        [{text:"انصراف",callback_data:"admin:users:0"}]]);return;
+    }
+    await changeAccess(uid,target,operation==="confirm_revoke"?"revoke":operation,state);changed=true;
+    await answerCallback(callback.id,"انجام شد.");await showAdminDashboard(chat.id,uid);
+  }catch(_){await answerCallback(callback.id,changed?"تغییر ثبت شد. برای نمایش وضعیت جدید، پنل را دوباره باز کنید.":
+    "عملیات انجام نشد. مجوزها یا وضعیت تغییر کرده است؛ پنل را دوباره باز کنید.");}
 }
-async function handleAdminAccessCommand(chatId,command,state,adminIds){
-  if(/^\/users(?:@\w+)?$/.test(command)){
-    const approved=[...new Set([...(state.approved||[]).map(String),...adminIds])];
-    const pending=Object.keys(state.pending||{});
-    await sendTelegram(chatId,"Authorised user IDs:\n"+(approved.join("\n")||"None")+"\n\nPending requests:\n"+(pending.join("\n")||"None")+"\n\nRevoke access with /revoke USER_ID.");
-    return;
+async function handleAdminAccessCommand(chatId,command,uid){
+  let changed=false;
+  try{
+    const state=await loadAccessState({strict:true});
+    if(!isBotAdmin(uid,state)){await sendTelegram(chatId,"دسترسی مدیریت ندارید.",{
+      menu:state.approved.includes(uid),removeMenu:!state.approved.includes(uid)});return;}
+    if(/^\/admin(?:@\w+)?$/.test(command)){
+      await sendTelegram(chatId,"پنل مدیریت",{menu:true});await showAdminDashboard(chatId,uid);return;
+    }
+    if(/^\/users(?:@\w+)?$/.test(command)){await showAdminDashboard(chatId,uid,"users");return;}
+    const action=command.match(/^\/(approve|revoke)(?:@\w+)?\s+([1-9]\d*)$/);
+    if(action){await changeAccess(uid,action[2],action[1],state);changed=true;await showAdminDashboard(chatId,uid);}
+  }catch(_){await sendTelegram(chatId,changed?"تغییر ثبت شد. برای نمایش وضعیت جدید، پنل را دوباره باز کنید.":
+    "عملیات انجام نشد. پنل را دوباره باز کنید و مجوزها را بررسی کنید.",{menu:true});}
+}
+function validateAccessChange(actor,target,action,state){
+  if(!isBotAdmin(actor,state)||!/^[1-9]\d*$/.test(target)||!Number.isSafeInteger(Number(target))||isOwner(target))throw new Error("access_change_denied");
+  if(action==="grant"||action==="demote"){
+    if(!isOwner(actor)||!state.approved.includes(target))throw new Error("owner_permission_required");
+    if(action==="demote"&&!state.delegatedAdmins.includes(target))throw new Error("not_an_admin");
+  }else if(action==="revoke"){
+    if(!state.approved.includes(target)&&!state.pending[target])throw new Error("unknown_user");
+    if(!isOwner(actor)&&state.delegatedAdmins.includes(target))throw new Error("owner_permission_required");
+  }else if(action==="reject"){
+    if(!state.pending[target]||state.approved.includes(target))throw new Error("request_not_pending");
+  }else if(action!=="approve")throw new Error("unknown_action");
+}
+async function changeAccess(actor,target,action,state){
+  validateAccessChange(actor,target,action,state);
+  if(action==="grant")state.delegatedAdmins=[...new Set([...state.delegatedAdmins,target])];
+  else if(action==="demote")state.delegatedAdmins=state.delegatedAdmins.filter(x=>x!==target);
+  else if(action==="approve"){
+    state.approved=[...new Set([...state.approved,target])];
+    if(state.pending[target])state.users[target]=state.pending[target];
+    delete state.pending[target];
+  }else{
+    if(action==="revoke"){
+      state.approved=state.approved.filter(x=>x!==target);
+      state.delegatedAdmins=state.delegatedAdmins.filter(x=>x!==target);
+    }
+    delete state.pending[target];
   }
-  const revoke=command.match(/^\/revoke(?:@\w+)?\s+(\d+)$/);
-  if(revoke){
-    const target=revoke[1];
-    if(adminIds.includes(target)){await sendTelegram(chatId,"Admin IDs cannot be revoked with this command.");return;}
-    state.approved=(state.approved||[]).map(String).filter(x=>x!==target);
-    delete (state.pending||{})[target];await saveAccessState(state);
-    await sendTelegram(chatId,"Access revoked for user ID "+target+".");
-    await sendTelegram(Number(target),"Your access to the portfolio bot has been revoked.");
-    return;
+  state.audit.push({at:new Date().toISOString(),actor_id:actor,target_id:target,action});
+  state.audit=state.audit.slice(-100);
+  await saveAccessState(state);
+  if(action==="revoke"){
+    try{await savePendingBlackRock(target,{type:"none",updatedAt:new Date().toISOString()});}catch(_){}
   }
-  const approve=command.match(/^\/approve(?:@\w+)?\s+(\d+)$/);
-  if(approve){
-    const target=approve[1];state.approved=[...new Set([...(state.approved||[]).map(String),target])];
-    delete (state.pending||{})[target];await saveAccessState(state);
-    await sendTelegram(chatId,"Approved user ID "+target+".");
-    await sendTelegram(Number(target),"Your access request was approved. Send /help to see available commands.");
+  const notices={approve:"دسترسی شما تأیید شد. برای نمایش منو /start را ارسال کنید.",
+    reject:"درخواست دسترسی شما رد شد.",revoke:"دسترسی شما به ربات پرتفوی لغو شد.",
+    grant:"دسترسی مدیریت برای شما فعال شد. برای نمایش پنل مدیریت /start را ارسال کنید.",
+    demote:"دسترسی مدیریت شما لغو شد؛ دسترسی عادی به پرتفوی برقرار است."};
+  await sendTelegram(Number(target),notices[action],{menu:action==="grant"||action==="approve"||action==="demote",
+    removeMenu:action==="revoke"||action==="reject"});
+}
+async function memberLabel(id,state){
+  let user=state.users[id]||state.pending[id];
+  if(!user){
+    try{
+      const r=await fetch("https://api.telegram.org/bot"+process.env.TELEGRAM_BOT_TOKEN+"/getChat",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({chat_id:Number(id)}),signal:AbortSignal.timeout(8000)});
+      const result=await r.json();if(r.ok&&result.ok)user=result.result;
+    }catch(_){}
   }
+  const name=[user?.first_name,user?.last_name].filter(Boolean).join(" ").slice(0,70);
+  return (name||"کاربر")+(user?.username?" (@"+String(user.username).slice(0,32)+")":"")+" • "+id;
+}
+const ADMIN_PAGE_SIZE=8;
+const adminBack=()=>[{text:"بازگشت به پنل",callback_data:"admin:home"}];
+async function showAdminDashboard(chatId,uid,section="home",page=0){
+  const state=await loadAccessState({strict:true});
+  if(!isBotAdmin(uid,state))throw new Error("admin_permission_required");
+  const owner=isOwner(uid);
+  if(section==="home"){
+    const buttons=[[{text:"کاربران مجاز",callback_data:"admin:users:0"},{text:"درخواست‌های دسترسی",callback_data:"admin:pending:0"}],
+      [{text:"وضعیت سامانه",callback_data:"admin:status"},{text:"رویدادهای مدیریت",callback_data:"admin:audit"}]];
+    if(owner)buttons.push([{text:"مدیریت مدیران",callback_data:"admin:admins:0"}]);
+    await sendTelegramWithKeyboard(chatId,"پنل مدیریت • "+(owner?"مالک":"مدیر منتخب")+
+      "\n\nکاربران مجاز: "+new Set([...state.approved,...adminUserIds()]).size+
+      "\nدرخواست‌های در انتظار: "+Object.keys(state.pending).length+
+      "\nمدیران منتخب: "+state.delegatedAdmins.length,buttons);return;
+  }
+  if(section==="status"){
+    const snapshot=await safeSnapshot(),status=quantitySnapshotStatus(snapshot);
+    const active=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+chatId+".json");
+    const job=active?.request_id?await readPrivateJson(ALLOCATION_REQUEST_PREFIX+active.request_id+".json"):null;
+    const queued=job?.status==="queued"&&Date.now()-Date.parse(job.requested_at)<ALLOCATION_DEADLINE_MS;
+    const expired=job?.status==="queued"&&!queued;
+    const date=value=>value&&Number.isFinite(Date.parse(value))?new Date(value).toLocaleString("fa-IR",{timeZone:"Asia/Tehran"}):"نامشخص";
+    await sendTelegramWithKeyboard(chatId,"وضعیت سامانه\n\nذخیره‌سازی دسترسی: متصل\nSnapshot مقادیر: "+
+      (snapshot?(status.stale?"قدیمی یا نامعتبر":"به‌روز"):"موجود نیست")+
+      "\nتعداد دارایی‌های همگام‌شده: "+Object.keys(snapshot?.assets||{}).length+" از ۲۳"+
+      "\nآخرین همگام‌سازی (تهران): "+date(snapshot?.updated_at)+
+      "\nآخرین تغییر فایل (تهران): "+date(snapshot?.workbook_updated_at)+
+      "\nدریافت مستقل OneDrive: "+(process.env.GITHUB_ACTIONS_TOKEN?"پیکربندی شده":"پیکربندی نشده")+
+      "\nاحراز هویت وب‌هوک: "+(process.env.TELEGRAM_WEBHOOK_SECRET?"پیکربندی شده":"پیکربندی نشده")+
+      "\nدرخواست آخر شما: "+(queued?"در حال دریافت":expired?"منقضی شده؛ دوباره درخواست دهید":job?.status==="failed"?"ناموفق":job?.status==="completed"?"پاسخ همگام‌سازی دریافت شده":"درخواستی ثبت نشده")+
+      "\n\nوضعیت قیمت‌های بازار هنگام درخواست هر گزارش بررسی می‌شود.",[
+      [{text:"بررسی دوباره",callback_data:"admin:status"},{text:"آزمون ذخیره‌سازی",callback_data:"admin:storage_check"}],adminBack()]);return;
+  }
+  if(section==="audit"){
+    const labels={approve:"تأیید دسترسی",reject:"رد درخواست",revoke:"لغو دسترسی",grant:"افزودن مدیر",demote:"حذف نقش مدیر"};
+    const lines=state.audit.slice(-10).reverse().map(event=>
+      new Date(event.at).toLocaleString("fa-IR",{timeZone:"Asia/Tehran"})+" • "+(labels[event.action]||"تغییر دسترسی")+
+      "\nکاربر: "+event.target_id+" • مدیر: "+event.actor_id);
+    await sendTelegramWithKeyboard(chatId,"آخرین رویدادهای مدیریت (تهران)\n\n"+(lines.join("\n\n")||"رویدادی ثبت نشده است."),[adminBack()]);return;
+  }
+  if(section==="admins"&&!owner)throw new Error("owner_permission_required");
+  const ids=section==="pending"?Object.keys(state.pending):section==="admins"?state.approved.filter(id=>!isOwner(id)):
+    [...new Set([...adminUserIds(),...state.approved])];
+  page=Math.max(0,Math.min(Math.floor(page),Math.max(0,Math.ceil(ids.length/ADMIN_PAGE_SIZE)-1)));
+  const selected=ids.slice(page*ADMIN_PAGE_SIZE,(page+1)*ADMIN_PAGE_SIZE);
+  const names=await Promise.all(selected.map(id=>memberLabel(id,state)));
+  const title=section==="pending"?"درخواست‌های دسترسی":section==="admins"?"مدیریت مدیران • فقط مالک":"کاربران مجاز";
+  const lines=[],keyboard=[];
+  selected.forEach((id,i)=>{
+    const role=isOwner(id)?"مالک":state.delegatedAdmins.includes(id)?"مدیر منتخب":"کاربر";
+    lines.push((i+1)+". "+names[i]+(section==="pending"?"":" • "+role));
+    if(section==="pending")keyboard.push([{text:"تأیید "+(i+1),callback_data:"admin:approve:"+id},{text:"رد "+(i+1),callback_data:"admin:reject:"+id}]);
+    else if(section==="admins")keyboard.push([{text:(state.delegatedAdmins.includes(id)?"حذف نقش مدیر ":"انتخاب مدیر ")+(i+1),callback_data:"admin:"+(state.delegatedAdmins.includes(id)?"demote":"grant")+":"+id}]);
+    else if(!isOwner(id)&&(owner||!state.delegatedAdmins.includes(id)))keyboard.push([{text:"لغو دسترسی "+(i+1),callback_data:"admin:revoke:"+id}]);
+  });
+  const navigation=[];
+  if(page>0)navigation.push({text:"صفحه قبل",callback_data:"admin:"+section+":"+(page-1)});
+  if((page+1)*ADMIN_PAGE_SIZE<ids.length)navigation.push({text:"صفحه بعد",callback_data:"admin:"+section+":"+(page+1)});
+  if(navigation.length)keyboard.push(navigation);
+  keyboard.push(adminBack());
+  await sendTelegramWithKeyboard(chatId,title+"\nصفحه "+(page+1)+"\n\n"+(lines.join("\n\n")||"موردی وجود ندارد.")+
+    (section==="admins"?"\n\nحذف نقش مدیر، دسترسی عادی کاربر را حفظ می‌کند.":""),keyboard);
 }
 async function sendTelegramWithKeyboard(chatId,text,inlineKeyboard){
+  if(!isBotAdmin(String(chatId),await loadAccessState()))return false;
   return deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,reply_markup:{inline_keyboard:inlineKeyboard}})});
 }
 async function answerCallback(callbackId,text){
   const token=process.env.TELEGRAM_BOT_TOKEN;if(!token)return;
-  await fetch("https://api.telegram.org/bot"+token+"/answerCallbackQuery",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({callback_query_id:callbackId,text})});
+  try{await fetch("https://api.telegram.org/bot"+token+"/answerCallbackQuery",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({callback_query_id:callbackId,text})});}
+  catch(_){console.warn("Telegram callback answer unavailable");}
 }
 
 function parseNum(v){
@@ -963,11 +1149,16 @@ const BUTTON_MENU=[
   [{text:"راهنما",command:"/help"}]
 ];
 const MENU_COMMANDS=new Map([...BUTTON_MENU.flat().map(button=>[button.text,button.command]),
+  ["پنل مدیریت","/admin"],
   ["Latest Allocation","/latest_allocation"],
   ["تخصیص دارایی","/latest_allocation"],["به‌روزرسانی","/latest_allocation"],
   ["/allocation","/latest_allocation"],["/refresh","/latest_allocation"]]);
-function portfolioKeyboard(){
-  return {keyboard:BUTTON_MENU.map(row=>row.map(button=>({text:button.text}))),
+async function portfolioKeyboard(chatId){
+  const keyboard=BUTTON_MENU.map(row=>row.map(button=>({text:button.text})));
+  const state=await loadAccessState();
+  if(!isOwner(String(chatId))&&!state.approved.includes(String(chatId)))return null;
+  if(isBotAdmin(String(chatId),state))keyboard.push([{text:"پنل مدیریت"}]);
+  return {keyboard,
     resize_keyboard:true,is_persistent:true,
     input_field_placeholder:"یک گزینه انتخاب کنید یا قیمت بلک راک را وارد کنید"};
 }
@@ -1016,15 +1207,17 @@ async function deliverTelegram(chatId,method,options,{temporary=false}={}){
   }catch(_){console.warn("Telegram delivery unavailable",method);return false;}
 }
 
-async function sendTelegram(chatId,text,{menu=false,temporary=false}={}){
+async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=false}={}){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
 
   const send=async msg=>{
+    const markup=menu?await portfolioKeyboard(chatId):removeMenu?{remove_keyboard:true}:null;
+    if(menu&&!markup)return false;
     return deliverTelegram(chatId,"sendMessage",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:"HTML",...(menu?{reply_markup:portfolioKeyboard()}:{})})
+      body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:"HTML",...(markup?{reply_markup:markup}:{})})
     },{temporary});
   };
 
@@ -1070,9 +1263,11 @@ async function sendTelegramPhoto(chatId,png,caption){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
   const form=new FormData();
+  const keyboard=await portfolioKeyboard(chatId);
+  if(!keyboard)return false;
   form.append("chat_id",String(chatId));
   form.append("photo",new Blob([png],{type:"image/png"}),"portfolio-report.png");
-  form.append("reply_markup",JSON.stringify(portfolioKeyboard()));
+  form.append("reply_markup",JSON.stringify(keyboard));
   if(caption)form.append("caption",caption);
   return deliverTelegram(chatId,"sendPhoto",{method:"POST",body:form});
 }

@@ -49,7 +49,7 @@ Existing Microsoft authorization, token rotation and repository
 The owner configured a dedicated fine-grained GitHub token for only
 `SahandFAME/portfolio-agent-telegram`, with **Actions: read and write** and the
 mandatory **Metadata: read-only** permission. It does not need Contents write
-or Secrets permissions. Save it as the **Vercel Production** environment variable
+or Secrets permissions. It is saved as the **Vercel Production** environment variable
 `GITHUB_ACTIONS_TOKEN`. Its presence and on-demand dispatch have been verified;
 do not recreate it or put its value in chat or source control.
 

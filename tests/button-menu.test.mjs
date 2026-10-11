@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import path from 'node:path';
 import sharp from 'sharp';
 import { Resvg } from '@resvg/resvg-js';
+import { BlobPreconditionFailedError } from '@vercel/blob';
 
 const source = await fs.readFile(new URL('../api/telegram.js', import.meta.url), 'utf8');
 // Evaluate the actual unmodified handler, injecting only external dependencies.
@@ -37,6 +38,7 @@ async function app({readError=false, env={}}={}) {
     }});
   const dependencies = {
     '@vercel/blob':{
+      BlobPreconditionFailedError,
       get:async key => {
         if(readError) throw new Error('fixture storage unavailable');
         if(!store.has(key)) return null;
@@ -87,14 +89,14 @@ for(const [label,command] of buttons) test(`button ${label} runs ${command} with
   for(const sent of a.sends){
     const keyboard=JSON.parse(sent.options.body).reply_markup;
     assert.equal(keyboard.is_persistent,true);assert.equal(keyboard.resize_keyboard,true);
-    assert.deepEqual(keyboard.keyboard.flat().map(x=>x.text),buttons.map(x=>x[0]));
+    assert.deepEqual(keyboard.keyboard.flat().map(x=>x.text),[...buttons.map(x=>x[0]),'پنل مدیریت']);
   }
 });
 
 for(const command of ['/start','/help','/menu']) test(`${command} exposes the persistent menu`,async()=>{
   const a=await app();await a.request('POST',{},message(command),header);
   const reply=JSON.parse(a.sends[0].options.body);
-  assert.ok(reply.reply_markup.keyboard.length===4);assert.match(reply.text,/دکمه‌های منو/);
+  assert.ok(reply.reply_markup.keyboard.length===5);assert.match(reply.text,/دکمه‌های منو/);
 });
 
 test('menu selections do not bypass private-chat or user access controls',async()=>{
@@ -102,7 +104,7 @@ test('menu selections do not bypass private-chat or user access controls',async(
     const a=await app();await a.request('POST',{},message(label,2),header);
     const replies=a.sends.map(x=>JSON.parse(x.options.body)).filter(x=>x.chat_id===2);
     assert.equal(replies.length,1);const reply=replies[0];
-    assert.match(reply.text,/private|access request/);assert.equal(reply.reply_markup,undefined);
+    assert.match(reply.text,/private|access request/);assert.equal(reply.reply_markup.remove_keyboard,true);
     assert.doesNotMatch(reply.text,/دارایی‌های پرتفوی|Snapshot|تعداد: 15/);
     const b=await app();await b.request('POST',{},message(label,1,'group'),header);
     assert.equal(b.sends.length,0);

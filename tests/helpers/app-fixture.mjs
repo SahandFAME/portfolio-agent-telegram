@@ -5,11 +5,12 @@ import vm from 'node:vm';
 import path from 'node:path';
 import sharp from 'sharp';
 import { Resvg } from '@resvg/resvg-js';
+import { BlobPreconditionFailedError } from '@vercel/blob';
 
 const source = await fs.readFile(new URL('../../api/telegram.js', import.meta.url), 'utf8');
 // Evaluate the actual unmodified handler, injecting only external dependencies.
 // Named exports below exist only inside the test VM, not in application code.
-export async function app({readError=false, dispatchStatus=204, env={}, telegramReply=null}={}) {
+export async function app({readError=false, dispatchStatus=204, env={}, telegramReply=null,beforeWrite=null,beforeMarketFetch=null}={}) {
   const store = new Map(), writes = [], sends = [], background = [], dispatches=[], marketCalls=[];
   const tokenEnv = {PORTFOLIO_SYNC_SECRET:'fixture-primary',PORTFOLIO_SYNC_SECRET_AGENT:'fixture-secondary',
     GITHUB_ACTIONS_TOKEN:'fixture-actions',TELEGRAM_WEBHOOK_SECRET:'fixture-webhook',TELEGRAM_BOT_TOKEN:'fixture-bot',TELEGRAM_ADMIN_USER_IDS:'1',...env};
@@ -37,18 +38,29 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
     crypto:globalThis.crypto,AbortSignal,
     fetch:async(url,options)=>{
       if(String(url).startsWith('https://api.github.com/')){dispatches.push({url:String(url),options});return {status:dispatchStatus};}
-      if(!String(url).startsWith('https://api.telegram.org/'))marketCalls.push(String(url));
+      if(!String(url).startsWith('https://api.telegram.org/')){
+        marketCalls.push(String(url));if(beforeMarketFetch)await beforeMarketFetch(url,store);
+      }
       if(String(url).startsWith('https://api.telegram.org/')) sends.push({url:String(url),options});
       return quotes(url,options);
     }});
   const dependencies = {
     '@vercel/blob':{
+      BlobPreconditionFailedError,
       get:async key => {
-        if(readError) throw new Error('fixture storage unavailable');
+        if(typeof readError==='function'?readError(key):readError) throw new Error('fixture storage unavailable');
         if(!store.has(key)) return null;
-        return {stream:new ReadableStream({start(c){c.enqueue(Buffer.from(JSON.stringify(store.get(key))));c.close();}})};
+        const text=JSON.stringify(store.get(key));
+        return {blob:{etag:text},stream:new ReadableStream({start(c){c.enqueue(Buffer.from(text));c.close();}})};
       },
-      put:async(key,value)=>{writes.push({key,value:JSON.parse(value)});store.set(key,JSON.parse(value));}
+      put:async(key,value,options)=>{
+        if(beforeWrite)await beforeWrite(key,value,options,store);
+        if(options.ifMatch&&options.ifMatch!==JSON.stringify(store.get(key))){
+          throw new BlobPreconditionFailedError();
+        }
+        if(options.allowOverwrite===false&&store.has(key))throw new Error('fixture blob already exists');
+        writes.push({key,value:JSON.parse(value),options});store.set(key,JSON.parse(value));
+      }
     },
     '@vercel/functions':{waitUntil:promise=>background.push(promise)},
     sharp:{default:sharp},'@resvg/resvg-js':{Resvg},path:{default:path}
