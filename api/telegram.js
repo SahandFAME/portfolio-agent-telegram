@@ -91,7 +91,7 @@ async function loadSnapshot(){
 
 async function readSnapshot(req,res){
   if(!syncAuth(req))return res.status(401).json({ok:false,error:"Unauthorized"});
-  try{const snapshot=await loadSnapshot();if(!snapshot)return res.status(404).json({ok:false,error:"No portfolio snapshot available"});return res.status(200).json({ok:true,snapshot});}
+  try{const snapshot=await loadSnapshot();if(!snapshot)return res.status(404).json({ok:false,error:"No portfolio snapshot available"});return res.status(200).json({ok:true,snapshot,latest_allocation_configured:!!process.env.GITHUB_ACTIONS_TOKEN});}
   catch(e){console.error(e);return res.status(404).json({ok:false,error:"No portfolio snapshot available"});}
 }
 
