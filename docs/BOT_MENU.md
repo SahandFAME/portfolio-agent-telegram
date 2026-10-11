@@ -71,7 +71,7 @@ or percentages.
 The pictured report is Persian, with right-to-left table columns, Persian
 digits, translated headings/units and the existing bold Solar Hijri/Tehran
 timestamps. Standard crypto symbols and price-provider names retain their
-recognized names. Bundled DejaVu regular/bold fonts support Persian shaping in
+recognized names. Bundled Estedad regular/bold fonts support Persian shaping in
 the serverless renderer; no host font installation or new service is needed.
 
 **نمودار ترکیب دارایی** independently refreshes quantities and prices and

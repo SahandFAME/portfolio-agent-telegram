@@ -55,6 +55,24 @@ bundled Persian-capable regular/bold fonts and a right-to-left table. The chart
 uses actual group values for slice angles and two-decimal labels, including
 zero-category and single-category handling.
 
+### Report appearance (owner-approved 2026-10-11)
+
+All pictured reports use bundled **Estedad Regular/Bold**, replacing DejaVu.
+The standalone composition chart uses the owner's selected **style B**: navy
+background, soft 3D shading, rounded slice corners and colored callouts. Each
+positive group's name and two-decimal percentage are connected to the midpoint
+of its own slice's outer arc. Callout positions are selected around the pie in
+circular order; larger connector displacements follow the exterior ellipse.
+Zero groups retain a zero-percentage label with no invented slice or connector.
+The theme does not change group classification, valuation, quantities, prices
+or displayed precision. Persian calendar/Tehran timestamps remain bold.
+
+Font files and their upstream provenance/license are in [assets/fonts](../assets/fonts/README.md).
+Vercel explicitly bundles these files through `functions.api/telegram.js.includeFiles`;
+the renderer does not need runtime font downloads or system fonts. Telegram's
+ordinary text messages use the client-selected font; the Estedad setting applies
+to generated images.
+
 The six manual holdings stay separate and unchanged. The workbook is never
 saved, edited or uploaded. No credentials, quantities, prices or chat IDs are
 printed by the sync worker. Workbook total validation is fail-closed.

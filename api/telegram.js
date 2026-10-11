@@ -1026,7 +1026,7 @@ function assetsReply(quantities,snapshot){
 function escXml(s){return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function svgText(x,y,text,size,opts={}){
   const anchor=opts.anchor||"start",weight=opts.weight||400,fill=opts.fill||"#18324a";
-  return '<text x="'+x+'" y="'+y+'" font-family="sans-serif" font-size="'+size+'" font-weight="'+weight+'" fill="'+fill+'" text-anchor="'+anchor+'">'+escXml(text)+"</text>";
+  return '<text x="'+x+'" y="'+y+'" font-family="Estedad" font-size="'+size+'" font-weight="'+weight+'" fill="'+fill+'" text-anchor="'+anchor+'">'+escXml(text)+"</text>";
 }
 function compactNumber(n){return Number(n).toLocaleString("fa-IR",{maximumFractionDigits:2});}
 function moneyFa(n){return compactNumber(n)+" تومان";}
@@ -1224,9 +1224,9 @@ async function prepareAllocation(q,blackRockPriceRial){
   return {vals,total,prices:reportPrices,usdIrr,priceTime:new Date().toISOString()};
 }
 function renderAllocationSvg(svg){
-  const fontPath=path.join(process.cwd(),"node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf");
-  const boldFontPath=path.join(process.cwd(),"node_modules/dejavu-fonts-ttf/ttf/DejaVuSans-Bold.ttf");
-  const rendered=new Resvg(svg,{font:{fontFiles:[fontPath,boldFontPath],loadSystemFonts:false,defaultFontFamily:"DejaVu Sans",sansSerifFamily:"DejaVu Sans"}}).render();
+  const fontPath=path.join(process.cwd(),"assets/fonts/Estedad-Regular.ttf");
+  const boldFontPath=path.join(process.cwd(),"assets/fonts/Estedad-Bold.ttf");
+  const rendered=new Resvg(svg,{font:{fontFiles:[fontPath,boldFontPath],loadSystemFonts:false,defaultFontFamily:"Estedad",sansSerifFamily:"Estedad"}}).render();
   return rendered.asPng();
 }
 function allocationTextReport(q,report,snapshot){
@@ -1269,7 +1269,9 @@ function buildAllocationPieSvg(report,snapshot=null){
   if(!Number.isFinite(report.total)||report.total<=0||groups.some(group=>!Number.isFinite(group.value)||group.value<0)||
     Math.abs(groups.reduce((sum,group)=>sum+group.value,0)-report.total)>Math.max(1,report.total)*1e-10)
     throw new Error("invalid_allocation_chart");
-  const cx=800,cy=550,rx=500,ry=240,depth=70;
+  const cx=800,cy=565,rx=440,ry=242,depth=50;
+  const palette={"طلا و سکه":"#e7bd66","نقره":"#a3b3c8","سهام و صندوق":"#7896ee","رمز ارز":"#eb949f","Tether":"#61c5aa","US Dollar":"#96c6d7"};
+  const theme={background:"#101b2e",card:"#19283f",ink:"#f1f5fb",muted:"#9caec5"};
   const point=(angle,offset=0)=>[cx+rx*Math.cos(angle),cy+ry*Math.sin(angle)+offset];
   const xy=point=>point.map(value=>value.toFixed(3)).join(" ");
   const shade=(color,factor)=>"#"+color.slice(1).match(/../g).map(value=>Math.min(255,Math.round(parseInt(value,16)*factor)).toString(16).padStart(2,"0")).join("");
@@ -1277,27 +1279,37 @@ function buildAllocationPieSvg(report,snapshot=null){
   let angle=-Math.PI/2;
   const slices=groups.map((group,index)=>{
     const start=angle,end=start+group.percentage/100*Math.PI*2;angle=end;
-    return {...group,index,start,end,color:ALLOCATION_COLORS[group.category]};
+    return {...group,index,start,end,color:palette[group.category]};
   });
   let svg='<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1160" viewBox="0 0 1600 1160">'+
-    '<defs><filter id="shadow" x="-20%" y="-30%" width="140%" height="160%"><feGaussianBlur stdDeviation="14"/></filter>';
+    '<defs><filter id="shadow" x="-30%" y="-70%" width="160%" height="250%"><feGaussianBlur stdDeviation="20"/></filter>';
   for(const slice of slices){
-    svg+='<radialGradient id="top'+slice.index+'" cx="45%" cy="25%" r="80%"><stop offset="0" stop-color="'+shade(slice.color,1.14)+'"/><stop offset="1" stop-color="'+slice.color+'"/></radialGradient>'+
-      '<linearGradient id="side'+slice.index+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+shade(slice.color,.78)+'"/><stop offset="1" stop-color="'+shade(slice.color,.53)+'"/></linearGradient>';
+    svg+='<linearGradient id="top'+slice.index+'" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="'+shade(slice.color,1.10)+'"/><stop offset=".55" stop-color="'+slice.color+'"/><stop offset="1" stop-color="'+shade(slice.color,.96)+'"/></linearGradient>'+
+      '<linearGradient id="side'+slice.index+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+shade(slice.color,.8)+'"/><stop offset="1" stop-color="'+shade(slice.color,.58)+'"/></linearGradient>';
   }
-  svg+='</defs><rect width="1600" height="1160" fill="#f6f9fc"/>';
-  svg+=svgText(800,70,"نمودار ترکیب دارایی",42,{anchor:"middle",weight:700});
-  svg+=svgText(800,115,"قیمت‌های بازار: "+portfolioTime(report.priceTime),22,{anchor:"middle",weight:700,fill:"#526579"});
-  if(snapshot)svg+=svgText(800,152,"همگام‌سازی مقادیر: "+portfolioTime(snapshot.updated_at),19,{anchor:"middle",weight:700,fill:"#526579"});
-  svg+='<ellipse cx="800" cy="620" rx="510" ry="248" fill="#18324a" opacity=".16" filter="url(#shadow)"/>';
-  // Only the front-facing outer arcs have visible vertical walls.
+  svg+='</defs><rect width="1600" height="1160" fill="'+theme.background+'"/>';
+  svg+='<rect x="36" y="184" width="1528" height="831" rx="42" fill="'+theme.card+'"/>';
+  svg+=svgText(800,70,"نمودار ترکیب دارایی",42,{anchor:"middle",weight:700,fill:theme.ink});
+  svg+=svgText(800,115,"قیمت‌های بازار: "+portfolioTime(report.priceTime),22,{anchor:"middle",weight:700,fill:theme.muted});
+  if(snapshot)svg+=svgText(800,152,"همگام‌سازی مقادیر: "+portfolioTime(snapshot.updated_at),19,{anchor:"middle",weight:700,fill:theme.muted});
+  svg+='<ellipse cx="800" cy="633" rx="430" ry="234" fill="#000000" opacity=".3" filter="url(#shadow)"/>';
+  // Soften corners and leave narrow gaps without changing computed percentages.
+  const geometry=slice=>{
+    const span=slice.end-slice.start,gap=Math.min(.009,span*.06);
+    return {start:slice.start+gap,end:slice.end-gap,corner:Math.min(.045,span*.12),arc:Math.min(.03,span*.16)};
+  };
+  // Only front-facing outer arcs have visible vertical walls, with rounded bottoms.
   for(const slice of slices){
     if(slice.value===0)continue;
     for(const turn of [-1,0,1]){
-      const start=Math.max(slice.start,turn*2*Math.PI),end=Math.min(slice.end,turn*2*Math.PI+Math.PI);
+      const shape=geometry(slice);
+      const start=Math.max(shape.start,turn*2*Math.PI),end=Math.min(shape.end,turn*2*Math.PI+Math.PI);
       if(end-start<1e-10)continue;
+      const inset=Math.min(.025,(end-start)/4),round=8;
       const path='M '+xy(point(start))+' A '+rx+' '+ry+' 0 0 1 '+xy(point(end))+
-        ' L '+xy(point(end,depth))+' A '+rx+' '+ry+' 0 0 0 '+xy(point(start,depth))+' Z';
+        ' L '+xy(point(end,depth-round))+' Q '+xy(point(end,depth))+' '+xy(point(end-inset,depth))+
+        ' A '+rx+' '+ry+' 0 0 0 '+xy(point(start+inset,depth))+
+        ' Q '+xy(point(start,depth))+' '+xy(point(start,depth-round))+' Z';
       svg+='<path data-layer="side" d="'+path+'" fill="url(#side'+slice.index+')"/>';
     }
   }
@@ -1305,36 +1317,70 @@ function buildAllocationPieSvg(report,snapshot=null){
     if(slice.value===0)continue;
     let path;
     if(slice.end-slice.start>=2*Math.PI-1e-10){
-      path='M '+(cx-rx)+' '+cy+' A '+rx+' '+ry+' 0 1 1 '+(cx+rx)+' '+cy+' A '+rx+' '+ry+' 0 1 1 '+(cx-rx)+' '+cy+' Z';
+      path='M -1 0 A 1 1 0 1 1 1 0 A 1 1 0 1 1 -1 0 Z';
     }else{
-      path='M '+cx+' '+cy+' L '+xy(point(slice.start))+' A '+rx+' '+ry+' 0 '+(slice.end-slice.start>Math.PI?1:0)+' 1 '+xy(point(slice.end))+' Z';
+      const {start,end,corner,arc}=geometry(slice),tip=.062;
+      const p=(radius,angle)=>[radius*Math.cos(angle),radius*Math.sin(angle)].map(value=>value.toFixed(8)).join(" ");
+      path='M '+p(tip,start)+' L '+p(1-corner,start)+' Q '+p(1,start)+' '+p(1,start+arc)+
+        ' A 1 1 0 '+(end-start-2*arc>Math.PI?1:0)+' 1 '+p(1,end-arc)+
+        ' Q '+p(1,end)+' '+p(1-corner,end)+' L '+p(tip,end)+' Q 0 0 '+p(tip,start)+' Z';
     }
-    svg+='<path data-layer="top" data-category="'+escXml(slice.category)+'" data-percentage="'+slice.percentage+'" d="'+path+'" fill="url(#top'+slice.index+')" stroke="#ffffff" stroke-width="2"/>';
+    svg+='<path data-layer="top" data-category="'+escXml(slice.category)+'" data-percentage="'+slice.percentage+'" d="'+path+'" transform="translate('+cx+' '+cy+') scale('+rx+' '+ry+')" fill="url(#top'+slice.index+')"/>';
+    const shape=geometry(slice),start=shape.start+Math.min(.05,(shape.end-shape.start)/5),end=shape.end-Math.min(.05,(shape.end-shape.start)/5);
+    svg+='<path d="M '+xy(point(start))+' A '+rx+' '+ry+' 0 '+(end-start>Math.PI?1:0)+' 1 '+xy(point(end))+'" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity=".24"/>';
   }
-  const labels=slices.map(slice=>{
-    const middle=(slice.start+slice.end)/2;
-    return {...slice,side:slice.value>0?(Math.cos(middle)<0?"left":"right"):(slice.index%2?"left":"right"),
-      wantedY:slice.value>0?cy+(ry+60)*Math.sin(middle):280+slice.index*90,middle};
+  // Eight nonoverlapping perimeter positions; match slices in circular order so
+  // callouts remain legible even with very uneven or tiny holdings.
+  const slots=[
+    {x:1060,y:251,edge:[1060,302]}, {x:1420,y:419,edge:[1280,419]},
+    {x:1420,y:687,edge:[1280,687]}, {x:1060,y:922,edge:[1060,871]},
+    {x:540,y:922,edge:[540,871]}, {x:180,y:687,edge:[320,687]},
+    {x:180,y:419,edge:[320,419]}, {x:540,y:251,edge:[540,302]}
+  ].map(slot=>{
+    let angle=Math.atan2((slot.y-cy)/(ry+50),(slot.x-cx)/(rx+42));
+    if(angle<-Math.PI/2)angle+=2*Math.PI;
+    return {...slot,angle};
   });
-  for(const side of ["left","right"]){
-    const nodes=labels.filter(label=>label.side===side).sort((a,b)=>a.wantedY-b.wantedY);
-    let previous=150;
-    nodes.forEach((label,index)=>{
-      const y=Math.min(850-(nodes.length-1-index)*100,Math.max(240+index*100,previous+100,label.wantedY));previous=y;
-      const x=side==="left"?30:1360,edge=side==="left"?240:1360;
-      if(label.value>0){
-        const p=point(label.middle),elbow=side==="left"?260:1340;
-        svg+='<polyline points="'+xy(p)+' '+elbow+' '+y+' '+edge+' '+y+'" fill="none" stroke="'+shade(label.color,.75)+'" stroke-width="2"/>';
+  const positive=slices.filter(slice=>slice.value>0),assigned=new Map();
+  const distance=(a,b)=>Math.atan2(Math.sin(a-b),Math.cos(a-b));
+  let bestCost=Infinity,best=[];
+  const choose=(chosen,next)=>{
+    if(chosen.length===positive.length){
+      for(let rotation=0;rotation<chosen.length;rotation++){
+        const order=chosen.map((_,index)=>chosen[(index+rotation)%chosen.length]);
+        const cost=positive.reduce((sum,slice,index)=>sum+distance((slice.start+slice.end)/2,slots[order[index]].angle)**2,0);
+        if(cost<bestCost){bestCost=cost;best=order;}
       }
-      svg+='<rect x="'+x+'" y="'+(y-42)+'" width="210" height="84" rx="14" fill="#ffffff" stroke="'+label.color+'" stroke-width="2"/>';
-      svg+=svgText(x+194,y-9,label.label,20,{anchor:"end",weight:700});
-      svg+=svgText(x+194,y+24,percent(label),29,{anchor:"end",weight:700,fill:shade(label.color,.62)});
-    });
+      return;
+    }
+    for(let index=next;index<=slots.length-(positive.length-chosen.length);index++)choose([...chosen,index],index+1);
+  };
+  choose([],0);
+  positive.forEach((slice,index)=>assigned.set(slice.index,best[index]));
+  const unused=slots.map((_,index)=>index).filter(index=>!best.includes(index));
+  slices.filter(slice=>slice.value===0).forEach(slice=>assigned.set(slice.index,unused.shift()));
+  for(const slice of slices){
+    const slot=slots[assigned.get(slice.index)],width=280,height=102;
+    if(slice.value>0){
+      const middle=(slice.start+slice.end)/2,start=point(middle);
+      const outer=angle=>[cx+(rx+42)*Math.cos(angle),cy+(ry+50)*Math.sin(angle)];
+      const delta=distance(slot.angle,middle),bend=outer(middle);
+      // Larger displacements follow the exterior ellipse, never cut across slices.
+      const path='M '+xy(start)+' L '+xy(bend)+
+        (Math.abs(delta)>.45?' A '+(rx+42)+' '+(ry+50)+' 0 0 '+(delta>0?1:0)+' '+xy(outer(slot.angle)):'')+
+        ' L '+xy(slot.edge);
+      svg+='<path data-layer="leader" data-leader-category="'+escXml(slice.category)+'" data-anchor="'+xy(start)+'" d="'+path+'" fill="none" stroke="'+slice.color+'" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>';
+      svg+='<circle cx="'+start[0]+'" cy="'+start[1]+'" r="4.4" fill="'+slice.color+'"/>';
+    }
+    svg+='<rect data-label-category="'+escXml(slice.category)+'" x="'+(slot.x-width/2)+'" y="'+(slot.y-height/2)+'" width="'+width+'" height="'+height+'" rx="23" fill="'+theme.background+'"/>';
+    svg+='<rect x="'+(slot.x+width/2-27)+'" y="'+(slot.y-height/2+23)+'" width="10" height="10" rx="4" fill="'+slice.color+'"/>';
+    svg+=svgText(slot.x,slot.y-13,slice.label,24,{anchor:"middle",weight:700,fill:theme.ink});
+    svg+=svgText(slot.x,slot.y+30,percent(slice),31,{anchor:"middle",weight:700,fill:slice.color});
   }
-  svg+='<rect x="300" y="950" width="1000" height="100" rx="20" fill="#123b5d"/>';
-  svg+=svgText(800,990,"ارزش کل پرتفوی",22,{anchor:"middle",weight:700,fill:"#dce9f4"});
-  svg+=svgText(800,1030,moneyFa(report.total/10),31,{anchor:"middle",weight:700,fill:"#ffffff"});
-  svg+=svgText(800,1100,"درصد گروه‌ها بر اساس ارزش تومانی است و تا دو رقم اعشار گرد شده است.",20,{anchor:"middle",fill:"#526579"});
+  svg+='<rect x="36" y="1038" width="1528" height="91" rx="28" fill="'+theme.card+'"/>';
+  svg+=svgText(1510,1075,"ارزش کل پرتفوی",21,{anchor:"end",weight:700,fill:theme.muted});
+  svg+=svgText(1510,1110,moneyFa(report.total/10),29,{anchor:"end",weight:700,fill:theme.ink});
+  svg+=svgText(78,1087,"درصد گروه‌ها بر اساس ارزش تومانی • دو رقم اعشار",20,{fill:theme.muted});
   return svg+'</svg>';
 }
 
