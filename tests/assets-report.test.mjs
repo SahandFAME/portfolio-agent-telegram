@@ -12,12 +12,18 @@ const names=text=>[...text.matchAll(/^\d+\. (.*?): /gm)].map(x=>x[1]);
 test('assets report groups all 29 holdings exactly once using allocation categories',async()=>{
   const a=await app();a.store.set('portfolio/latest.json',a.payload);
   const before=JSON.stringify(a.store.get('portfolio/latest.json'));
-  const {text,reply_markup}=await report(a);
+  const {text,reply_markup,parse_mode}=await report(a);
   assert.equal(names(text).length,29);
   assert.deepEqual(names(text).sort(),[...a.ns.ASSETS].sort());
   assert.deepEqual([...text.matchAll(/^(\d+)\. /gm)].map(x=>Number(x[1])),Array.from({length:29},(_,i)=>i+1));
-  const sections=text.split('\n\n');
-  const group=title=>sections.find(x=>x.startsWith(title+'\n'));
+  assert.equal(parse_mode,'HTML');
+  assert.equal((text.match(/<b><i><u>/g)||[]).length,6);
+  assert.ok(text.startsWith('دارایی‌های پرتفوی (۲۹ مورد)\n\n'));
+  const group=title=>{
+    const heading='<b><i><u>'+title+'</u></i></b>\n\n';
+    assert.ok(text.includes(heading),'styled heading and blank line: '+title);
+    return text.split(heading)[1].split('\n\n')[0];
+  };
   assert.deepEqual(names(group('طلا و سکه')),['طلا','عیار','گوهر','آلتون','امرالد','زرفام',...Object.keys(a.ns.MANUAL).filter(x=>x!=='دلار')]);
   assert.deepEqual(names(group('نقره')),['شمش نقره 999']);
   assert.deepEqual(names(group('سهام و صندوق‌ها')),['نهال','طعام','استیل','فلز فارابی','پتروآگاه','خودران','بلک راک','سجام','فملی']);
