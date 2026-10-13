@@ -123,3 +123,14 @@ UTF-8 JSON rather than a tiny ASCII record. It compares access-object read and
 metadata ETags, reporting only equality, weak/strong flags and byte size. Failure
 phase/type is returned without identifiers, ETag values, content or credentials.
 The canary never changes real user access or holdings.
+
+
+**Verified production cause:** the 2026-10-13 probe returned HTTP 503 at
+`conditional_update` with `precondition_failed`. The live 1,083-byte access
+object's download ETag was weak and differed from its strong storage metadata
+ETag. A representative Persian-text canary reproduced the conditional-write
+failure without changing access counts. Small ASCII canaries had succeeded.
+Access-state and canary version reads now request `Accept-Encoding: identity`
+while bypassing the cache. Weak ETags remain rejected; they are never stripped
+or replaced by an unconditional overwrite. Regression tests cover promotion,
+demotion, weak-tag refusal and concurrent-update rejection.
