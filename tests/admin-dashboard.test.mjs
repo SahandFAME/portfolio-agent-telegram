@@ -248,7 +248,21 @@ test('conditional storage canary verifies conflict rejection without touching ac
   assert.equal((await a.request('POST',{verify:'access-storage'})).code,401);
   const r=await a.request('POST',{verify:'access-storage'}, {},{'x-portfolio-sync-secret':'fixture-secondary'});
   assert.equal(r.code,200);assert.equal(r.data.conditional_writes_verified,true);
+  assert.equal(r.data.storage_metadata.read_etag_matches_head,true);
+  assert.equal(r.data.storage_metadata.weak_read_etag,false);
+  assert.equal(r.data.storage_metadata.etag,undefined);
   assert.equal(changes(a).length,0);assert.deepEqual(a.store.get(KEY),state());
   assert.deepEqual(a.store.get('portfolio/latest.json'),a.payload);
   assert.equal(a.store.get('portfolio/diagnostics/access-storage.json').stage,2);
+});
+
+test('private failure diagnostics classify rejected actions without storing identities or exception messages',async()=>{
+  const a=await fixture();await click(a,'admin:demote:1');
+  const failure=a.store.get('portfolio/diagnostics/last-access-change.json');
+  assert.equal(failure.kind,'access_change_denied');assert.equal(failure.operation,'demote');
+  assert.equal(failure.committed,false);assert.deepEqual(Object.keys(failure).sort(),['at','committed','kind','operation']);
+  assert.equal(changes(a).length,0);
+  const r=await a.request('POST',{verify:'access-storage'}, {},{'x-portfolio-sync-secret':'fixture-secondary'});
+  assert.equal(r.data.latest_failure.kind,'access_change_denied');
+  assert.equal((await a.request('POST',{verify:'access-storage'})).code,401);
 });

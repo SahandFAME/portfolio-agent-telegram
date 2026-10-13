@@ -1,4 +1,4 @@
-import { put, get, BlobPreconditionFailedError } from "@vercel/blob";
+import { put, get, head, BlobPreconditionFailedError } from "@vercel/blob";
 import { waitUntil } from "@vercel/functions";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
@@ -143,27 +143,45 @@ async function readAccessHealth(req,res){
   }catch(_){return res.status(503).json({ok:false,error:"Access storage unavailable"});}
 }
 async function verifyAccessStorage(){
-  // Exercise conditional writes on a separate private canary, never on user
-  // permissions or portfolio data. The same small path is reused each time.
+  // Exercise representative UTF-8 access JSON on a separate private canary.
+  // Never write actual permissions or holdings, or disclose identities/ETags.
   const key="portfolio/diagnostics/access-storage.json",id=crypto.randomUUID();
+  const padding="آزمون ذخیره‌سازی نقش مهمان و مدیر ".repeat(512);
+  let phase="access_metadata",metadata,latestFailure;
   try{
-    await writePrivateJson(key,{check_id:id,stage:1});
+    latestFailure=await readPrivateJson("portfolio/diagnostics/last-access-change.json");
+    const access=await get(ACCESS_STATE,{access:"private",useCache:false});
+    if(access){
+      const info=await head(ACCESS_STATE);
+      metadata={read_etag_matches_head:access.blob?.etag===info.etag,
+        weak_read_etag:String(access.blob?.etag||"").startsWith("W/"),
+        weak_head_etag:String(info.etag||"").startsWith("W/"),
+        access_size_bytes:info.size};
+      await access.stream.cancel();
+    }
+    phase="canary_create";
+    await writePrivateJson(key,{check_id:id,stage:1,padding});
+    phase="canary_read";
     const initial=await get(key,{access:"private",useCache:false});
     const etag=initial?.blob?.etag;
     await initial?.stream?.cancel();
     if(!etag)throw new Error("missing_etag");
     const options={access:"private",addRandomSuffix:false,contentType:"application/json",ifMatch:etag};
-    await put(key,JSON.stringify({check_id:id,stage:2}),options);
+    phase="conditional_update";
+    await put(key,JSON.stringify({check_id:id,stage:2,padding}),options);
+    phase="readback";
     const readback=await readPrivateJson(key);
-    if(readback?.check_id!==id||readback.stage!==2)throw new Error("canary_readback_failed");
+    if(readback?.check_id!==id||readback.stage!==2||readback.padding!==padding)throw new Error("canary_readback_failed");
+    phase="stale_update";
     try{
-      await put(key,JSON.stringify({check_id:id,stage:3}),options);
-      return {ok:false,conditional_writes_verified:false};
+      await put(key,JSON.stringify({check_id:id,stage:3,padding}),options);
+      return {ok:false,conditional_writes_verified:false,failure_phase:phase,storage_metadata:metadata,latest_failure:latestFailure};
     }catch(error){
       if(!(error instanceof BlobPreconditionFailedError))throw new Error("unexpected_canary_error");
     }
-    return {ok:true,conditional_writes_verified:true};
-  }catch(_){return {ok:false,conditional_writes_verified:false};}
+    return {ok:true,conditional_writes_verified:true,storage_metadata:metadata,latest_failure:latestFailure};
+  }catch(error){return {ok:false,conditional_writes_verified:false,failure_phase:phase,
+    failure_kind:error instanceof BlobPreconditionFailedError?"precondition_failed":"storage_error",storage_metadata:metadata,latest_failure:latestFailure};}
 }
 
 async function loadPendingBlackRock(chatId){
@@ -538,7 +556,14 @@ async function handleAccessCallback(callback){
     }
     await changeAccess(uid,target,operation==="confirm_revoke"?"revoke":operation,state);changed=true;
     await answerCallback(callback.id,"انجام شد.");await showAdminDashboard(chat.id,uid,"home",0,previousPanel);
-  }catch(_){await answerCallback(callback.id,changed?"تغییر ثبت شد. برای نمایش وضعیت جدید، پنل را دوباره باز کنید.":
+  }catch(error){
+    const codes=new Set(["access_state_unavailable","access_change_denied","role_change_denied","not_an_admin",
+      "owner_permission_required","unknown_user","request_not_pending","unknown_action"]);
+    const kind=error instanceof BlobPreconditionFailedError?"precondition_failed":codes.has(error?.message)?error.message:"unexpected_error";
+    try{await writePrivateJson("portfolio/diagnostics/last-access-change.json",{at:new Date().toISOString(),
+      operation:String(callback.data||"").match(/^admin:(grant|demote|approve_guest|approve_admin|confirm_revoke|reject):/)?.[1]||"admin_control",
+      kind,committed:changed});}catch(_){}
+    await answerCallback(callback.id,changed?"تغییر ثبت شد. برای نمایش وضعیت جدید، پنل را دوباره باز کنید.":
     "عملیات انجام نشد. مجوزها یا وضعیت تغییر کرده است؛ پنل را دوباره باز کنید.");}
 }
 async function handleAdminAccessCommand(chatId,command,uid){

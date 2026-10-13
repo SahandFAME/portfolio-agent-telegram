@@ -39,6 +39,7 @@ async function app({readError=false, env={}}={}) {
   const dependencies = {
     '@vercel/blob':{
       BlobPreconditionFailedError,
+      head:async key=>({etag:JSON.stringify(store.get(key)),size:Buffer.byteLength(JSON.stringify(store.get(key)))}),
       get:async key => {
         if(readError) throw new Error('fixture storage unavailable');
         if(!store.has(key)) return null;
