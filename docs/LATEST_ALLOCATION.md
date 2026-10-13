@@ -30,11 +30,17 @@ chart through the same fresh-quantity and fresh-price workflow.
 5. An authenticated completion callback identifies the private request. The bot
    rechecks user access, expiration, current request and the exact fresh snapshot
    before fetching market prices. Replayed or superseded callbacks are ignored.
-6. If EcoCoach requires a price, the bot shows the original concise prompt.
+6. For owner/admin reports, if EcoCoach requires a price, the bot shows the original concise prompt.
    When that price is entered, it reads and synchronizes OneDrive again, then
    fetches market prices again and produces the chosen picture, text or chart.
    This second read avoids
    an old quantity snapshot if the owner waits before entering the price.
+
+Guest charts check the EcoCoach website first and, if no reliable quote is
+available, use the owner-authorized fixed **1,030,000 toman/unit** fallback.
+This exception is limited to guests, who receive only category percentages;
+there is no admin price-entry wait. All other completeness/freshness checks
+remain required. See [EcoCoach price lookup](ECOCOACH_PRICING.md) for provenance.
 
 Errors stop report generation; an old cached report is not substituted. Requests
 expire after ten minutes, and a snapshot must be at most two minutes old when a

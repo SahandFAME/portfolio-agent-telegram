@@ -1,5 +1,13 @@
 # Portfolio Agent — Complete Codex Project Handoff
 
+> **2026-10-13 owner-authorized guest exception:** guest charts prefer a verified
+> EcoCoach website quote; otherwise value `بلک راک` at the fixed **1,030,000
+> toman/unit (10,300,000 rial/unit)**. This is recorded as a fixed fallback,
+> not a live quote. Guests no longer wait for admin price input. Owner/admin
+> reports retain website-first/manual-price fallback; all other missing data
+> still blocks reports. Details: [EcoCoach pricing](ECOCOACH_PRICING.md).
+
+
 **As of:** 2026-10-10 (Tehran time)  
 **Primary repository:** https://github.com/SahandFAME/portfolio-agent-telegram  
 **Branch:** `main`  

@@ -66,7 +66,7 @@ test('admins promote guests and demote another admin; owner and self roles stay 
 
 test('guest image contains the same group percentages but no total, asset notes or detailed valuation output',async()=>{
   const a=await fixture();const q={...a.assets,...a.ns.MANUAL,'بلک راک':15};
-  const data=await a.ns.prepareAllocation(q,100000);
+  const data=await a.ns.prepareAllocation(q,null,{guest:true});
   const normal=a.ns.buildAllocationPieSvg(data,a.payload),guest=a.ns.buildAllocationPieSvg(data,a.payload,{guest:true});
   assert.match(normal,/ارزش کل پرتفوی/);
   assert.doesNotMatch(guest,/ارزش کل|تومان|بلک راک|یادداشت|طلب از مامان|3030|EcoCoach/);
@@ -81,23 +81,16 @@ test('guest image contains the same group percentages but no total, asset notes 
   }
 });
 
-test('manual fallback for guest charts is handled only by admins and repeats fresh sync before a redacted delivery',async()=>{
+test('guest fallback delivers a redacted chart after one fresh sync without admin price prompts',async()=>{
   const a=await fixture();await a.request('POST',{},msg('/allocation_chart'),header);
-  assert.equal(a.marketCalls.length,0);const first=requestId(a);await complete(a);
+  assert.equal(a.marketCalls.length,0);const id=requestId(a);await complete(a);
   const guestText=messages(a).filter(x=>x.chat_id===2).map(x=>x.text).join('\n');
-  assert.doesNotMatch(guestText,/EcoCoach|بلک راک|تعداد:|تومان|یادداشت|۱۵|15/);
-  assert.equal(a.store.get('portfolio/latest-allocation/requests/'+first+'.json').status,'awaiting_price');
-  const button=messages(a).find(x=>x.chat_id===3&&x.reply_markup?.inline_keyboard).reply_markup.inline_keyboard[0][0].callback_data;
-  assert.equal(button,'admin:guest_price:'+first);
-  await a.request('POST',{},cb(button,2),header);
-  assert.equal(a.store.has('portfolio/pending-blackrock/2.json')&&a.store.get('portfolio/pending-blackrock/2.json').type==='guest_blackrock_price',false);
-  await a.request('POST',{},cb(button),header);
-  assert.match(messages(a).at(-1).text,/EcoCoach/);
-  await a.request('POST',{},msg('850000 تومان',3),header);
-  assert.equal(a.dispatches.length,2);const second=requestId(a);
-  const record=a.store.get('portfolio/latest-allocation/requests/'+second+'.json');
-  assert.equal(record.user_id,'2');assert.equal(record.price_approved_by,'3');assert.equal(record.blackRockPriceRial,8500000);
-  await complete(a);
+  assert.doesNotMatch(guestText,/EcoCoach|بلک راک|تعداد:|تومان|یادداشت|تأیید قیمت|1030000/);
+  assert.equal(a.store.get('portfolio/latest-allocation/requests/'+id+'.json').status,'completed');
+  assert.equal(a.store.get('portfolio/pending-blackrock/2.json').type,'none');
+  assert.equal(messages(a).some(x=>x.chat_id!==2),false);
+  assert.equal(a.dispatches.length,1);
+  assert.equal(a.marketCalls.filter(url=>url==='https://ecocoach.net/blackrock-index').length,1);
   const photos=a.sends.filter(x=>x.url.endsWith('/sendPhoto'));assert.equal(photos.length,1);
   assert.equal(photos[0].options.body.get('chat_id'),'2');assert.equal(photos[0].options.body.get('caption'),'نمودار درصد ترکیب دارایی');
   assert.deepEqual(JSON.parse(photos[0].options.body.get('reply_markup')).keyboard,[[{text:'نمودار ترکیب دارایی'}]]);
@@ -122,10 +115,11 @@ test('demotion during image/text preparation blocks sensitive sends and old sele
   assert.equal(a.dispatches.length,0);
 });
 
-test('expired, replaced, invalid or revoked guest-price requests cannot be resumed by old admin buttons',async()=>{
-  for(const scenario of ['expired','replaced','invalid','revoked']){
+test('retired guest-price buttons cannot resume any legacy request or create admin price input',async()=>{
+  for(const scenario of ['current','expired','replaced','invalid','revoked']){
     const a=await fixture();await a.request('POST',{},msg('/allocation_chart'),header);await complete(a);
     const id=requestId(a),record=a.store.get('portfolio/latest-allocation/requests/'+id+'.json');
+    record.status='awaiting_price';record.ecoCoach_quantity=15;
     if(scenario==='expired')record.requested_at='2020-01-01T00:00:00Z';
     if(scenario==='invalid')record.requested_at='invalid';
     if(scenario==='replaced')a.store.set('portfolio/latest-allocation/active/2.json',{request_id:'different'});
@@ -133,5 +127,6 @@ test('expired, replaced, invalid or revoked guest-price requests cannot be resum
     await a.request('POST',{},cb('admin:guest_price:'+id),header);
     assert.notEqual(a.store.get('portfolio/pending-blackrock/3.json')?.type,'guest_blackrock_price');
     assert.equal(a.dispatches.length,1);
+    assert.equal(messages(a).some(x=>x.chat_id===3&&/EcoCoach|قیمت فعلی|تعداد:/.test(x.text)),false);
   }
 });

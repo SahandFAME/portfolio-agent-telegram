@@ -49,12 +49,13 @@ controls through buttons, slash commands, aliases or old callbacks. Admins and
 the owner retain the full report menu. Guest charts and captions contain no
 total or footnotes; no detailed valuation object is returned in guest mode.
 
-If the EcoCoach price requires manual input for a guest chart, admins receive a
-private prompt button. An authorized admin selects the matching pending request
-and enters the price. The bot starts a second fresh OneDrive sync for that guest
-and renders only the redacted chart. The guest never sees the fund quantity,
-manual price prompt or notes. Expired, replaced and revoked requests cannot be
-resumed; the entered price is scoped to that request, not a reusable quote cache.
+Guest charts check EcoCoach's website first. If no verified quote is available,
+they use the owner's explicitly approved fixed fallback of **1,030,000 toman per
+unit** (2026-10-13). No admin price prompt or second sync is needed for guests;
+old guest-price relay buttons are inactive. Owner/admin reports retain the
+manual-price prompt if the website has no reliable quote. Guest charts still
+require a fresh verified OneDrive snapshot, complete other prices and current
+access; they show no total, quantities or notes.
 
 Names come from recorded access requests or a read-only Telegram `getChat`
 lookup; unavailable names fall back to the numeric Telegram ID. Lists paginate

@@ -23,12 +23,19 @@ HTTPS, no authentication or cache, an eight-second timeout, a one-megabyte
 response limit, and reject redirects. No credentials or login session are sent
 to EcoCoach. Category commands that do not contain the fund skip this lookup.
 
-When the site is unreachable or provides no reliable quote, the existing admin
-manual-price flow remains available. Guests never receive that price/quantity
-prompt: the bot sends it to current admins privately, scopes the entered price
-to the awaiting request, performs another fresh OneDrive read and delivers the
-guest's chart without total valuation or notes. The owner's six manual holdings
-and OneDrive workbook remain unchanged.
+When the site is unreachable or provides no reliable quote, owner/admin reports
+retain the existing manual-price flow. As explicitly authorized by the owner on
+2026-10-13, **guest charts only** instead use a fixed **1,030,000 toman per unit**
+(**10,300,000 rial per unit**). A valid website quote always takes precedence.
+The fallback's internal provenance is `Owner-approved guest fallback`, with
+`fixedPrice: true`, no fabricated quote/retrieval timestamp and no quote source
+URL. It is an authorized fixed valuation assumption, not a live market quote.
+
+Guests receive the chart after the same single fresh OneDrive sync, without
+waiting for an admin or exposing totals, quantities, notes or price prompts.
+Other missing prices/quantities still prevent chart generation. The retired
+admin guest-price relay and its old buttons cannot resume requests. The owner's
+six manual holdings and OneDrive workbook remain unchanged.
 
 Cloud development networking requires `ecocoach.net` and `www.ecocoach.net` in
 the allowlist. Both were added to the saved environment draft; actual HTTPS
