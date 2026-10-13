@@ -7,6 +7,9 @@ import path from "path";
 const ONEDRIVE_CLIENT_ID = '04a73ec3-340a-4cb6-a087-7fdc4dfd93e0';
 const SNAPSHOT = "portfolio/latest.json";
 const ACCESS_STATE = "portfolio/access-control.json";
+// Compressed Blob downloads have weak representation ETags that cannot be used
+// for conditional writes. Read access JSON as identity to retain its strong ETag.
+const ACCESS_READ_OPTIONS={access:"private",useCache:false,headers:{"Accept-Encoding":"identity"}};
 const BLACKROCK_PENDING_PREFIX = "portfolio/pending-blackrock/";
 const ASSETS = [
   "طلا","عیار","گوهر","آلتون","امرالد","زرفام","نهال","طعام","استیل",
@@ -150,7 +153,7 @@ async function verifyAccessStorage(){
   let phase="access_metadata",metadata,latestFailure;
   try{
     latestFailure=await readPrivateJson("portfolio/diagnostics/last-access-change.json");
-    const access=await get(ACCESS_STATE,{access:"private",useCache:false});
+    const access=await get(ACCESS_STATE,ACCESS_READ_OPTIONS);
     if(access){
       const info=await head(ACCESS_STATE);
       metadata={read_etag_matches_head:access.blob?.etag===info.etag,
@@ -162,10 +165,10 @@ async function verifyAccessStorage(){
     phase="canary_create";
     await writePrivateJson(key,{check_id:id,stage:1,padding});
     phase="canary_read";
-    const initial=await get(key,{access:"private",useCache:false});
+    const initial=await get(key,ACCESS_READ_OPTIONS);
     const etag=initial?.blob?.etag;
     await initial?.stream?.cancel();
-    if(!etag)throw new Error("missing_etag");
+    if(!etag||etag.startsWith("W/"))throw new Error("missing_strong_etag");
     const options={access:"private",addRandomSuffix:false,contentType:"application/json",ifMatch:etag};
     phase="conditional_update";
     await put(key,JSON.stringify({check_id:id,stage:2,padding}),options);
@@ -470,7 +473,7 @@ function isBotAdmin(uid,state){
 function emptyAccessState(){return {approved:[],pending:{},delegatedAdmins:[],users:{},audit:[]};}
 async function loadAccessState({strict=false}={}){
   try{
-    const r=await get(ACCESS_STATE,{access:"private",useCache:false});
+    const r=await get(ACCESS_STATE,ACCESS_READ_OPTIONS);
     if(!r)return emptyAccessState();
     const reader=r.stream.getReader(),chunks=[];
     while(true){const x=await reader.read();if(x.done)break;chunks.push(Buffer.from(x.value));}
@@ -489,7 +492,7 @@ async function loadAccessState({strict=false}={}){
   }
 }
 async function saveAccessState(state){
-  if(state._unavailable||(state._exists&&!state._etag))throw new Error("access_state_unavailable");
+  if(state._unavailable||(state._exists&&(!state._etag||state._etag.startsWith("W/"))))throw new Error("access_state_unavailable");
   await put(ACCESS_STATE,JSON.stringify(state,null,2),{access:"private",addRandomSuffix:false,
     ...(state._etag?{ifMatch:state._etag}:{allowOverwrite:false}),contentType:"application/json"});
 }

@@ -266,3 +266,36 @@ test('private failure diagnostics classify rejected actions without storing iden
   assert.equal(r.data.latest_failure.kind,'access_change_denied');
   assert.equal((await a.request('POST',{verify:'access-storage'})).code,401);
 });
+
+
+test('promotion and demotion use strong identity ETags for compressible Persian access JSON',async()=>{
+  const a=await fixture({compressAccessReads:true});
+  a.store.get(KEY).users['2'].first_name='کاربر آزمایشی '.repeat(150);
+  await click(a,'admin:grant:2');
+  assert.deepEqual(a.store.get(KEY).delegatedAdmins,['3','2']);
+  assert.equal(callbacks(a).at(-1).text,'انجام شد.');
+  await click(a,'admin:demote:2');
+  assert.deepEqual(a.store.get(KEY).delegatedAdmins,['3']);
+  assert.equal(a.store.get(KEY).approved.includes('2'),true);
+  assert.equal(callbacks(a).at(-1).text,'انجام شد.');
+  assert.equal(changes(a).length,2);
+  assert.ok(changes(a).every(x=>x.options.ifMatch&&!x.options.ifMatch.startsWith('W/')));
+  assert.deepEqual(a.store.get(KEY).audit.map(x=>x.action),['grant','demote']);
+});
+
+test('a storage server ignoring identity cannot turn a weak ETag into an unconditional permission update',async()=>{
+  const a=await fixture({forceWeakEtag:true});
+  await click(a,'admin:grant:2');
+  assert.equal(changes(a).length,0);assert.deepEqual(a.store.get(KEY),state());
+  assert.equal(a.store.get('portfolio/diagnostics/last-access-change.json').kind,'access_state_unavailable');
+});
+
+test('identity reads preserve conflict rejection for large Persian records',async()=>{
+  const a=await fixture({compressAccessReads:true,beforeWrite:(key,value,options,store)=>{
+    if(key===KEY)store.set(KEY,{...store.get(KEY),approved:['3']});
+  }});
+  a.store.get(KEY).users['2'].first_name='نام فارسی '.repeat(150);
+  await click(a,'admin:grant:2');
+  assert.equal(changes(a).length,0);assert.deepEqual(a.store.get(KEY).approved,['3']);
+  assert.equal(a.store.get('portfolio/diagnostics/last-access-change.json').kind,'precondition_failed');
+});

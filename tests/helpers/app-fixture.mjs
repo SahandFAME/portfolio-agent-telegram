@@ -10,7 +10,7 @@ import { BlobPreconditionFailedError } from '@vercel/blob';
 const source = await fs.readFile(new URL('../../api/telegram.js', import.meta.url), 'utf8');
 // Evaluate the actual unmodified handler, injecting only external dependencies.
 // Named exports below exist only inside the test VM, not in application code.
-export async function app({readError=false, dispatchStatus=204, env={}, telegramReply=null,beforeWrite=null,beforeMarketFetch=null,ecoCoachHtml=null,ecoCoachError=false,ecoCoachStatus=200}={}) {
+export async function app({readError=false, dispatchStatus=204, env={}, telegramReply=null,beforeWrite=null,beforeMarketFetch=null,ecoCoachHtml=null,ecoCoachError=false,ecoCoachStatus=200,compressAccessReads=false,forceWeakEtag=false}={}) {
   const store = new Map(), writes = [], sends = [], background = [], dispatches=[], marketCalls=[];
   const tokenEnv = {PORTFOLIO_SYNC_SECRET:'fixture-primary',PORTFOLIO_SYNC_SECRET_AGENT:'fixture-secondary',
     GITHUB_ACTIONS_TOKEN:'fixture-actions',TELEGRAM_WEBHOOK_SECRET:'fixture-webhook',TELEGRAM_BOT_TOKEN:'fixture-bot',TELEGRAM_ADMIN_USER_IDS:'1',...env};
@@ -52,11 +52,12 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
     '@vercel/blob':{
       BlobPreconditionFailedError,
       head:async key=>({etag:JSON.stringify(store.get(key)),size:Buffer.byteLength(JSON.stringify(store.get(key)))}),
-      get:async key => {
+      get:async (key,options) => {
         if(typeof readError==='function'?readError(key):readError) throw new Error('fixture storage unavailable');
         if(!store.has(key)) return null;
         const text=JSON.stringify(store.get(key));
-        return {blob:{etag:text},stream:new ReadableStream({start(c){c.enqueue(Buffer.from(text));c.close();}})};
+        const weak=forceWeakEtag||(compressAccessReads&&options.headers?.['Accept-Encoding']!=='identity');
+        return {blob:{etag:weak?'W/'+text:text},stream:new ReadableStream({start(c){c.enqueue(Buffer.from(text));c.close();}})};
       },
       put:async(key,value,options)=>{
         if(beforeWrite)await beforeWrite(key,value,options,store);

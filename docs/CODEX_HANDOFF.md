@@ -8,6 +8,12 @@
 > still blocks reports. Details: [EcoCoach pricing](ECOCOACH_PRICING.md).
 
 
+> **2026-10-13 role-change repair:** compressed Blob reads produced weak
+> representation ETags, so promotion/demotion conditional writes failed.
+> Access JSON now requests identity encoding and retains strong-version
+> conditional writes. Owner protection and conflict rejection remain required.
+> Production reproduction and regression coverage: [admin dashboard](ADMIN_DASHBOARD.md).
+
 **As of:** 2026-10-10 (Tehran time)  
 **Primary repository:** https://github.com/SahandFAME/portfolio-agent-telegram  
 **Branch:** `main`  
