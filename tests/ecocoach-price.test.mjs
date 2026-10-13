@@ -81,3 +81,40 @@ test('guest charts use an available site price with one fresh sync and no price 
   const text=a.sends.filter(call=>call.url.endsWith('/sendMessage')).map(call=>JSON.parse(call.options.body).text).join('\n');
   assert.doesNotMatch(text,/قیمت فعلی|تعداد:|تومان|یادداشت|بلک راک/);
 });
+
+
+test('guest-only owner-approved fallback converts 1,030,000 toman to rial and counts the fund once without claiming a quote',async()=>{
+  for(const options of [{},{ecoCoachError:true},{ecoCoachStatus:503},{ecoCoachHtml:page(table({stamp:'2020-01-01T00:00:00Z'}))}]){
+    const a=await app(options);
+    // An old/manual request price cannot override the guest's fixed fallback.
+    const report=await a.ns.prepareAllocation(q(a),100000,{guest:true});
+    assert.equal(report.prices['بلک راک'].priceRial,10300000);
+    assert.equal(report.prices['بلک راک'].unit,'IRR/unit');
+    assert.equal(report.prices['بلک راک'].source,'Owner-approved guest fallback');
+    assert.equal(report.prices['بلک راک'].fixedPrice,true);
+    assert.equal(report.prices['بلک راک'].quotedAt,undefined);
+    assert.equal(report.prices['بلک راک'].retrievedAt,undefined);
+    assert.equal(report.vals['بلک راک'],154500000);
+    assert.equal(Object.keys(report.vals).length,29);
+    assert.equal(report.total,Object.values(report.vals).reduce((sum,value)=>sum+value,0));
+    const output=await a.ns.latestAllocationReport(q(a),null,'chart',a.payload,{guest:true});
+    assert.ok(output.png);assert.equal(output.total,undefined);assert.equal(output.captionFootnotes,undefined);
+    const admin=await a.ns.prepareAllocation(q(a),null);
+    assert.equal(admin.needsEcoCoachPrice,true);assert.equal(admin.total,undefined);
+  }
+});
+
+test('verified website quote overrides the fixed guest fallback; missing other quantities or prices still block charts',async()=>{
+  const a=await app({ecoCoachHtml:page(table())});
+  const report=await a.ns.prepareAllocation(q(a),null,{guest:true});
+  assert.equal(report.prices['بلک راک'].priceRial,8500000);
+  assert.equal(report.prices['بلک راک'].source,'EcoCoach');assert.equal(report.prices['بلک راک'].fixedPrice,undefined);
+  assert.equal(report.vals['بلک راک'],127500000);
+  const invalid=q(a);delete invalid.BTC;
+  const missing=await a.ns.latestAllocationReport(invalid,null,'chart',a.payload,{guest:true});
+  assert.ok(missing.text);assert.equal(missing.png,undefined);assert.equal(missing.total,undefined);
+  const unavailable=await app({beforeMarketFetch:()=>{throw new Error('fixture unavailable');}});
+  const failed=await unavailable.ns.latestAllocationReport(q(unavailable),null,'chart',unavailable.payload,{guest:true});
+  assert.ok(failed.text);assert.equal(failed.png,undefined);assert.equal(failed.total,undefined);
+  assert.doesNotMatch(missing.text+failed.text,/بلک راک|BTC|تومان|EcoCoach|تعداد|یادداشت/);
+});

@@ -236,21 +236,6 @@ async function telegram(req,res){
   waitUntil((async()=>{
     try{
       const pending=await loadPendingBlackRock(message.chat.id);
-      if(pending?.type==="guest_blackrock_price"&&!command.startsWith("/")){
-        const price=parseUserPrice(command);
-        if(price===null){await sendTelegram(message.chat.id,"لطفاً قیمت فعلی هر واحد را به تومان وارد کنید.",{menu:true,temporary:true});return;}
-        const record=await readPrivateJson(ALLOCATION_REQUEST_PREFIX+pending.guest_request_id+".json");
-        const current=record?await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json"):null;
-        const age=Date.now()-Date.parse(record?.requested_at);
-        if(!record||record.status!=="awaiting_price"||current?.request_id!==record.request_id||
-          !Number.isFinite(age)||age<0||age>ALLOCATION_DEADLINE_MS){
-          await savePendingBlackRock(message.chat.id,{type:"none"});
-          await sendTelegram(message.chat.id,"این درخواست نمودار منقضی یا جایگزین شده است.",{menu:true});return;
-        }
-        const reply=await requestLatestAllocation(record.chat_id,record.user_id,price,"chart",{approvedBy:uid});
-        await savePendingBlackRock(message.chat.id,{type:"none"});
-        await sendTelegram(message.chat.id,reply,{menu:true,temporary:true});return;
-      }
       if(command==="/latest_allocation"){
         await showAllocationMenu(message.chat.id);
         return;
@@ -354,11 +339,10 @@ async function readPrivateJson(key){
 async function writePrivateJson(key,value){
   await put(key,JSON.stringify(value),{access:"private",addRandomSuffix:false,allowOverwrite:true,contentType:"application/json"});
 }
-async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null,reportFormat="image",{approvedBy=null}={}){
+async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null,reportFormat="image"){
   const state=await loadAccessState({strict:true}),uid=String(userId);
   if(String(chatId)!==uid||(!isOwner(uid)&&!state.approved.includes(uid)))return "دسترسی ندارید.";
-  if(approvedBy!==null&&!isBotAdmin(String(approvedBy),state))throw new Error("price_approval_denied");
-  if(!isBotAdmin(uid,state)&&(reportFormat!=="chart"||(blackRockPriceRial!==null&&approvedBy===null)))return guestHelp();
+  if(!isBotAdmin(uid,state)&&(reportFormat!=="chart"||blackRockPriceRial!==null))return guestHelp();
   const token=process.env.GITHUB_ACTIONS_TOKEN;
   if(!token)return "دریافت تازه از OneDrive هنوز پیکربندی نشده است. گزارش قبلی به‌عنوان گزارش تازه نمایش داده نمی‌شود.";
   const active=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+chatId+".json");
@@ -367,8 +351,7 @@ async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null,rep
     return "درخواست دریافت تازه از OneDrive در حال انجام است. لطفاً منتظر پاسخ بمانید.";
   const id=crypto.randomUUID();
   const record={request_id:id,chat_id:chatId,user_id:String(userId),status:"queued",
-    requested_at:new Date().toISOString(),blackRockPriceRial,report_format:reportFormat,
-    ...(approvedBy!==null?{price_approved_by:String(approvedBy)}:{})};
+    requested_at:new Date().toISOString(),blackRockPriceRial,report_format:reportFormat};
   await writePrivateJson(ALLOCATION_REQUEST_PREFIX+id+".json",record);
   await writePrivateJson(ALLOCATION_ACTIVE_PREFIX+chatId+".json",{request_id:id});
   await savePendingBlackRock(chatId,{type:"latest_sync_pending",request_id:id,requestedAt:record.requested_at});
@@ -418,20 +401,12 @@ async function completeLatestAllocation(req,res){
          !Number.isFinite(stamp)||stamp<Date.parse(record.requested_at)||stamp>now||now-stamp>120000)
         throw new Error("verified_snapshot_changed");
       const quantities={...assets,...MANUAL};
-      const guestPriceAllowed=guest&&record.price_approved_by&&isBotAdmin(record.price_approved_by,state);
-      const report=await latestAllocationReport(quantities,guest&&!guestPriceAllowed?null:record.blackRockPriceRial,guest?"chart":record.report_format||"image",snapshot,{guest});
+      const report=await latestAllocationReport(quantities,guest?null:record.blackRockPriceRial,guest?"chart":record.report_format||"image",snapshot,{guest});
       const latest=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json");
       if(latest?.request_id!==id)return;
       if(report.text){
         if(guest){
-          if(report.needsEcoCoachPrice){
-            await writePrivateJson(ALLOCATION_REQUEST_PREFIX+id+".json",{...record,status:"awaiting_price",ecoCoach_quantity:quantities["بلک راک"]});
-            for(const admin of [...new Set([...adminUserIds(),...state.delegatedAdmins])]){
-              await sendTelegramWithKeyboard(Number(admin),"برای تکمیل نمودار یک مهمان، قیمت فعلی هر واحد بلک راک* لازم است.\nقیمت و مقدار دارایی برای مهمان نمایش داده نمی‌شود.\n\n"+assetFootnotes(["بلک راک"],{html:false}),[
-                [{text:"ثبت قیمت برای این نمودار",callback_data:"admin:guest_price:"+id}]],{temporary:false});
-            }
-          }
-          await sendTelegram(record.chat_id,report.needsEcoCoachPrice?"نمودار منتظر تأیید قیمت توسط مدیر است. پس از ثبت قیمت، نمودار تازه ارسال می‌شود.":"تهیه نمودار فعلاً ممکن نیست. لطفاً بعداً دوباره تلاش کنید.",{menu:true,audience:"guest"});return;
+          await sendTelegram(record.chat_id,"تهیه نمودار فعلاً ممکن نیست. لطفاً بعداً دوباره تلاش کنید.",{menu:true,audience:"guest"});return;
         }
         if(report.text.includes("قیمت فعلی هر واحد صندوق بلک"))await savePendingBlackRock(record.chat_id,{
           type:"latest_blackrock_price",requestedAt:new Date().toISOString(),request_id:id,report_format:record.report_format||"image"});
@@ -526,17 +501,9 @@ async function handleAccessCallback(callback){
     if(!isBotAdmin(uid,state)){await answerCallback(callback.id,"دسترسی مدیریت ندارید.");return;}
     const data=String(callback.data||"");
     const previousPanel=callbackPanelToReplace(callback);
-    const guestPrice=data.match(/^admin:guest_price:([0-9a-f-]{36})$/);
-    if(guestPrice){
-      const record=await readPrivateJson(ALLOCATION_REQUEST_PREFIX+guestPrice[1]+".json");
-      const current=record?await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json"):null;
-      const age=Date.now()-Date.parse(record?.requested_at);
-      if(!record||record.status!=="awaiting_price"||current?.request_id!==record.request_id||
-        !state.approved.includes(record.user_id)||!Number.isFinite(age)||age<0||age>ALLOCATION_DEADLINE_MS)
-        throw new Error("guest_request_expired");
-      await savePendingBlackRock(chat.id,{type:"guest_blackrock_price",guest_request_id:record.request_id});
-      await answerCallback(callback.id,"");
-      await sendTelegramWithKeyboard(chat.id,"قیمت فعلی هر واحد بلک راک* (EcoCoach) را به تومان ارسال کنید.\nتعداد: "+format(record.ecoCoach_quantity)+" واحد\n\n"+assetFootnotes(["بلک راک"],{html:false}),[adminBack()],{previousPanel});return;
+    // Old guest price-entry buttons must never reopen the retired relay flow.
+    if(data.startsWith("admin:guest_price:")){
+      await answerCallback(callback.id,"این گزینه دیگر فعال نیست؛ مهمان می‌تواند نمودار تازه درخواست کند.");return;
     }
     if(data==="admin:main_menu"){
       await answerCallback(callback.id,"");
@@ -910,6 +877,9 @@ async function getListedPrice(asset,marketHtmls){
 }
 
 const ECOCOACH_FUND_URL="https://ecocoach.net/blackrock-index";
+// Owner-authorized fallback for guest charts only; this is not a market quote.
+const GUEST_ECOCOACH_PRICE_TOMAN=1030000;
+const GUEST_ECOCOACH_PRICE_RIAL=GUEST_ECOCOACH_PRICE_TOMAN*10;
 function parseEcoCoachPrice(html,now=Date.now()){
   // Accept only an explicitly labelled per-unit quote on the observed fund page.
   // Marketing figures, return charts, total NAV and another BlackRock are ignored.
@@ -1352,9 +1322,9 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   svg+='</svg>';
   return svg;
 }
-async function prepareAllocation(q,blackRockPriceRial){
+async function prepareAllocation(q,blackRockPriceRial,{guest=false}={}){
   const {prices,errors}=await getPrices();
-  const effectiveBlackRockPrice=prices["بلک راک"]?.priceRial??blackRockPriceRial;
+  const effectiveBlackRockPrice=prices["بلک راک"]?.priceRial??(guest?GUEST_ECOCOACH_PRICE_RIAL:blackRockPriceRial);
   const usdIrr=prices["دلار"]?.priceRial;
   if(!usdIrr)return {text:"دریافت نرخ دلار آزاد ناموفق بود؛ ارزش‌گذاری انجام نشد."};
   const missingQuantities=ASSETS.filter(a=>q[a]===undefined||!Number.isFinite(Number(q[a]))||Number(q[a])<0);
@@ -1380,7 +1350,12 @@ async function prepareAllocation(q,blackRockPriceRial){
   }
   if(effectiveBlackRockPrice!==null){const v=qSafe(q["بلک راک"])*effectiveBlackRockPrice;vals["بلک راک"]=v;total+=v;delete errors["بلک راک"];}
   if(!total)return {text:"هیچ قیمت معتبر فعلی برای ارزش‌گذاری دریافت نشد."};
-  const reportPrices={...prices};if(!prices["بلک راک"]&&blackRockPriceRial!==null)reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
+  const reportPrices={...prices};
+  if(!prices["بلک راک"]&&effectiveBlackRockPrice!==null){
+    reportPrices["بلک راک"]=guest
+      ?{priceRial:GUEST_ECOCOACH_PRICE_RIAL,source:"Owner-approved guest fallback",fixedPrice:true,unit:"IRR/unit"}
+      :{priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
+  }
   if(!Number.isFinite(total)||total<=0||Object.values(vals).some(value=>!Number.isFinite(value)||value<0))
     return {text:"ارزش‌گذاری کامل و معتبر نیست؛ هیچ جمع کل، درصد یا نموداری ارائه نمی‌شود."};
   return {vals,total,prices:reportPrices,usdIrr,priceTime:new Date().toISOString()};
@@ -1419,8 +1394,8 @@ function allocationTextReport(q,report,snapshot){
   return {messages,percentages,total:report.total};
 }
 async function latestAllocationReport(q,blackRockPriceRial,format="image",snapshot=null,{guest=false}={}){
-  const report=await prepareAllocation(q,blackRockPriceRial);
-  if(report.text)return guest?{text:"تهیه نمودار فعلاً ممکن نیست؛ قیمت یکی از دارایی‌ها نیازمند تأیید مدیر است.",needsEcoCoachPrice:report.needsEcoCoachPrice===true}:report;
+  const report=await prepareAllocation(q,blackRockPriceRial,{guest});
+  if(report.text)return guest?{text:"تهیه نمودار فعلاً ممکن نیست. لطفاً بعداً دوباره تلاش کنید."}:report;
   if(guest)return {png:renderAllocationSvg(buildAllocationPieSvg(report,snapshot,{guest:true})),guestSafe:true};
   if(format==="text")return allocationTextReport(q,report,snapshot);
   if(format==="chart")return {png:renderAllocationSvg(buildAllocationPieSvg(report,snapshot)),total:report.total,captionFootnotes:assetFootnotes(ASSETS,{html:false})};
