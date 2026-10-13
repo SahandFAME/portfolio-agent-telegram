@@ -114,3 +114,12 @@ and Telegram dependencies mocked, including persistence conflicts and revocation
 during price retrieval. Production checks separately verify the deployed commit,
 protected snapshot/access metadata, conditional canary and webhook configuration.
 A real owner's menu interaction remains separate from these automated checks.
+
+
+### Storage diagnosis (2026-10-13)
+
+The authenticated storage canary checks conditional updates using representative
+UTF-8 JSON rather than a tiny ASCII record. It compares access-object read and
+metadata ETags, reporting only equality, weak/strong flags and byte size. Failure
+phase/type is returned without identifiers, ETag values, content or credentials.
+The canary never changes real user access or holdings.
