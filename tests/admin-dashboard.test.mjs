@@ -21,6 +21,7 @@ test('dashboard button appears only for the owner and currently approved chosen 
     const rows=bodies(a).find(x=>x.chat_id===id).reply_markup.keyboard;
     const keyboard=rows.flat().map(x=>x.text);
     assert.equal(keyboard.includes('پنل مدیریت'),visible);
+    if(!visible){assert.deepEqual(rows,[[{text:'نمودار ترکیب دارایی'}]]);continue;}
     assert.ok(keyboard.includes('آخرین ترکیب دارایی'));
     assert.deepEqual(rows[0],[{text:'آخرین ترکیب دارایی'}]);
     assert.equal(rows.at(-1).length,visible?2:1);
@@ -37,10 +38,10 @@ test('owner dashboard provides access requests, users, roles, system status and 
     ['admin:users:0','admin:pending:0','admin:status','admin:audit','admin:admins:0','admin:main_menu']);
 });
 
-test('chosen admin dashboard excludes owner-only role management',async()=>{
+test('chosen admin dashboard includes authorized role management',async()=>{
   const a=await fixture();await a.request('POST',{},message('/admin',3),header);
   const dashboard=bodies(a).at(-1);assert.match(dashboard.text,/مدیر منتخب/);
-  assert.equal(dashboard.reply_markup.inline_keyboard.flat().some(x=>x.callback_data.startsWith('admin:admins')),false);
+  assert.equal(dashboard.reply_markup.inline_keyboard.flat().some(x=>x.callback_data.startsWith('admin:admins')),true);
 });
 
 test('typing the admin button or command cannot bypass authorization',async()=>{
@@ -78,8 +79,8 @@ test('pending and unknown users cannot be made admins before access approval',as
   }
 });
 
-test('chosen admins cannot grant roles, remove another admin role or open role management',async()=>{
-  for(const data of ['admin:grant:2','admin:demote:3','admin:admins:0']){
+test('chosen admins cannot change their own role or the owner role',async()=>{
+  for(const data of ['admin:grant:3','admin:demote:3','admin:demote:1']){
     const a=await fixture();await click(a,data,3);
     assert.equal(changes(a).length,0);assert.equal(bodies(a).length,0);
     assert.match(callbacks(a).at(-1).text,/مجوزها|وضعیت/);
@@ -90,17 +91,17 @@ test('owner can remove admin rights while preserving ordinary portfolio access',
   const a=await fixture();await click(a,'admin:demote:3');
   assert.deepEqual(a.store.get(KEY).delegatedAdmins,[]);assert.ok(a.store.get(KEY).approved.includes('3'));
   const notice=bodies(a).find(x=>x.chat_id===3);
-  assert.match(notice.text,/دسترسی عادی.*برقرار/);
+  assert.match(notice.text,/نقش شما به مهمان تغییر کرد/);
   assert.equal(notice.reply_markup.keyboard.flat().some(x=>x.text==='پنل مدیریت'),false);
-  a.sends.length=0;await click(a,'admin:approve:5',3);assert.equal(changes(a).length,1);
+  a.sends.length=0;await click(a,'admin:approve_guest:5',3);assert.equal(changes(a).length,1);
   assert.equal(a.store.get(KEY).approved.includes('5'),false);
 });
 
 test('chosen admin can approve a pending request and retain all prior users and roles',async()=>{
-  const a=await fixture();await click(a,'admin:approve:5',3);
+  const a=await fixture();await click(a,'admin:approve_guest:5',3);
   const saved=a.store.get(KEY);assert.deepEqual(saved.approved,['2','3','5']);
   assert.deepEqual(saved.delegatedAdmins,['3']);assert.equal(saved.pending['5'],undefined);
-  assert.equal(saved.users['5'].username,'fixture_user');assert.equal(saved.audit[0].action,'approve');
+  assert.equal(saved.users['5'].username,'fixture_user');assert.equal(saved.audit[0].action,'approve_guest');
   assert.match(bodies(a).find(x=>x.chat_id===5).text,/تأیید/);
 });
 
@@ -111,7 +112,7 @@ test('chosen admin can reject a pending request without granting access',async()
 });
 
 test('old approval buttons cannot silently reapprove a revoked user',async()=>{
-  const a=await fixture();await click(a,'admin:approve:5');await click(a,'admin:confirm_revoke:5');
+  const a=await fixture();await click(a,'admin:approve_guest:5');await click(a,'admin:confirm_revoke:5');
   const count=changes(a).length;
   for(const data of ['admin:approve:5','access:approve:5'])await click(a,data);
   assert.equal(changes(a).length,count);assert.equal(a.store.get(KEY).approved.includes('5'),false);
@@ -203,12 +204,14 @@ test('user and request lists are paginated and display names safely as plain tex
 
 test('access audit records role changes and is available to current admins only',async()=>{
   const a=await fixture();await click(a,'admin:grant:2');await click(a,'admin:audit',3);
-  assert.match(bodies(a).at(-1).text,/افزودن مدیر/);
+  assert.match(bodies(a).at(-1).text,/ارتقا به مدیر/);
   assert.match(bodies(a).at(-1).text,/کاربر: 2.*مدیر: 1/);
 });
 
 test('legacy approve and revoke commands retain owner authorization and conditional persistence',async()=>{
   const a=await fixture();await a.request('POST',{},message('/approve 5'),header);
+  assert.equal(a.store.get(KEY).approved.includes('5'),false);
+  await click(a,'admin:approve_guest:5');
   assert.ok(a.store.get(KEY).approved.includes('5'));
   await a.request('POST',{},message('/revoke 5'),header);assert.equal(a.store.get(KEY).approved.includes('5'),false);
   assert.ok(changes(a).every(x=>x.options.ifMatch));
@@ -226,7 +229,7 @@ test('concurrent role removal prevents a stale delegated approval from overwriti
   const a=await fixture({beforeWrite:(key,value,options,store)=>{
     if(key===KEY&&conflict){conflict=false;store.set(KEY,{...store.get(KEY),delegatedAdmins:[]});}
   }});
-  await click(a,'admin:approve:5',3);
+  await click(a,'admin:approve_guest:5',3);
   assert.equal(changes(a).length,0);assert.deepEqual(a.store.get(KEY).delegatedAdmins,[]);
   assert.equal(a.store.get(KEY).approved.includes('5'),false);assert.ok(a.store.get(KEY).pending['5']);
   assert.equal(bodies(a).some(x=>x.chat_id===5),false);

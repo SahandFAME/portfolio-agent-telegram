@@ -94,6 +94,22 @@ The six manual holdings stay separate and unchanged. The workbook is never
 saved, edited or uploaded. No credentials, quantities, prices or chat IDs are
 printed by the sync worker. Workbook total validation is fail-closed.
 
+## Guest reporting (owner-authorized 2026-10-13)
+
+Approved non-admins have guest access to the composition chart only. The guest
+renderer omits portfolio totals, asset notes and caption footnotes, while keeping
+the category percentages from the same complete current valuation. Server-side
+command, callback and delivery checks enforce this restriction. Admin demotion
+during pricing or multi-message delivery blocks the previously prepared full
+report. Guest requests with a missing EcoCoach price prompt an admin privately;
+after manual entry the guest's request repeats fresh synchronization and receives
+only the chart. All request deadlines and snapshot correlation safeguards remain.
+
+Complete valuations first check the fund's public EcoCoach page, retaining quote
+identity, per-unit currency and source freshness. The observed page currently
+provides no unit quote, so manual fallback remains expected. See
+[ECOCOACH_PRICING.md](ECOCOACH_PRICING.md) for evidence and validation rules.
+
 ## Production dispatch credential
 
 Existing Microsoft authorization, token rotation and repository

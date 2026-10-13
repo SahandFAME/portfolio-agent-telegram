@@ -77,7 +77,7 @@ async function app({readError=false, quoteFailure=false, env={}}={}) {
 test('EcoCoach remains the exact concise prompt when it is the only missing price', async()=>{
   const a=await app();const quantities={...a.assets,...a.ns.MANUAL,'بلک راک':15};
   const report=await a.ns.allocationImageReply(quantities,null);
-  assert.equal(report.text,'برای تهیه گزارش، قیمت فعلی هر واحد صندوق بلک راک* (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: 15 واحد\n\n<b>یادداشت دارایی‌ها (*)</b>\n<b>بلک راک*</b>: صندوق خصوصی اکوکوچ است؛ قیمت فعلی هر واحد را کاربر وارد می‌کند.');
+  assert.equal(report.text,'برای تهیه گزارش، قیمت فعلی هر واحد صندوق بلک راک* (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: 15 واحد\n\n<b>یادداشت دارایی‌ها (*)</b>\n<b>بلک راک*</b>: صندوق خصوصی اکوکوچ است؛ قیمت واحد ابتدا در سایت صندوق بررسی می‌شود؛ در صورت نبود قیمت معتبر، مدیر آن را وارد می‌کند.');
   assert.equal(report.png,undefined);
 });
 

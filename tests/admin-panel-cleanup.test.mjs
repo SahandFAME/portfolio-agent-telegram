@@ -89,7 +89,7 @@ test('ordinary users cannot delete panel messages through forged callbacks',asyn
 test('unanswered access notifications remain while admin screens are replaced',async()=>{
   const a=await fixture();await a.request('POST',{},message('/start',4),header);
   const notifications=a.sends.map((call,index)=>({call,id:index+1})).filter(({call})=>
-    method(call)==='sendMessage'&&body(call).reply_markup?.inline_keyboard?.flat().some(x=>x.callback_data==='access:approve:4'));
+    method(call)==='sendMessage'&&body(call).reply_markup?.inline_keyboard?.flat().some(x=>x.callback_data==='admin:approve_guest:4'));
   assert.equal(notifications.length,2);
   await a.request('POST',{},message('/admin'),header);
   await a.request('POST',{},click('admin:status'),header);
