@@ -71,7 +71,7 @@ test('pictured footnotes use readable Persian EcoCoach text and remain inside an
     assert.ok(svg.includes('>'+asset+'*</text>'),asset);
     assert.ok(footer.includes(asset+'*: '),asset);
   }
-  assert.ok(footer.includes('بلک راک*: صندوق خصوصی اکوکوچ است؛ قیمت فعلی هر واحد را کاربر وارد می‌کند.'));
+  assert.ok(footer.includes('بلک راک*: صندوق خصوصی اکوکوچ است؛ قیمت واحد ابتدا در سایت صندوق بررسی می‌شود؛ در صورت نبود قیمت معتبر، مدیر آن را وارد می‌کند.'));
   assert.doesNotMatch(footer,/EcoCoach|<tspan/);
   assert.ok(imageHeight>2160);
   for(const node of texts){assert.equal(+node[1],1730);assert.ok(+node[2]<+rect[1]+Number(rect[2])-20);}

@@ -22,8 +22,8 @@ normally; Telegram controls behavior on the phone Back button and chat re-entry.
 | Control | Function |
 |---|---|
 | کاربران مجاز | Paginated user list, names/IDs/roles, access revocation with confirmation |
-| درخواست‌های دسترسی | Approve or reject pending requests |
-| مدیریت مدیران | Owner-only selection/removal of admin roles from approved users |
+| درخواست‌های دسترسی | Approve as guest/admin, or reject pending requests |
+| مدیریت نقش‌ها | Promote an approved guest or demote another admin to guest |
 | وضعیت سامانه | Snapshot age/count, Tehran timestamps, configuration and current request status |
 | آزمون ذخیره‌سازی | Verify write/readback and stale-write rejection on a separate private canary |
 | رویدادهای مدیریت | Last ten access/role changes, actors and Tehran timestamps |
@@ -32,13 +32,29 @@ The immutable owner identities remain the existing `TELEGRAM_ADMIN_USER_IDS`
 configuration. No new owner ID or credential is required. Dashboard controls
 cannot remove these identities; changing ownership requires deployment settings.
 
-The owner may choose additional admins only from currently approved users.
-Chosen admins can approve/reject requests and revoke ordinary user access. Only
-the owner can grant/remove admin roles or revoke a chosen admin's portfolio
-access. Chosen admins cannot revoke owners, other admins, or themselves.
-Removing an admin role preserves ordinary portfolio access. Revoking portfolio
+As authorized by the owner on 2026-10-13, every current admin may approve a new
+request explicitly as **guest** or **admin**, promote an existing approved guest,
+or demote another admin to guest. Role changes cannot target the immutable owner
+or the actor's own role. Admins can revoke guests; direct revocation of another
+admin remains an owner action. Demotion preserves approval but restricts access
+to the guest chart. Revoking portfolio
 access removes both permissions, clears pending price input and removes the
 keyboard. Users receive the result of the access change.
+
+Existing approved users without a delegated admin role are guests automatically;
+no ownership/access-state rewrite is needed. Guests receive only the percentage
+composition chart. They cannot access quantities, total valuation, notes,
+category reports, the image/text report submenu, status diagnostics or admin
+controls through buttons, slash commands, aliases or old callbacks. Admins and
+the owner retain the full report menu. Guest charts and captions contain no
+total or footnotes; no detailed valuation object is returned in guest mode.
+
+If the EcoCoach price requires manual input for a guest chart, admins receive a
+private prompt button. An authorized admin selects the matching pending request
+and enters the price. The bot starts a second fresh OneDrive sync for that guest
+and renders only the redacted chart. The guest never sees the fund quantity,
+manual price prompt or notes. Expired, replaced and revoked requests cannot be
+resumed; the entered price is scoped to that request, not a reusable quote cache.
 
 Names come from recorded access requests or a read-only Telegram `getChat`
 lookup; unavailable names fall back to the numeric Telegram ID. Lists paginate
@@ -51,7 +67,10 @@ eight entries at a time. Display names are sent as plain text, not HTML.
   privileges.
 - Callbacks require the actor's own private chat and current permissions. Old
   approval buttons cannot reapprove a revoked user without a new pending request.
-- Admin list delivery and portfolio text/image delivery recheck current access.
+- Admin list delivery and portfolio text/image delivery recheck current roles.
+  Sensitive report delivery requires an admin role, including between text
+  chunks. An image prepared before demotion cannot be delivered as a guest
+  image. Guest-safe image delivery is a separate renderer path.
   Revoked users cannot resume queued allocations or receive images after access
   is removed while prices are loading.
 - `portfolio/access-control.json` remains private. The existing approved/pending
@@ -65,7 +84,8 @@ eight entries at a time. Display names are sent as plain text, not HTML.
   storage test uses only `portfolio/diagnostics/access-storage.json`; it never
   writes permissions, quantities or the workbook.
 - `/users`, `/approve USER_ID` and `/revoke USER_ID` remain available to current
-  admins with the same owner protections. Dashboard revocation asks for
+  admins with the same owner protections. The approve command and legacy approve
+  buttons open an explicit role choice. Dashboard revocation asks for
   confirmation; the explicit `/revoke` command remains immediate.
 
 ## Safe operational verification

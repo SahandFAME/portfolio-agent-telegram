@@ -29,7 +29,8 @@ message field to reopen it.
 **آخرین ترکیب دارایی** occupies the first row by itself as a wide primary
 button. Other reports use two-button rows. For the owner and approved delegated
 admins, **پنل مدیریت** shares the last row with **راهنما**, giving it the same
-width as the regular buttons. Ordinary approved users see no admin button.
+width as the regular buttons. Approved guests receive only **نمودار ترکیب دارایی**;
+the owner/admin report menu and full reports are inaccessible to guests.
 
 The menu stays reusable after a selection (`one_time_keyboard: false`), while
 `is_persistent: false` permits normal dismissal instead of asking Telegram to

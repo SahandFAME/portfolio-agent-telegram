@@ -17,7 +17,7 @@ const ASSETS = [
 const MANUAL = {"سکه تمام":3,"ربع سکه غیره":3,"ربع سکه بانکی":1,"آبشده (طلب)":1.37,"آبشده (شمش زربد)":20,"دلار":3030};
 // Historical comments from CODEX_HANDOFF.md; never use these figures as quotes.
 const ASSET_COMMENTS={
-  "بلک راک":"صندوق خصوصی اکوکوچ است؛ قیمت فعلی هر واحد را کاربر وارد می‌کند.",
+  "بلک راک":"صندوق خصوصی اکوکوچ است؛ قیمت واحد ابتدا در سایت صندوق بررسی می‌شود؛ در صورت نبود قیمت معتبر، مدیر آن را وارد می‌کند.",
   "آبشده (طلب)":"طلب از مامان به ازای ما به تفاوت خرید شمش زربد (9200 تومان در گرم طلا 6718)",
   "آبشده (شمش زربد)":"شمش زربد (در گرم 6718)؛ 1404/01/26",
   "دلار":"خریدهای تاریخی: 700 دلار در 83000 (04/02/20)؛ 2300 دلار در 108800 (04/08/04)"
@@ -138,6 +138,7 @@ async function readAccessHealth(req,res){
     return res.status(200).json({ok:true,owner_count:adminUserIds().length,
       approved_count:state.approved.length,pending_count:Object.keys(state.pending).length,
       delegated_admin_count:state.delegatedAdmins.length,audit_count:state.audit.length,
+      guest_count:state.approved.filter(id=>!isBotAdmin(id,state)).length,guest_chart_only:true,
       conditional_updates_ready:!state._exists||!!state._etag});
   }catch(_){return res.status(503).json({ok:false,error:"Access storage unavailable"});}
 }
@@ -196,7 +197,7 @@ async function telegram(req,res){
   const message=req.body?.message;
   if(!message?.chat?.id)return res.status(200).json({ok:true});
   const userId=message.from?.id;
-  if(message.chat.type!=="private"||userId===undefined)return res.status(200).json({ok:true});
+  if(message.chat.type!=="private"||userId===undefined||String(message.chat.id)!==String(userId))return res.status(200).json({ok:true});
   const text=(message.text||"").trim();
   const command=MENU_COMMANDS.get(text)||text;
   const uid=String(userId);
@@ -220,9 +221,36 @@ async function telegram(req,res){
     return res.status(200).json({ok:true});
   }
 
+  if(!isAdmin){
+    waitUntil((async()=>{
+      try{
+      if(command==="/allocation_chart"){
+        const reply=await requestLatestAllocation(message.chat.id,uid,null,"chart");
+        await sendTelegram(message.chat.id,reply,{menu:true,temporary:true,audience:"guest"});
+      }else await sendTelegram(message.chat.id,guestHelp(),{menu:true,audience:"guest"});
+      }catch(_){await sendTelegram(message.chat.id,"دریافت نمودار ناموفق بود. لطفاً دوباره تلاش کنید.",{menu:true,audience:"guest"});}
+    })());
+    return res.status(200).json({ok:true});
+  }
+
   waitUntil((async()=>{
     try{
       const pending=await loadPendingBlackRock(message.chat.id);
+      if(pending?.type==="guest_blackrock_price"&&!command.startsWith("/")){
+        const price=parseUserPrice(command);
+        if(price===null){await sendTelegram(message.chat.id,"لطفاً قیمت فعلی هر واحد را به تومان وارد کنید.",{menu:true,temporary:true});return;}
+        const record=await readPrivateJson(ALLOCATION_REQUEST_PREFIX+pending.guest_request_id+".json");
+        const current=record?await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json"):null;
+        const age=Date.now()-Date.parse(record?.requested_at);
+        if(!record||record.status!=="awaiting_price"||current?.request_id!==record.request_id||
+          !Number.isFinite(age)||age<0||age>ALLOCATION_DEADLINE_MS){
+          await savePendingBlackRock(message.chat.id,{type:"none"});
+          await sendTelegram(message.chat.id,"این درخواست نمودار منقضی یا جایگزین شده است.",{menu:true});return;
+        }
+        const reply=await requestLatestAllocation(record.chat_id,record.user_id,price,"chart",{approvedBy:uid});
+        await savePendingBlackRock(message.chat.id,{type:"none"});
+        await sendTelegram(message.chat.id,reply,{menu:true,temporary:true});return;
+      }
       if(command==="/latest_allocation"){
         await showAllocationMenu(message.chat.id);
         return;
@@ -279,12 +307,12 @@ const ALLOCATION_ACTIVE_PREFIX="portfolio/latest-allocation/active/";
 const ALLOCATION_SELECTION_PREFIX="portfolio/latest-allocation/selections/";
 const ALLOCATION_DEADLINE_MS=10*60*1000;
 async function showAllocationMenu(chatId){
-  if(!await portfolioKeyboard(chatId))return;
+  if(!isBotAdmin(String(chatId),await loadAccessState({strict:true})))return;
   const selection={selection_id:crypto.randomUUID(),created_at:new Date().toISOString(),used:false};
   await writePrivateJson(ALLOCATION_SELECTION_PREFIX+chatId+".json",selection);
   await savePendingBlackRock(chatId,{type:"allocation_format_selection",selection_id:selection.selection_id});
   await sendMainMenu(chatId);
-  if(!await portfolioKeyboard(chatId))return;
+  if(!isBotAdmin(String(chatId),await loadAccessState({strict:true})))return;
   const data=format=>"allocation:pick:"+selection.selection_id+":"+format;
   await deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
     chat_id:chatId,text:"آخرین ترکیب دارایی\n\nنوع گزارش را انتخاب کنید. پس از انتخاب، مقادیر تازه از OneDrive و قیمت‌های تازه بازار دریافت می‌شوند.",
@@ -299,6 +327,7 @@ async function handleAllocationCallback(callback){
     const state=await loadAccessState({strict:true});
     if(!isOwner(uid)&&!state.approved.includes(uid)){await answerCallback(callback.id,"دسترسی ندارید.");return;}
     const match=String(callback.data||"").match(/^allocation:pick:([0-9a-f-]{36}):(image|text|menu)$/);
+    if(match?.[2]!=="menu"&&!isBotAdmin(uid,state)){await answerCallback(callback.id,"فقط نمودار درصدی برای مهمان قابل دسترسی است.");return;}
     const selection=await readPrivateJson(ALLOCATION_SELECTION_PREFIX+chat.id+".json");
     const age=Date.now()-Date.parse(selection?.created_at);
     if(!match||selection?.selection_id!==match[1]||selection.used||!Number.isFinite(age)||age<0||age>ALLOCATION_DEADLINE_MS){
@@ -325,7 +354,11 @@ async function readPrivateJson(key){
 async function writePrivateJson(key,value){
   await put(key,JSON.stringify(value),{access:"private",addRandomSuffix:false,allowOverwrite:true,contentType:"application/json"});
 }
-async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null,reportFormat="image"){
+async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null,reportFormat="image",{approvedBy=null}={}){
+  const state=await loadAccessState({strict:true}),uid=String(userId);
+  if(String(chatId)!==uid||(!isOwner(uid)&&!state.approved.includes(uid)))return "دسترسی ندارید.";
+  if(approvedBy!==null&&!isBotAdmin(String(approvedBy),state))throw new Error("price_approval_denied");
+  if(!isBotAdmin(uid,state)&&(reportFormat!=="chart"||(blackRockPriceRial!==null&&approvedBy===null)))return guestHelp();
   const token=process.env.GITHUB_ACTIONS_TOKEN;
   if(!token)return "دریافت تازه از OneDrive هنوز پیکربندی نشده است. گزارش قبلی به‌عنوان گزارش تازه نمایش داده نمی‌شود.";
   const active=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+chatId+".json");
@@ -334,7 +367,8 @@ async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null,rep
     return "درخواست دریافت تازه از OneDrive در حال انجام است. لطفاً منتظر پاسخ بمانید.";
   const id=crypto.randomUUID();
   const record={request_id:id,chat_id:chatId,user_id:String(userId),status:"queued",
-    requested_at:new Date().toISOString(),blackRockPriceRial,report_format:reportFormat};
+    requested_at:new Date().toISOString(),blackRockPriceRial,report_format:reportFormat,
+    ...(approvedBy!==null?{price_approved_by:String(approvedBy)}:{})};
   await writePrivateJson(ALLOCATION_REQUEST_PREFIX+id+".json",record);
   await writePrivateJson(ALLOCATION_ACTIVE_PREFIX+chatId+".json",{request_id:id});
   await savePendingBlackRock(chatId,{type:"latest_sync_pending",request_id:id,requestedAt:record.requested_at});
@@ -370,9 +404,10 @@ async function completeLatestAllocation(req,res){
     try{
       const state=await loadAccessState();
       if(!new Set([...(state.approved||[]).map(String),...adminUserIds()]).has(record.user_id))return;
+      const guest=!isBotAdmin(record.user_id,state);
       await savePendingBlackRock(record.chat_id,{type:"none",updatedAt:new Date().toISOString()});
       if(!body.ok||Date.now()-Date.parse(record.requested_at)>ALLOCATION_DEADLINE_MS){
-        await sendTelegram(record.chat_id,"دریافت یا تأیید مقادیر تازه OneDrive ناموفق بود. گزارش تازه تهیه نشد؛ لطفاً Latest Allocation را دوباره انتخاب کنید.",{menu:true});return;
+        await sendTelegram(record.chat_id,"دریافت تازه ناموفق بود. لطفاً گزارش را دوباره درخواست کنید.",{menu:true,audience:"guest"});return;
       }
       const snapshot=await loadSnapshot();
       const journal=ASSETS.filter(a=>!(a in MANUAL));
@@ -383,10 +418,21 @@ async function completeLatestAllocation(req,res){
          !Number.isFinite(stamp)||stamp<Date.parse(record.requested_at)||stamp>now||now-stamp>120000)
         throw new Error("verified_snapshot_changed");
       const quantities={...assets,...MANUAL};
-      const report=await latestAllocationReport(quantities,record.blackRockPriceRial,record.report_format||"image",snapshot);
+      const guestPriceAllowed=guest&&record.price_approved_by&&isBotAdmin(record.price_approved_by,state);
+      const report=await latestAllocationReport(quantities,guest&&!guestPriceAllowed?null:record.blackRockPriceRial,guest?"chart":record.report_format||"image",snapshot,{guest});
       const latest=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json");
       if(latest?.request_id!==id)return;
       if(report.text){
+        if(guest){
+          if(report.needsEcoCoachPrice){
+            await writePrivateJson(ALLOCATION_REQUEST_PREFIX+id+".json",{...record,status:"awaiting_price",ecoCoach_quantity:quantities["بلک راک"]});
+            for(const admin of [...new Set([...adminUserIds(),...state.delegatedAdmins])]){
+              await sendTelegramWithKeyboard(Number(admin),"برای تکمیل نمودار یک مهمان، قیمت فعلی هر واحد بلک راک* لازم است.\nقیمت و مقدار دارایی برای مهمان نمایش داده نمی‌شود.\n\n"+assetFootnotes(["بلک راک"],{html:false}),[
+                [{text:"ثبت قیمت برای این نمودار",callback_data:"admin:guest_price:"+id}]],{temporary:false});
+            }
+          }
+          await sendTelegram(record.chat_id,report.needsEcoCoachPrice?"نمودار منتظر تأیید قیمت توسط مدیر است. پس از ثبت قیمت، نمودار تازه ارسال می‌شود.":"تهیه نمودار فعلاً ممکن نیست. لطفاً بعداً دوباره تلاش کنید.",{menu:true,audience:"guest"});return;
+        }
         if(report.text.includes("قیمت فعلی هر واحد صندوق بلک"))await savePendingBlackRock(record.chat_id,{
           type:"latest_blackrock_price",requestedAt:new Date().toISOString(),request_id:id,report_format:record.report_format||"image"});
         await sendTelegram(record.chat_id,report.text,{menu:true,temporary:report.text.includes("قیمت فعلی هر واحد صندوق بلک")});
@@ -398,10 +444,10 @@ async function completeLatestAllocation(req,res){
         }
       }else{
         await savePendingBlackRock(record.chat_id,{type:"none",updatedAt:new Date().toISOString()});
-        await sendTelegramPhoto(record.chat_id,report.png,(record.report_format==="chart"?"نمودار ترکیب دارایی":"آخرین ترکیب دارایی")+" • مقادیر تازه OneDrive و قیمت‌های تازه بازار"+(report.captionFootnotes?"\n\n"+report.captionFootnotes:""));
+        await sendTelegramPhoto(record.chat_id,report.png,guest?"نمودار درصد ترکیب دارایی":(record.report_format==="chart"?"نمودار ترکیب دارایی":"آخرین ترکیب دارایی")+" • مقادیر تازه OneDrive و قیمت‌های تازه بازار"+(report.captionFootnotes?"\n\n"+report.captionFootnotes:""),{guestSafe:guest});
       }
     }catch(_){
-      await sendTelegram(record.chat_id,"تأیید Snapshot تازه یا تهیه گزارش ناموفق بود. لطفاً Latest Allocation را دوباره انتخاب کنید.",{menu:true});
+      await sendTelegram(record.chat_id,"دریافت تازه یا تهیه گزارش ناموفق بود. لطفاً دوباره تلاش کنید.",{menu:true,audience:"guest"});
     }
   })());
   return res.status(200).json({ok:true});
@@ -466,7 +512,8 @@ async function requestAccess(uid,user){
   const display=[user.first_name,user.last_name].filter(Boolean).join(" ")||"Telegram user";
   const who=display+(user.username?" (@"+user.username+")":"")+"\nUser ID: "+uid;
   for(const adminId of adminIds){
-    await sendTelegramWithKeyboard(adminId,"New portfolio bot access request\n\n"+who,[[{text:"Approve",callback_data:"access:approve:"+uid},{text:"Reject",callback_data:"access:reject:"+uid}]],{temporary:false});
+    await sendTelegramWithKeyboard(adminId,"درخواست دسترسی جدید\n\n"+who,[[{text:"تأیید به‌عنوان مهمان",callback_data:"admin:approve_guest:"+uid},{text:"تأیید به‌عنوان مدیر",callback_data:"admin:approve_admin:"+uid}],
+      [{text:"رد درخواست",callback_data:"access:reject:"+uid}]],{temporary:false});
   }
   return "Your access request has been sent to the bot admin. You will receive a message when it is reviewed.";
 }
@@ -479,6 +526,18 @@ async function handleAccessCallback(callback){
     if(!isBotAdmin(uid,state)){await answerCallback(callback.id,"دسترسی مدیریت ندارید.");return;}
     const data=String(callback.data||"");
     const previousPanel=callbackPanelToReplace(callback);
+    const guestPrice=data.match(/^admin:guest_price:([0-9a-f-]{36})$/);
+    if(guestPrice){
+      const record=await readPrivateJson(ALLOCATION_REQUEST_PREFIX+guestPrice[1]+".json");
+      const current=record?await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json"):null;
+      const age=Date.now()-Date.parse(record?.requested_at);
+      if(!record||record.status!=="awaiting_price"||current?.request_id!==record.request_id||
+        !state.approved.includes(record.user_id)||!Number.isFinite(age)||age<0||age>ALLOCATION_DEADLINE_MS)
+        throw new Error("guest_request_expired");
+      await savePendingBlackRock(chat.id,{type:"guest_blackrock_price",guest_request_id:record.request_id});
+      await answerCallback(callback.id,"");
+      await sendTelegramWithKeyboard(chat.id,"قیمت فعلی هر واحد بلک راک* (EcoCoach) را به تومان ارسال کنید.\nتعداد: "+format(record.ecoCoach_quantity)+" واحد\n\n"+assetFootnotes(["بلک راک"],{html:false}),[adminBack()],{previousPanel});return;
+    }
     if(data==="admin:main_menu"){
       await answerCallback(callback.id,"");
       await trackPreviousAdminPanel(chat.id,previousPanel);
@@ -487,6 +546,7 @@ async function handleAccessCallback(callback){
     const legacy=data.match(/^access:(approve|reject):([1-9]\d*)$/);
     if(legacy){
       if(!state.pending[legacy[2]]){await answerCallback(callback.id,"این درخواست دیگر در انتظار نیست.");return;}
+      if(legacy[1]==="approve"){await answerCallback(callback.id,"");await showApprovalRoles(chat.id,legacy[2],previousPanel);return;}
       await changeAccess(uid,legacy[2],legacy[1],state);changed=true;
       await answerCallback(callback.id,"انجام شد.");await showAdminDashboard(chat.id,uid,"home",0,previousPanel);return;
     }
@@ -497,10 +557,11 @@ async function handleAccessCallback(callback){
     }
     const page=data.match(/^admin:(home|users|pending|admins|status|audit)(?::(\d+))?$/);
     if(page){await answerCallback(callback.id,"");await showAdminDashboard(chat.id,uid,page[1],Number(page[2]||0),previousPanel);return;}
-    const action=data.match(/^admin:(approve|reject|revoke|confirm_revoke|grant|demote):([1-9]\d*)$/);
+    const action=data.match(/^admin:(approve_guest|approve_admin|approve|reject|revoke|confirm_revoke|grant|demote):([1-9]\d*)$/);
     if(!action){await answerCallback(callback.id,"گزینه نامعتبر.");return;}
     const [_,operation,target]=action;
-    if((operation==="approve"||operation==="reject")&&!state.pending[target])throw new Error("request_not_pending");
+    if((operation.startsWith("approve")||operation==="reject")&&!state.pending[target])throw new Error("request_not_pending");
+    if(operation==="approve"){await answerCallback(callback.id,"");await showApprovalRoles(chat.id,target,previousPanel);return;}
     if(operation==="revoke"){
       validateAccessChange(uid,target,"revoke",state);
       await answerCallback(callback.id,"");
@@ -518,36 +579,45 @@ async function handleAdminAccessCommand(chatId,command,uid){
   try{
     const state=await loadAccessState({strict:true});
     if(!isBotAdmin(uid,state)){await sendTelegram(chatId,"دسترسی مدیریت ندارید.",{
-      menu:state.approved.includes(uid),removeMenu:!state.approved.includes(uid)});return;}
+      menu:state.approved.includes(uid),removeMenu:!state.approved.includes(uid),audience:"guest"});return;}
     if(/^\/admin(?:@\w+)?$/.test(command)){
       await sendMainMenu(chatId);await showAdminDashboard(chatId,uid);return;
     }
     if(/^\/users(?:@\w+)?$/.test(command)){await showAdminDashboard(chatId,uid,"users");return;}
     const action=command.match(/^\/(approve|revoke)(?:@\w+)?\s+([1-9]\d*)$/);
-    if(action){await changeAccess(uid,action[2],action[1],state);changed=true;await showAdminDashboard(chatId,uid);}
+    if(action){
+      if(action[1]==="approve"){
+        if(!state.pending[action[2]])throw new Error("request_not_pending");
+        await showApprovalRoles(chatId,action[2]);return;
+      }
+      await changeAccess(uid,action[2],action[1],state);changed=true;await showAdminDashboard(chatId,uid);
+    }
   }catch(_){await sendTelegram(chatId,changed?"تغییر ثبت شد. برای نمایش وضعیت جدید، پنل را دوباره باز کنید.":
     "عملیات انجام نشد. پنل را دوباره باز کنید و مجوزها را بررسی کنید.",{menu:true});}
 }
 function validateAccessChange(actor,target,action,state){
   if(!isBotAdmin(actor,state)||!/^[1-9]\d*$/.test(target)||!Number.isSafeInteger(Number(target))||isOwner(target))throw new Error("access_change_denied");
   if(action==="grant"||action==="demote"){
-    if(!isOwner(actor)||!state.approved.includes(target))throw new Error("owner_permission_required");
+    if(actor===target||!state.approved.includes(target))throw new Error("role_change_denied");
     if(action==="demote"&&!state.delegatedAdmins.includes(target))throw new Error("not_an_admin");
   }else if(action==="revoke"){
     if(!state.approved.includes(target)&&!state.pending[target])throw new Error("unknown_user");
     if(!isOwner(actor)&&state.delegatedAdmins.includes(target))throw new Error("owner_permission_required");
   }else if(action==="reject"){
     if(!state.pending[target]||state.approved.includes(target))throw new Error("request_not_pending");
-  }else if(action!=="approve")throw new Error("unknown_action");
+  }else if(action==="approve_guest"||action==="approve_admin"){
+    if(!state.pending[target]||state.approved.includes(target))throw new Error("request_not_pending");
+  }else throw new Error("unknown_action");
 }
 async function changeAccess(actor,target,action,state){
   validateAccessChange(actor,target,action,state);
   if(action==="grant")state.delegatedAdmins=[...new Set([...state.delegatedAdmins,target])];
   else if(action==="demote")state.delegatedAdmins=state.delegatedAdmins.filter(x=>x!==target);
-  else if(action==="approve"){
+  else if(action==="approve_guest"||action==="approve_admin"){
     state.approved=[...new Set([...state.approved,target])];
     if(state.pending[target])state.users[target]=state.pending[target];
     delete state.pending[target];
+    if(action==="approve_admin")state.delegatedAdmins=[...new Set([...state.delegatedAdmins,target])];
   }else{
     if(action==="revoke"){
       state.approved=state.approved.filter(x=>x!==target);
@@ -558,15 +628,23 @@ async function changeAccess(actor,target,action,state){
   state.audit.push({at:new Date().toISOString(),actor_id:actor,target_id:target,action});
   state.audit=state.audit.slice(-100);
   await saveAccessState(state);
-  if(action==="revoke"){
+  if(action==="revoke"||action==="demote"){
     try{await savePendingBlackRock(target,{type:"none",updatedAt:new Date().toISOString()});}catch(_){}
   }
-  const notices={approve:"دسترسی شما تأیید شد. برای نمایش منو /start را ارسال کنید.",
+  const notices={approve_guest:"دسترسی مهمان شما تأیید شد؛ فقط نمودار درصد ترکیب دارایی در دسترس است.",
+    approve_admin:"دسترسی شما به‌عنوان مدیر تأیید شد. برای نمایش منو /start را ارسال کنید.",
     reject:"درخواست دسترسی شما رد شد.",revoke:"دسترسی شما به ربات پرتفوی لغو شد.",
     grant:"دسترسی مدیریت برای شما فعال شد. برای نمایش پنل مدیریت /start را ارسال کنید.",
-    demote:"دسترسی مدیریت شما لغو شد؛ دسترسی عادی به پرتفوی برقرار است."};
-  await sendTelegram(Number(target),notices[action],{menu:action==="grant"||action==="approve"||action==="demote",
-    removeMenu:action==="revoke"||action==="reject"});
+    demote:"نقش شما به مهمان تغییر کرد؛ فقط نمودار درصد ترکیب دارایی در دسترس است."};
+  await sendTelegram(Number(target),notices[action],{menu:["grant","approve_guest","approve_admin","demote"].includes(action),
+    removeMenu:action==="revoke"||action==="reject",audience:"guest"});
+}
+async function showApprovalRoles(chatId,target,previousPanel=null){
+  const state=await loadAccessState({strict:true});
+  if(!isBotAdmin(String(chatId),state)||!state.pending[target])throw new Error("request_not_pending");
+  await sendTelegramWithKeyboard(chatId,"نقش کاربر "+target+" را هنگام تأیید انتخاب کنید:",[
+    [{text:"تأیید به‌عنوان مهمان",callback_data:"admin:approve_guest:"+target},{text:"تأیید به‌عنوان مدیر",callback_data:"admin:approve_admin:"+target}],
+    [{text:"رد درخواست",callback_data:"admin:reject:"+target}]],{previousPanel});
 }
 async function memberLabel(id,state){
   let user=state.users[id]||state.pending[id];
@@ -590,7 +668,7 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
   if(section==="home"){
     const buttons=[[{text:"کاربران مجاز",callback_data:"admin:users:0"},{text:"درخواست‌های دسترسی",callback_data:"admin:pending:0"}],
       [{text:"وضعیت سامانه",callback_data:"admin:status"},{text:"رویدادهای مدیریت",callback_data:"admin:audit"}]];
-    if(owner)buttons.push([{text:"مدیریت مدیران",callback_data:"admin:admins:0"}]);
+    buttons.push([{text:"مدیریت نقش‌ها",callback_data:"admin:admins:0"}]);
     await sendTelegramWithKeyboard(chatId,"پنل مدیریت • "+(owner?"مالک":"مدیر منتخب")+
       "\n\nکاربران مجاز: "+new Set([...state.approved,...adminUserIds()]).size+
       "\nدرخواست‌های در انتظار: "+Object.keys(state.pending).length+
@@ -614,25 +692,24 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
       [{text:"بررسی دوباره",callback_data:"admin:status"},{text:"آزمون ذخیره‌سازی",callback_data:"admin:storage_check"}],adminBack()],{previousPanel,html:true});return;
   }
   if(section==="audit"){
-    const labels={approve:"تأیید دسترسی",reject:"رد درخواست",revoke:"لغو دسترسی",grant:"افزودن مدیر",demote:"حذف نقش مدیر"};
+    const labels={approve:"تأیید دسترسی",approve_guest:"تأیید مهمان",approve_admin:"تأیید مدیر",reject:"رد درخواست",revoke:"لغو دسترسی",grant:"ارتقا به مدیر",demote:"تغییر نقش به مهمان"};
     const lines=state.audit.slice(-10).reverse().map(event=>
       boldPortfolioTime(event.at)+" • "+(labels[event.action]||"تغییر دسترسی")+
       "\nکاربر: "+escXml(event.target_id)+" • مدیر: "+escXml(event.actor_id));
     await sendTelegramWithKeyboard(chatId,"آخرین رویدادهای مدیریت (تهران)\n\n"+(lines.join("\n\n")||"رویدادی ثبت نشده است."),[adminBack()],{previousPanel,html:true});return;
   }
-  if(section==="admins"&&!owner)throw new Error("owner_permission_required");
   const ids=section==="pending"?Object.keys(state.pending):section==="admins"?state.approved.filter(id=>!isOwner(id)):
     [...new Set([...adminUserIds(),...state.approved])];
   page=Math.max(0,Math.min(Math.floor(page),Math.max(0,Math.ceil(ids.length/ADMIN_PAGE_SIZE)-1)));
   const selected=ids.slice(page*ADMIN_PAGE_SIZE,(page+1)*ADMIN_PAGE_SIZE);
   const names=await Promise.all(selected.map(id=>memberLabel(id,state)));
-  const title=section==="pending"?"درخواست‌های دسترسی":section==="admins"?"مدیریت مدیران • فقط مالک":"کاربران مجاز";
+  const title=section==="pending"?"درخواست‌های دسترسی":section==="admins"?"مدیریت نقش‌ها":"کاربران مجاز";
   const lines=[],keyboard=[];
   selected.forEach((id,i)=>{
-    const role=isOwner(id)?"مالک":state.delegatedAdmins.includes(id)?"مدیر منتخب":"کاربر";
+    const role=isOwner(id)?"مالک":state.delegatedAdmins.includes(id)?"مدیر":"مهمان";
     lines.push((i+1)+". "+names[i]+(section==="pending"?"":" • "+role));
-    if(section==="pending")keyboard.push([{text:"تأیید "+(i+1),callback_data:"admin:approve:"+id},{text:"رد "+(i+1),callback_data:"admin:reject:"+id}]);
-    else if(section==="admins")keyboard.push([{text:(state.delegatedAdmins.includes(id)?"حذف نقش مدیر ":"انتخاب مدیر ")+(i+1),callback_data:"admin:"+(state.delegatedAdmins.includes(id)?"demote":"grant")+":"+id}]);
+    if(section==="pending")keyboard.push([{text:"تأیید مهمان "+(i+1),callback_data:"admin:approve_guest:"+id},{text:"تأیید مدیر "+(i+1),callback_data:"admin:approve_admin:"+id},{text:"رد "+(i+1),callback_data:"admin:reject:"+id}]);
+    else if(section==="admins"&&id!==uid)keyboard.push([{text:(state.delegatedAdmins.includes(id)?"تغییر به مهمان ":"ارتقا به مدیر ")+(i+1),callback_data:"admin:"+(state.delegatedAdmins.includes(id)?"demote":"grant")+":"+id}]);
     else if(!isOwner(id)&&(owner||!state.delegatedAdmins.includes(id)))keyboard.push([{text:"لغو دسترسی "+(i+1),callback_data:"admin:revoke:"+id}]);
   });
   const navigation=[];
@@ -641,7 +718,7 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
   if(navigation.length)keyboard.push(navigation);
   keyboard.push(adminBack());
   await sendTelegramWithKeyboard(chatId,title+"\nصفحه "+(page+1)+"\n\n"+(lines.join("\n\n")||"موردی وجود ندارد.")+
-    (section==="admins"?"\n\nحذف نقش مدیر، دسترسی عادی کاربر را حفظ می‌کند.":""),keyboard,{previousPanel});
+    (section==="admins"?"\n\nمهمان فقط نمودار درصدی را می‌بیند. نقش مالک و نقش خودتان قابل تغییر نیست.":""),keyboard,{previousPanel});
 }
 function callbackPanelToReplace(callback){
   const message=callback.message;
@@ -666,11 +743,12 @@ async function trackPreviousAdminPanel(chatId,previousPanel){
 async function sendTelegramWithKeyboard(chatId,text,inlineKeyboard,{temporary=true,previousPanel=null,html=false}={}){
   if(!isBotAdmin(String(chatId),await loadAccessState()))return false;
   await trackPreviousAdminPanel(chatId,previousPanel);
+  try{if(!isBotAdmin(String(chatId),await loadAccessState({strict:true})))return false;}catch(_){return false;}
   const keyboard=temporary?[...inlineKeyboard,[{text:"بازگشت به منوی اصلی",callback_data:"admin:main_menu"}]]:inlineKeyboard;
   return deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:chatId,text,...(html?{parse_mode:"HTML"}:{}),reply_markup:{inline_keyboard:keyboard}})},{temporary});
 }
 async function sendMainMenu(chatId){
-  await sendTelegram(chatId,"منوی اصلی پرتفوی\nبرای انتخاب گزارش، از دکمه‌های زیر استفاده کنید.",{menu:true,menuAnchor:true});
+  await sendTelegram(chatId,"منوی اصلی پرتفوی\nبرای انتخاب گزارش، از دکمه‌های زیر استفاده کنید.",{menu:true,menuAnchor:true,audience:"guest"});
 }
 async function answerCallback(callbackId,text){
   const token=process.env.TELEGRAM_BOT_TOKEN;if(!token)return;
@@ -831,7 +909,56 @@ async function getListedPrice(asset,marketHtmls){
   }
 }
 
-async function getPrices(){
+const ECOCOACH_FUND_URL="https://ecocoach.net/blackrock-index";
+function parseEcoCoachPrice(html,now=Date.now()){
+  // Accept only an explicitly labelled per-unit quote on the observed fund page.
+  // Marketing figures, return charts, total NAV and another BlackRock are ignored.
+  const clean=String(html).replace(/<(script|style|nav|footer)\b[^>]*>[\s\S]*?<\/\1>/gi,"");
+  const plain=text=>text.replace(/<[^>]*>/g," ").replace(/&nbsp;|&#160;/g," ").replace(/\s+/g," ").trim();
+  if(!/(صندوق\s+(?:شاخصی\s+)?بلک\s*راک|EcoCoach\s+BlackRock)/i.test(plain(clean)))throw new Error("ECOCOACH_PRICE_UNAVAILABLE");
+  const candidates=[];
+  for(const table of clean.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)){
+    const caption=table[1].match(/<caption\b[^>]*>([\s\S]*?)<\/caption>/i);
+    if(!caption||!/(صندوق\s+(?:شاخصی\s+)?بلک\s*راک|EcoCoach\s+BlackRock)/i.test(plain(caption[1])))continue;
+    if(/نمونه|فرضی|آزمایشی|example|demo|hypothetical|backtest|coming soon|BlackRock Inc|NYSE|iShares/i.test(plain(table[1])))continue;
+    const quotes=[],dates=[];
+    for(const row of table[1].matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)){
+      const cells=[...row[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)].map(match=>plain(match[1]));
+      if(cells.length!==2||!/^(?:قیمت|ارزش|NAV)\s*(?:فعلی\s*)?(?:هر\s*)?واحد(?:\s*(?:صندوق)\s*)?$/i.test(cells[0]))continue;
+      const match=cells[1].match(/^([۰-۹٠-٩\d][۰-۹٠-٩\d,٬.٫]*)\s*(تومان|ریال|IRT|IRR)$/i);
+      if(!match)continue;
+      const numeric=match[1].replace(/[۰-۹]/g,c=>String("۰۱۲۳۴۵۶۷۸۹".indexOf(c)))
+        .replace(/[٠-٩]/g,c=>String("٠١٢٣٤٥٦٧٨٩".indexOf(c))).replace(/٬/g,",").replace(/٫/g,".");
+      if(!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(numeric))continue;
+      const value=parseNum(numeric),price=value*(/^(تومان|IRT)$/i.test(match[2])?10:1);
+      if(value!==null&&Number.isFinite(price)&&price>0&&price<=Number.MAX_SAFE_INTEGER)quotes.push(price);
+    }
+    for(const row of table[1].matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)){
+      const label=plain(row[1]);
+      if(!/(تاریخ|زمان).*(?:قیمت|به[‌\s-]*روزرسانی)|(?:Price as of|Price updated)/i.test(label))continue;
+      for(const time of row[1].matchAll(/<time\b[^>]*datetime=["']([^"']+)["']/gi)){
+        if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(time[1]))dates.push(time[1]);
+      }
+    }
+    const amounts=[...new Set(quotes)],stamps=[...new Set(dates.map(date=>Date.parse(date)))];
+    const age=now-stamps[0];
+    if(amounts.length===1&&stamps.length===1&&Number.isFinite(age)&&age>=0&&age<=24*60*60*1000)
+      candidates.push({price:amounts[0],stamp:stamps[0]});
+  }
+  const distinct=[...new Map(candidates.map(candidate=>[candidate.price+"|"+candidate.stamp,candidate])).values()];
+  if(distinct.length!==1)throw new Error("ECOCOACH_PRICE_UNAVAILABLE");
+  return {priceRial:distinct[0].price,source:"EcoCoach",sourceUrl:ECOCOACH_FUND_URL,
+    quotedAt:new Date(distinct[0].stamp).toISOString(),retrievedAt:new Date(now).toISOString(),unit:"IRR/unit"};
+}
+async function ecoCoachPrice(){
+  const response=await fetch(ECOCOACH_FUND_URL,{headers:{"User-Agent":"Mozilla/5.0","Accept":"text/html"},
+    cache:"no-store",redirect:"error",signal:AbortSignal.timeout(8000)});
+  if(!response.ok)throw new Error("ECOCOACH_PRICE_UNAVAILABLE");
+  const html=await response.text();
+  if(html.length>1000000)throw new Error("ECOCOACH_PRICE_UNAVAILABLE");
+  return parseEcoCoachPrice(html);
+}
+async function getPrices({includeEcoCoach=true}={}){
   const prices={};
   const errors={};
   const goldDefs={
@@ -872,6 +999,9 @@ async function getPrices(){
   jobs.push(...Object.keys(LISTED).map(async asset=>{
     try{prices[asset]=await getListedPrice(asset,marketHtmls);}catch(e){errors[asset]=e.message;}
   }));
+  if(includeEcoCoach)jobs.push((async()=>{
+    try{prices["بلک راک"]=await ecoCoachPrice();}catch(_){errors["بلک راک"]="USER_INPUT_REQUIRED";}
+  })());
   try{
     const ids=Object.values(CRYPTO_IDS).join(",");
     const data=await fetchJson("https://api.coingecko.com/api/v3/simple/price?ids="+encodeURIComponent(ids)+"&vs_currencies=usd");
@@ -881,10 +1011,6 @@ async function getPrices(){
     }
   }catch(e){for(const asset of Object.keys(CRYPTO_IDS))errors[asset]="CoinGecko unavailable";}
   await Promise.all(jobs);
-  // These require asset-specific market data; never substitute a similarly named instrument.
-  // بلک راک is the user's EcoCoach private fund. Its current price must be supplied by the user for each valuation.
-  // The allocation flow prompts for it rather than substituting a similarly named security.
-  errors["بلک راک"]="USER_INPUT_REQUIRED";
   return {prices,errors};
 }
 
@@ -895,7 +1021,7 @@ function valueRial(asset,qty,p,usdIrr){
 }
 
 async function valuationReply(q,names,title){
-  const {prices,errors}=await getPrices();
+  const {prices,errors}=await getPrices({includeEcoCoach:names.includes("بلک راک")});
   const usdIrr=prices["دلار"]?.priceRial;
   if(!usdIrr) return title+"\n\nUSD/IRR price unavailable; valuation cannot be calculated.";
   const lines=[title+"\n"];
@@ -971,7 +1097,7 @@ async function allocationReply(q,blackRockPriceRial=null){
     if(!Number.isFinite(qty)||qty<0){errors[a]="Invalid quantity";continue;}
     vals[a]=valueRial(a,qty,prices[a],usdIrr); total+=vals[a];
   }
-  if(blackRockPriceRial!==null){
+  if(blackRockPriceRial!==null&&!prices["بلک راک"]){
     const v=(q["بلک راک"]||0)*blackRockPriceRial;
     vals["بلک راک"]=v;
     total+=v;
@@ -986,7 +1112,7 @@ async function allocationReply(q,blackRockPriceRial=null){
   }
   if(!total)return "Allocation unavailable: no current prices were obtained.";
   const reportPrices={...prices};
-  if(blackRockPriceRial!==null) reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
+  if(blackRockPriceRial!==null&&!prices["بلک راک"]) reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
   const table=portfolioTable(q,vals,total,reportPrices,usdIrr);
   const sources=[...new Set(Object.keys(vals).map(a=>reportPrices[a]?.source).filter(Boolean))].join(", ");
   const lines=["<b>Portfolio valuation — live prices</b>","","<b>Total:</b> "+formatToman(total)+" | <b>USD:</b> $"+format(valueUsd(total,usdIrr)),"","<i>Unit prices and sources are shown below.</i>","",table];
@@ -1000,7 +1126,7 @@ async function allocationReply(q,blackRockPriceRial=null){
 function cryptoAsset(asset){return ["BTC","ETH","Tether","Link","ADA","SOL","ONDO"].includes(asset);}
 function qSafe(v){const n=Number(v);return Number.isFinite(n)?n:0;}
 function sourceFa(s){
-  const m={"CoinGecko":"CoinGecko","Shakhesban":"شاخص‌بان","Shakhesban IME":"شاخص‌بان (بورس کالا)","TGJU":"TGJU","User input":"ورودی کاربر","TGJU 18K gold × quarter-coin weight":"TGJU × وزن ربع سکه"};
+  const m={"CoinGecko":"CoinGecko","Shakhesban":"شاخص‌بان","Shakhesban IME":"شاخص‌بان (بورس کالا)","TGJU":"TGJU","EcoCoach":"اکوکوچ","User input":"ورودی کاربر","TGJU 18K gold × quarter-coin weight":"TGJU × وزن ربع سکه"};
   return m[s]||s||"-";
 }
 function unitPriceDisplay(asset,p){
@@ -1228,17 +1354,18 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
 }
 async function prepareAllocation(q,blackRockPriceRial){
   const {prices,errors}=await getPrices();
+  const effectiveBlackRockPrice=prices["بلک راک"]?.priceRial??blackRockPriceRial;
   const usdIrr=prices["دلار"]?.priceRial;
   if(!usdIrr)return {text:"دریافت نرخ دلار آزاد ناموفق بود؛ ارزش‌گذاری انجام نشد."};
   const missingQuantities=ASSETS.filter(a=>q[a]===undefined||!Number.isFinite(Number(q[a]))||Number(q[a])<0);
   if(missingQuantities.length)return {text:withAssetFootnotes("ارزش‌گذاری انجام نشد؛ مقدار این دارایی‌ها موجود یا معتبر نیست: "+missingQuantities.map(assetLabel).join("، "),missingQuantities)};
   const missingPrices=ASSETS.filter(a=>{
-    if(a==="بلک راک")return blackRockPriceRial===null;
+    if(a==="بلک راک")return effectiveBlackRockPrice===null||effectiveBlackRockPrice===undefined;
     return !!errors[a]||!prices[a];
   });
   if(missingPrices.length){
     const otherMissing=missingPrices.filter(a=>a!=="بلک راک");
-    if(!otherMissing.length&&missingPrices.includes("بلک راک"))return {text:withAssetFootnotes("برای تهیه گزارش، قیمت فعلی هر واحد صندوق "+assetLabel("بلک راک")+" (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: "+format(q["بلک راک"])+" واحد",["بلک راک"])};
+    if(!otherMissing.length&&missingPrices.includes("بلک راک"))return {needsEcoCoachPrice:true,text:withAssetFootnotes("برای تهیه گزارش، قیمت فعلی هر واحد صندوق "+assetLabel("بلک راک")+" (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: "+format(q["بلک راک"])+" واحد",["بلک راک"])};
     const lines=["گزارش ارزش‌گذاری کامل تهیه نشد. برای جلوگیری از نمایش جمع و درصدهای ناقص، هیچ جمع کل یا نموداری ارائه نمی‌شود."];
     if(otherMissing.length)lines.push("قیمت ناموجود/نامعتبر: "+otherMissing.map(a=>assetLabel(a)+" ("+(errors[a]||"قیمت دریافت نشد")+")").join("؛ "));
     if(missingPrices.includes("بلک راک"))lines.push("لطفاً قیمت فعلی هر واحد صندوق "+assetLabel("بلک راک")+" (EcoCoach) را به تومان ارسال کنید. تعداد: "+format(q["بلک راک"])+" واحد");
@@ -1251,9 +1378,9 @@ async function prepareAllocation(q,blackRockPriceRial){
     vals[a]=valueRial(a,qty,prices[a],usdIrr);
     total+=vals[a];
   }
-  if(blackRockPriceRial!==null){const v=qSafe(q["بلک راک"])*blackRockPriceRial;vals["بلک راک"]=v;total+=v;delete errors["بلک راک"];}
+  if(effectiveBlackRockPrice!==null){const v=qSafe(q["بلک راک"])*effectiveBlackRockPrice;vals["بلک راک"]=v;total+=v;delete errors["بلک راک"];}
   if(!total)return {text:"هیچ قیمت معتبر فعلی برای ارزش‌گذاری دریافت نشد."};
-  const reportPrices={...prices};if(blackRockPriceRial!==null)reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
+  const reportPrices={...prices};if(!prices["بلک راک"]&&blackRockPriceRial!==null)reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
   if(!Number.isFinite(total)||total<=0||Object.values(vals).some(value=>!Number.isFinite(value)||value<0))
     return {text:"ارزش‌گذاری کامل و معتبر نیست؛ هیچ جمع کل، درصد یا نموداری ارائه نمی‌شود."};
   return {vals,total,prices:reportPrices,usdIrr,priceTime:new Date().toISOString()};
@@ -1291,9 +1418,10 @@ function allocationTextReport(q,report,snapshot){
   ).join("\n")+"\n\nقیمت‌های بازار: "+boldPortfolioTime(report.priceTime);
   return {messages,percentages,total:report.total};
 }
-async function latestAllocationReport(q,blackRockPriceRial,format="image",snapshot=null){
+async function latestAllocationReport(q,blackRockPriceRial,format="image",snapshot=null,{guest=false}={}){
   const report=await prepareAllocation(q,blackRockPriceRial);
-  if(report.text)return report;
+  if(report.text)return guest?{text:"تهیه نمودار فعلاً ممکن نیست؛ قیمت یکی از دارایی‌ها نیازمند تأیید مدیر است.",needsEcoCoachPrice:report.needsEcoCoachPrice===true}:report;
+  if(guest)return {png:renderAllocationSvg(buildAllocationPieSvg(report,snapshot,{guest:true})),guestSafe:true};
   if(format==="text")return allocationTextReport(q,report,snapshot);
   if(format==="chart")return {png:renderAllocationSvg(buildAllocationPieSvg(report,snapshot)),total:report.total,captionFootnotes:assetFootnotes(ASSETS,{html:false})};
   return {png:renderAllocationSvg(buildPortfolioSvg(q,report.vals,report.total,report.prices,report.usdIrr)),total:report.total};
@@ -1302,7 +1430,7 @@ async function allocationImageReply(q,blackRockPriceRial){
   return latestAllocationReport(q,blackRockPriceRial,"image");
 }
 
-function buildAllocationPieSvg(report,snapshot=null){
+function buildAllocationPieSvg(report,snapshot=null,{guest=false}={}){
   const groups=allocationGroups(report.vals,report.total);
   if(!Number.isFinite(report.total)||report.total<=0||groups.some(group=>!Number.isFinite(group.value)||group.value<0)||
     Math.abs(groups.reduce((sum,group)=>sum+group.value,0)-report.total)>Math.max(1,report.total)*1e-10)
@@ -1415,10 +1543,12 @@ function buildAllocationPieSvg(report,snapshot=null){
     svg+=svgText(slot.x,slot.y-13,slice.label,24,{anchor:"middle",weight:700,fill:theme.ink});
     svg+=svgText(slot.x,slot.y+30,percent(slice),31,{anchor:"middle",weight:700,fill:slice.color});
   }
-  svg+='<rect x="36" y="1038" width="1528" height="91" rx="28" fill="'+theme.card+'"/>';
-  svg+=svgText(1510,1075,"ارزش کل پرتفوی",21,{anchor:"end",weight:700,fill:theme.muted});
-  svg+=svgText(1510,1110,moneyFa(report.total/10),29,{anchor:"end",weight:700,fill:theme.ink});
-  svg+=svgText(78,1087,"درصد گروه‌ها بر اساس ارزش تومانی • دو رقم اعشار",20,{fill:theme.muted});
+  if(!guest){
+    svg+='<rect x="36" y="1038" width="1528" height="91" rx="28" fill="'+theme.card+'"/>';
+    svg+=svgText(1510,1075,"ارزش کل پرتفوی",21,{anchor:"end",weight:700,fill:theme.muted});
+    svg+=svgText(1510,1110,moneyFa(report.total/10),29,{anchor:"end",weight:700,fill:theme.ink});
+    svg+=svgText(78,1087,"درصد گروه‌ها بر اساس ارزش تومانی • دو رقم اعشار",20,{fill:theme.muted});
+  }
   return svg+'</svg>';
 }
 
@@ -1428,6 +1558,7 @@ function formatPrice(asset,p){
 function formatToman(rial){return format(rial/10)+" toman";}
 function format(v){return Number(v).toLocaleString("en-US",{maximumFractionDigits:8});}
 function group(q,names){return withAssetFootnotes(names.map(n=>assetLabel(n)+": "+(q[n]===undefined?"not synchronized":format(q[n]))).join("\n"),names);}
+function guestHelp(){return "دسترسی شما مهمان است. فقط نمودار درصد ترکیب دارایی در دسترس است؛ از دکمه زیر استفاده کنید.";}
 function help(){return withAssetFootnotes("Portfolio Agent is online.\nبرای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n/status — portfolio status\n/assets — asset list\n/latest_allocation — آخرین ترکیب دارایی: انتخاب گزارش تصویری یا متنی با مقادیر و قیمت‌های تازه\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/allocation_chart — نمودار سه‌بعدی ترکیب دارایی با مقادیر و قیمت‌های تازه\n/cash_dollar — Cash Dollar (دلار نقدی)\n\nبرای تهیه گزارش ارزش‌گذاری، ربات قیمت فعلی هر واحد "+assetLabel("بلک راک")+" (EcoCoach) را به تومان از شما می‌پرسد.",["بلک راک"]);}
 async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return null;}}
 function quantitySnapshotStatus(snapshot){
@@ -1457,13 +1588,14 @@ const MENU_COMMANDS=new Map([...BUTTON_MENU.flat().map(button=>[button.text,butt
   ["تخصیص دارایی","/latest_allocation"],["به‌روزرسانی","/latest_allocation"],
   ["/allocation","/latest_allocation"],["/refresh","/latest_allocation"]]);
 async function portfolioKeyboard(chatId){
-  const keyboard=BUTTON_MENU.map(row=>row.map(button=>({text:button.text})));
   const state=await loadAccessState();
   if(!isOwner(String(chatId))&&!state.approved.includes(String(chatId)))return null;
-  if(isBotAdmin(String(chatId),state))keyboard.at(-1).push({text:"پنل مدیریت"});
+  const admin=isBotAdmin(String(chatId),state);
+  const keyboard=admin?BUTTON_MENU.map(row=>row.map(button=>({text:button.text}))):[[{text:"نمودار ترکیب دارایی"}]];
+  if(admin)keyboard.at(-1).push({text:"پنل مدیریت"});
   return {keyboard,
     resize_keyboard:true,is_persistent:false,one_time_keyboard:false,
-    input_field_placeholder:"یک گزینه انتخاب کنید یا قیمت "+assetLabel("بلک راک")+" را وارد کنید"};
+    input_field_placeholder:admin?"یک گزینه انتخاب کنید یا قیمت "+assetLabel("بلک راک")+" را وارد کنید":"نمایش نمودار درصد ترکیب دارایی"};
 }
 
 const TEMPORARY_REPLY_PREFIX="portfolio/temporary-replies/";
@@ -1525,13 +1657,16 @@ async function deliverTelegram(chatId,method,options,{temporary=false,menuAnchor
   }catch(_){console.warn("Telegram delivery unavailable",method);return false;}
 }
 
-async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=false,menuAnchor=false}={}){
+async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=false,menuAnchor=false,audience="admin"}={}){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
 
   const send=async msg=>{
     const markup=menu?await portfolioKeyboard(chatId):removeMenu?{remove_keyboard:true}:null;
     if(menu&&!markup)return false;
+    if(menu&&audience!=="guest"){
+      try{if(!isBotAdmin(String(chatId),await loadAccessState({strict:true})))return false;}catch(_){return false;}
+    }
     return deliverTelegram(chatId,"sendMessage",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
@@ -1577,12 +1712,13 @@ async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=f
   if(chunk)await send(chunk);
 }
 
-async function sendTelegramPhoto(chatId,png,caption){
+async function sendTelegramPhoto(chatId,png,caption,{guestSafe=false}={}){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
   const form=new FormData();
   const keyboard=await portfolioKeyboard(chatId);
   if(!keyboard)return false;
+  if(!guestSafe){try{if(!isBotAdmin(String(chatId),await loadAccessState({strict:true})))return false;}catch(_){return false;}}
   form.append("chat_id",String(chatId));
   form.append("photo",new Blob([png],{type:"image/png"}),"portfolio-report.png");
   form.append("reply_markup",JSON.stringify(keyboard));
