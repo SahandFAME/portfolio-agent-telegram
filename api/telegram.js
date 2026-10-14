@@ -299,11 +299,17 @@ async function telegram(req,res){
         reply=snapshot?("پورتفولیو متصل است.\n\nآخرین Snapshot معاملات: "+boldPortfolioTime(snapshot.updated_at)+(snapshot.workbook_updated_at?"\nآخرین به‌روزرسانی فایل: "+boldPortfolioTime(snapshot.workbook_updated_at):"")+(status.stale?"\n\n⚠️ "+status.message:"\n\nوضعیت Snapshot: به‌روز")):"پورتفولیو متصل است، اما Snapshot معاملات هنوز همگام‌سازی نشده است.";
       }
       else if(command==="/assets")reply=assetsReply(quantities,snapshot);
-      else if(command==="/gold_and_other_precious_metals"||command==="/gold")reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"طلا و فلزات گرانبها");
-      else if(command==="/crypto")reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"رمزارز");
-      else if(command==="/cash_dollar")reply=await valuationReply(quantities,["دلار"],"دلار نقدی");
+      else if(command==="/gold_and_other_precious_metals"||command==="/gold")reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"طلا و فلزات گرانبها",snapshot);
+      else if(command==="/crypto")reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"رمزارز",snapshot);
+      else if(command==="/cash_dollar")reply=await valuationReply(quantities,["دلار"],"دلار نقدی",snapshot);
       else reply=help();
-      if(reply)await sendTelegram(message.chat.id,reply,{menu:true,temporary:reply.includes("قیمت فعلی هر واحد بلک راک")});
+      if(reply){
+        const categoryReport=["/gold","/gold_and_other_precious_metals","/crypto","/cash_dollar"].includes(command);
+        const chunks=categoryReport?splitAssetReportParagraphs(reply):[reply];
+        for(const chunk of chunks){
+          if(!await sendTelegram(message.chat.id,chunk,{menu:true,temporary:chunk.includes("قیمت فعلی هر واحد بلک راک")}))break;
+        }
+      }
     }catch(e){console.error("Telegram handler error:",e);try{await sendTelegram(message.chat.id,"خطا در تهیه گزارش. لطفاً دوباره تلاش کنید.",{menu:true});}catch(_){}}
   })());
   return res.status(200).json({ok:true});
@@ -1018,29 +1024,50 @@ function valueRial(asset,qty,p,usdIrr){
   return qty*p.priceRial;
 }
 
-async function valuationReply(q,names,title){
+async function valuationReply(q,names,title,snapshot=null){
   const {prices,errors}=await getPrices({includeEcoCoach:names.includes("بلک راک")});
   const usdIrr=prices["دلار"]?.priceRial;
-  if(!usdIrr) return title+"\n\nUSD/IRR price unavailable; valuation cannot be calculated.";
-  const lines=[title+"\n"];
-  let total=0;
-  const missing=[];
-  for(const name of names){
-    if(errors[name]||!prices[name]){missing.push(assetLabel(name)+": "+(errors[name]||"price unavailable"));continue;}
-    if(q[name]===undefined||!Number.isFinite(Number(q[name]))||Number(q[name])<0){missing.push(assetLabel(name)+": quantity unavailable");continue;}
-    const v=valueRial(name,Number(q[name]),prices[name],usdIrr);
-    total+=v;
-    lines.push(assetLabel(name)+": "+format(q[name])+" × "+formatPrice(name,prices[name])+" = "+formatToman(v));
+  if(!Number.isFinite(usdIrr)||usdIrr<=0)return "<b>"+escXml(title)+"</b>\n\nدریافت نرخ دلار آزاد ناموفق بود؛ ارزش‌گذاری انجام نشد.";
+  const blocks=[];let total=0,incomplete=false;
+  names.forEach((asset,index)=>{
+    let missing=errors[asset]||!prices[asset]?"قیمت معتبر دریافت نشد":null;
+    if(q[asset]===undefined||!Number.isFinite(Number(q[asset]))||Number(q[asset])<0)missing="مقدار دارایی موجود یا معتبر نیست";
+    const value=missing?null:valueRial(asset,Number(q[asset]),prices[asset],usdIrr);
+    if(!missing&&(!Number.isFinite(value)||value<0))missing="ارزش‌گذاری معتبر نیست";
+    if(missing){
+      incomplete=true;
+      blocks.push(reportNumber(index+1)+". <b>"+escXml(assetLabel(asset))+"</b>\nارزش‌گذاری انجام نشد: "+missing);
+    }else{
+      total+=value;
+      blocks.push(detailedAssetTextBlock(q,asset,index,prices[asset],value));
+    }
+  });
+  const header="<b>گزارش تفصیلی "+escXml(title)+"</b>\n"+
+    (snapshot?"آخرین همگام‌سازی مقادیر: "+boldPortfolioTime(snapshot.updated_at)+"\n":"")+
+    "قیمت‌های بازار: "+boldPortfolioTime(new Date())+"\n"+
+    (incomplete||!Number.isFinite(total)?"<b>گزارش ناقص است؛ جمع کل ارائه نمی‌شود.</b>":
+      "ارزش کل دارایی‌های این گزارش: <b>"+reportNumber(total/10)+" تومان</b>");
+  return withAssetFootnotes([header,...blocks].join("\n\n"),names);
+}
+function reportNumber(value){return Number(value).toLocaleString("fa-IR",{maximumFractionDigits:8});}
+function detailedAssetTextBlock(q,asset,index,quote,value){
+  const unit=cryptoAsset(asset)?asset:asset==="دلار"?"دلار":REPORT_UNIT[asset];
+  const price=quote.priceUsd!==undefined?reportNumber(quote.priceUsd)+" دلار":reportNumber(quote.priceRial/10)+" تومان";
+  return reportNumber(index+1)+". <b>"+escXml(assetLabel(asset))+"</b>\n"+
+    "مقدار: "+reportNumber(q[asset])+" "+escXml(unit)+" • گروه: "+escXml(REPORT_GROUP[asset])+"\n"+
+    "ارزش: <b>"+reportNumber(value/10)+" تومان</b>\n"+
+    "قیمت واحد: "+price+" • منبع: "+escXml(sourceFa(quote.source));
+}
+function splitAssetReportParagraphs(text){
+  const chunks=[];let chunk="";
+  for(const paragraph of text.split("\n\n")){
+    if((chunk+"\n\n"+paragraph).length>3500&&chunk){
+      chunks.push(chunk);chunk="<b>ادامه گزارش</b>";
+    }
+    chunk+=(chunk?"\n\n":"")+paragraph;
   }
-  if(missing.length){
-    lines.push("\nValuation incomplete — subtotal omitted to avoid understating the portfolio.");
-    lines.push("Missing data:");
-    lines.push(...missing);
-  }else{
-    lines.push("\nSubtotal: "+formatToman(total));
-  }
-  lines.push("\nPrices retrieved: "+boldPortfolioTime(new Date()));
-  return withAssetFootnotes(lines.join("\n"),names);
+  if(chunk)chunks.push(chunk);
+  return chunks;
 }
 
 const REPORT_GROUP={
@@ -1402,13 +1429,7 @@ function allocationTextReport(q,report,snapshot){
     "ارزش کل پرتفوی: <b>"+number(report.total/10)+" تومان</b>";
   const messages=[];let chunk=header;
   ASSETS.forEach((asset,index)=>{
-    const quote=report.prices[asset];
-    const unit=cryptoAsset(asset)?asset:REPORT_UNIT[asset];
-    const price=quote.priceUsd!==undefined?number(quote.priceUsd)+" دلار":number(quote.priceRial/10)+" تومان";
-    const block=number(index+1)+". <b>"+escXml(assetLabel(asset))+"</b>\n"+
-      "مقدار: "+number(q[asset])+" "+escXml(unit)+" • گروه: "+escXml(REPORT_GROUP[asset])+"\n"+
-      "ارزش: <b>"+number(report.vals[asset]/10)+" تومان</b>\n"+
-      "قیمت واحد: "+price+" • منبع: "+escXml(sourceFa(quote.source));
+    const block=detailedAssetTextBlock(q,asset,index,report.prices[asset],report.vals[asset]);
     if((chunk+"\n\n"+block).length>3500){messages.push(chunk);chunk="<b>ادامه گزارش ترکیب دارایی</b>";}
     chunk+="\n\n"+block;
   });

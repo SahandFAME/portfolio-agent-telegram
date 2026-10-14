@@ -30,16 +30,16 @@ test('asset list marks only the four commented holdings and preserves every cano
 test('category footnotes are restricted to related assets and acquisition figures never replace live valuation',async()=>{
   const a=await app(),q=quantities(a),before=JSON.stringify(q);
   const gold=await a.ns.valuationReply(q,['آبشده (طلب)','آبشده (شمش زربد)'],'طلا و فلزات گرانبها');
-  for(const asset of commented.slice(1,3)){assert.ok(gold.includes(asset+'*: '));assert.ok(gold.includes(a.ns.ASSET_COMMENTS[asset]));}
+  for(const asset of commented.slice(1,3)){assert.ok(gold.includes('<b>'+asset+'*</b>'));assert.ok(gold.includes(a.ns.ASSET_COMMENTS[asset]));}
   assert.doesNotMatch(gold,/بلک راک|خریدهای تاریخی:/);
   const cash=await a.ns.valuationReply(q,['دلار'],'دلار نقدی');
-  assert.ok(cash.includes('دلار*: 3,030 × 100,000 toman = 303,000,000 toman'));
-  assert.ok(cash.includes('Subtotal: 303,000,000 toman'));
+  assert.ok(cash.includes('مقدار: ۳٬۰۳۰ دلار • گروه: فیات'));
+  assert.ok(cash.includes('ارزش کل دارایی‌های این گزارش: <b>۳۰۳٬۰۰۰٬۰۰۰ تومان</b>'));
   assert.ok(cash.includes(a.ns.ASSET_COMMENTS['دلار']));assert.doesNotMatch(cash,/آبشده|بلک راک/);
   const crypto=await a.ns.valuationReply(q,['BTC','ETH'],'رمزارز');
   assert.doesNotMatch(crypto,/یادداشت دارایی‌ها|خریدهای تاریخی|BTC\*|ETH\*/);
   const missing=await a.ns.valuationReply({...q,'آبشده (طلب)':undefined},['آبشده (طلب)'],'طلا');
-  assert.match(missing,/آبشده \(طلب\)\*: quantity unavailable/);assert.doesNotMatch(missing,/Subtotal:/);
+  assert.match(missing,/آبشده \(طلب\)\*<\/b>\nارزش‌گذاری انجام نشد: مقدار دارایی موجود یا معتبر نیست/);assert.doesNotMatch(missing,/ارزش کل دارایی‌های این گزارش:/);
   assert.equal(JSON.stringify(q),before);
 });
 
