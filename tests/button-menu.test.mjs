@@ -131,7 +131,7 @@ test('buttons work while waiting for EcoCoach and numeric input still sends a ph
   a.store.set('portfolio/pending-blackrock/1.json',{type:'blackrock_price'});
   assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'blackrock_price');
   await a.request('POST',{},message('دارایی‌ها'),header);
-  assert.match(JSON.parse(a.sends.at(-1).options.body).text,/۲۹/);
+  assert.match(JSON.parse(a.sends.at(-1).options.body).text,/۷ مورد/);
   assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'blackrock_price');
   await a.request('POST',{},message('۸۵۰٬۰۰۰ تومان'),header);
   const photo=a.sends.find(x=>x.url.endsWith('/sendPhoto'));

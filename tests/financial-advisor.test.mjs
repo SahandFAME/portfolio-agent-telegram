@@ -75,7 +75,7 @@ test('advisors receive all fresh report formats with normal manual EcoCoach pric
     assert.equal(a.store.get('portfolio/latest-allocation/requests/'+id(a)+'.json').blackRockPriceRial,8500000);
     await complete(a);
     if(format==='text'){
-      assert.ok(messages(a).some(x=>/ارزش کل پرتفوی:/.test(x.text)));
+      assert.ok(messages(a).some(x=>/ارزش کل گزارش:/.test(x.text)));
       assert.ok(messages(a).some(x=>/یادداشت دارایی‌ها/.test(x.text)));
       assert.match(messages(a).at(-1).text,/درصد گروه‌های دارایی/);
     }else{

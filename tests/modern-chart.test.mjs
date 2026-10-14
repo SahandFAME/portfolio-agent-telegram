@@ -7,7 +7,7 @@ import {app} from './helpers/app-fixture.mjs';
 
 const assets=['طلا','شمش نقره 999','فملی','BTC','Tether','دلار'];
 const stamp='2026-10-11T09:00:00Z';
-const report=amounts=>({vals:Object.fromEntries(assets.map((asset,index)=>[asset,amounts[index]])),total:amounts.reduce((sum,value)=>sum+value,0),priceTime:stamp});
+const report=rawAmounts=>{const amounts=rawAmounts.map(value=>value*1e13);return ({vals:Object.fromEntries(assets.map((asset,index)=>[asset,amounts[index]])),total:amounts.reduce((sum,value)=>sum+value,0),priceTime:stamp});};
 const boxes=svg=>[...svg.matchAll(/<rect data-label-category="([^"]+)" x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"/g)].map(match=>({category:match[1],x:+match[2],y:+match[3],w:+match[4],h:+match[5]}));
 
 test('Estedad regular and bold are authentic bundled fonts and included in the Vercel function',async()=>{

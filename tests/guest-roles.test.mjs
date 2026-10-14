@@ -68,7 +68,7 @@ test('guest image contains the same group percentages but no total, asset notes 
   const a=await fixture();const q={...a.assets,...a.ns.MANUAL,'بلک راک':15};
   const data=await a.ns.prepareAllocation(q,null,{guest:true});
   const normal=a.ns.buildAllocationPieSvg(data,a.payload),guest=a.ns.buildAllocationPieSvg(data,a.payload,{guest:true});
-  assert.match(normal,/ارزش کل پرتفوی/);
+  assert.match(normal,/ارزش کل گزارش/);
   assert.doesNotMatch(guest,/ارزش کل|تومان|بلک راک|یادداشت|طلب از مامان|3030|EcoCoach/);
   for(const group of a.ns.allocationGroups(data.vals,data.total)){
     assert.ok(guest.includes('>'+group.label+'</text>'));

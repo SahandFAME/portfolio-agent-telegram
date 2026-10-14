@@ -22,7 +22,7 @@ async function app({readError=false, missingGold=false, env={}}={}) {
       return {ok:true, json:async()=>({ok:true}), text:async()=>''};
     }
     if(url.includes('coingecko')) return {ok:true,json:async()=>Object.fromEntries(
-      ['bitcoin','ethereum','tether','chainlink','cardano','solana','ondo-finance'].map(k=>[k,{usd:2}]))};
+      ['bitcoin','ethereum','tether','chainlink','cardano','solana','ondo-finance'].map(k=>[k,{usd:200}]))};
     let text = 'آخرین قیمت 1,200,000';
     if(url.includes('/ime/')) text = 'SilverBar 999.9 1,200,000';
     if(url.includes('/profile/')) {

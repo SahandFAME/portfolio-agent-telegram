@@ -10,7 +10,7 @@ const callback=(data,id=1,chatId=id,type='private')=>({callback_query:{id:'fixtu
 const selected=a=>JSON.parse(a.dispatches.at(-1).options.body).inputs.request_id;
 const key=id=>'portfolio/latest-allocation/requests/'+id+'.json';
 async function complete(a,id=selected(a),{ok=true,mismatch=false}={}){
-  const snapshot={...a.payload,assets:{...a.assets,'بلک راک':15},updated_at:new Date().toISOString()};
+  const snapshot={...a.payload,assets:{...Object.fromEntries(Object.keys(a.assets).map(asset=>[asset,1])),'بلک راک':15},updated_at:new Date().toISOString()};
   a.store.set('portfolio/latest.json',snapshot);
   return a.request('POST',{complete:'latest-allocation'},{request_id:id,ok,
     snapshot_updated_at:mismatch?'changed':snapshot.updated_at,workbook_updated_at:snapshot.workbook_updated_at},auth);
@@ -57,10 +57,10 @@ test('text values and category percentages use the same complete valuation and t
   const report=await a.ns.prepareAllocation(q,100000);const output=await a.ns.latestAllocationReport(q,100000,'text',a.payload);
   assert.equal(output.total,report.total);
   const expected=Object.fromEntries([...a.ns.ASSETS].map(asset=>[asset,a.ns.valueRial(asset,q[asset],report.prices[asset],report.usdIrr)]));
-  assert.equal(report.total,Object.values(expected).reduce((sum,value)=>sum+value,0));
+  assert.equal(report.total,Object.values(expected).filter(value=>value>=500000).reduce((sum,value)=>sum+value,0));
   const all=output.messages.join('\n');
-  for(const asset of a.ns.ASSETS){assert.ok(all.includes('ارزش: <b>'+Math.round(expected[asset]/10).toLocaleString('fa-IR',{maximumFractionDigits:0}).replace(/٬/g,'،')+' تومان</b>'));}
-  assert.ok(all.includes('مقدار: ۰٫۰۰۵۱۹۱۵۳ BTC'));assert.ok(all.includes('مقدار: ۰٫۴۰۶۰۲ ETH'));
+  for(const asset of a.ns.visibleReportAssets(report.vals)){assert.ok(all.includes('ارزش: <b>'+Math.round(expected[asset]/10).toLocaleString('fa-IR',{maximumFractionDigits:0}).replace(/٬/g,'،')+' تومان</b>'));}
+  assert.doesNotMatch(all,/\. <b>BTC<\/b>/);assert.ok(all.includes('مقدار: ۰٫۴۰۶۰۲ ETH'));
   const groups=a.ns.allocationGroups(report.vals,report.total);
   assert.ok(Math.abs(groups.reduce((sum,g)=>sum+g.percentage,0)-100)<1e-10);
   assert.equal(groups.reduce((sum,g)=>sum+g.value,0),report.total);

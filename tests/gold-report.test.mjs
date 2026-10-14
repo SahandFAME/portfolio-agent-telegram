@@ -60,7 +60,7 @@ async function app({readError=false, env={}}={}) {
   });
   await module.evaluate();
   const ns = module.namespace;
-  const assets = Object.fromEntries([...ns.ASSETS].filter(x=>!(x in ns.MANUAL)).map(x=>[x,0]));
+  const assets = Object.fromEntries([...ns.ASSETS].filter(x=>!(x in ns.MANUAL)).map(x=>[x,1]));
   const payload = {version:'synthetic fixture',updated_at:new Date().toISOString(),
     workbook_updated_at:'2026-01-01T00:00:00Z',assets};
   async function request(method, query={}, body={}, headers={}) {

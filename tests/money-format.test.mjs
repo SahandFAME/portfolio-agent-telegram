@@ -15,19 +15,20 @@ test('whole-toman rounding and requested Persian/English dollar punctuation hand
 test('text, pictured and chart reports round money only, retaining exact values, quantities and percentages',async()=>{
   const a=await app(),q={...a.assets,...a.ns.MANUAL,BTC:.00519153,ETH:.40602},before=JSON.stringify(q);
   const data=await a.ns.prepareAllocation(q,12345.67);
-  assert.ok(Math.abs(data.vals.BTC-10383.06)<1e-8);
+  assert.equal(data.vals.BTC,undefined);
+  assert.ok(Math.abs(a.ns.valueRial("BTC",q.BTC,data.prices.BTC,data.usdIrr)-10383.06)<1e-8);
   const text=await a.ns.latestAllocationReport(q,12345.67,'text',a.payload);
   const body=text.messages.join('\n');
   assert.equal(text.total,data.total);
-  assert.match(body,/مقدار: ۰٫۰۰۵۱۹۱۵۳ BTC/);
-  assert.match(body,/ارزش: <b>۱،۰۳۸ تومان<\/b>/);
+  assert.doesNotMatch(body,/\. <b>BTC<\/b>/);
+  assert.match(body,/ارزش: <b>۸۱،۲۰۴ تومان<\/b>/);
   for(const line of body.split('\n').filter(line=>/تومان/.test(line)&&!/یادداشت|خرید تاریخی/.test(line))){
     assert.doesNotMatch(line,/[۰-۹][٫\/][۰-۹]/);
   }
   const svg=a.ns.buildPortfolioSvg(q,data.vals,data.total,data.prices,data.usdIrr);
-  assert.match(svg,/>۱،۰۳۸<\/text>/);
-  assert.match(svg,/>۰٫۰۰۵۲<\/text>/);
-  assert.ok(svg.includes('>۰/۰۱ دلار</text>'));
+  assert.doesNotMatch(svg,/>BTC<\/text>/);
+  assert.match(svg,/>۰٫۴۰۶<\/text>/);
+  assert.ok(svg.includes('>۰/۸۱ دلار</text>'));
   assert.doesNotMatch(svg,/[۰-۹]٫[۰-۹]+ دلار/);
   const chart=a.ns.buildAllocationPieSvg(data,a.payload);
   assert.ok(chart.includes(a.ns.formatTomanAmount(data.total/10)+' تومان'));

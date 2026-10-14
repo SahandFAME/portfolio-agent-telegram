@@ -11,6 +11,14 @@ const ACCESS_STATE = "portfolio/access-control.json";
 // for conditional writes. Read access JSON as identity to retain its strong ETag.
 const ACCESS_READ_OPTIONS={access:"private",useCache:false,headers:{"Accept-Encoding":"identity"}};
 const BLACKROCK_PENDING_PREFIX = "portfolio/pending-blackrock/";
+// Owner-authorized report cutoff, compared against exact rial valuations.
+const MIN_REPORT_VALUE_RIAL=50000*10;
+const REPORT_VISIBILITY_NOTE="دارایی‌های با ارزش کمتر از ۵۰،۰۰۰ تومان از ردیف‌ها، جمع کل و درصدها حذف شده‌اند.";
+function visibleReportAssets(vals){return ASSETS.filter(asset=>Number.isFinite(vals[asset])&&vals[asset]>=MIN_REPORT_VALUE_RIAL);}
+function filteredReportValues(vals){
+  const included=Object.fromEntries(visibleReportAssets(vals).map(asset=>[asset,vals[asset]]));
+  return {vals:included,total:Object.values(included).reduce((sum,value)=>sum+value,0)};
+}
 const ASSETS = [
   "طلا","عیار","گوهر","آلتون","امرالد","زرفام","نهال","طعام","استیل",
   "فلز فارابی","پتروآگاه","خودران","بلک راک","سجام","فملی","شمش نقره 999",
@@ -306,7 +314,7 @@ async function telegram(req,res){
         const status=quantitySnapshotStatus(snapshot);
         reply=snapshot?("پورتفولیو متصل است.\n\nآخرین Snapshot معاملات: "+boldPortfolioTime(snapshot.updated_at)+(snapshot.workbook_updated_at?"\nآخرین به‌روزرسانی فایل: "+boldPortfolioTime(snapshot.workbook_updated_at):"")+(status.stale?"\n\n⚠️ "+status.message:"\n\nوضعیت Snapshot: به‌روز")):"پورتفولیو متصل است، اما Snapshot معاملات هنوز همگام‌سازی نشده است.";
       }
-      else if(command==="/assets")reply=assetsReply(quantities,snapshot);
+      else if(command==="/assets")reply=await filteredAssetsReply(quantities,snapshot);
       else if(command==="/gold_and_other_precious_metals"||command==="/gold")reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"طلا و فلزات گرانبها",snapshot);
       else if(command==="/crypto")reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"رمزارز",snapshot);
       else if(command==="/cash_dollar")reply=await valuationReply(quantities,["دلار"],"دلار نقدی",snapshot);
@@ -441,7 +449,7 @@ async function completeLatestAllocation(req,res){
       if(latest?.request_id!==id)return;
       if(report.text){
         if(guest){
-          await sendTelegram(record.chat_id,"تهیه نمودار فعلاً ممکن نیست. لطفاً بعداً دوباره تلاش کنید.",{menu:true,audience:"guest"});return;
+          await sendTelegram(record.chat_id,report.empty?"هیچ گروه دارایی با ارزش قابل گزارش وجود ندارد.":"تهیه نمودار فعلاً ممکن نیست. لطفاً بعداً دوباره تلاش کنید.",{menu:true,audience:"guest"});return;
         }
         if(report.text.includes("قیمت فعلی هر واحد صندوق بلک"))await savePendingBlackRock(record.chat_id,{
           type:"latest_blackrock_price",requestedAt:new Date().toISOString(),request_id:id,report_format:record.report_format||"image"});
@@ -1059,18 +1067,18 @@ async function valuationReply(q,names,title,snapshot=null){
   const {prices,errors}=await getPrices({includeEcoCoach:names.includes("بلک راک")});
   const usdIrr=prices["دلار"]?.priceRial;
   if(!Number.isFinite(usdIrr)||usdIrr<=0)return "<b>"+escXml(title)+"</b>\n\nدریافت نرخ دلار آزاد ناموفق بود؛ ارزش‌گذاری انجام نشد.";
-  const blocks=[];let total=0,incomplete=false;
-  names.forEach((asset,index)=>{
+  const blocks=[],shown=[];let total=0,incomplete=false;
+  names.forEach(asset=>{
     let missing=errors[asset]||!prices[asset]?"قیمت معتبر دریافت نشد":null;
     if(q[asset]===undefined||!Number.isFinite(Number(q[asset]))||Number(q[asset])<0)missing="مقدار دارایی موجود یا معتبر نیست";
     const value=missing?null:valueRial(asset,Number(q[asset]),prices[asset],usdIrr);
     if(!missing&&(!Number.isFinite(value)||value<0))missing="ارزش‌گذاری معتبر نیست";
     if(missing){
       incomplete=true;
-      blocks.push(reportNumber(index+1)+". <b>"+escXml(assetLabel(asset))+"</b>\nارزش‌گذاری انجام نشد: "+missing);
+      shown.push(asset);
+      blocks.push(reportNumber(shown.length)+". <b>"+escXml(assetLabel(asset))+"</b>\nارزش‌گذاری انجام نشد: "+missing);
     }else{
-      total+=value;
-      blocks.push(detailedAssetTextBlock(q,asset,index,prices[asset],value));
+      if(value>=MIN_REPORT_VALUE_RIAL){total+=value;shown.push(asset);blocks.push(detailedAssetTextBlock(q,asset,shown.length-1,prices[asset],value));}
     }
   });
   const header="<b>گزارش تفصیلی "+escXml(title)+"</b>\n"+
@@ -1078,7 +1086,7 @@ async function valuationReply(q,names,title,snapshot=null){
     "قیمت‌های بازار: "+boldPortfolioTime(new Date())+"\n"+
     (incomplete||!Number.isFinite(total)?"<b>گزارش ناقص است؛ جمع کل ارائه نمی‌شود.</b>":
       "ارزش کل دارایی‌های این گزارش: <b>"+formatTomanAmount(total/10)+" تومان</b>");
-  return withAssetFootnotes([header,...blocks].join("\n\n"),names);
+  return withAssetFootnotes([header,REPORT_VISIBILITY_NOTE,...(blocks.length?blocks:["هیچ دارایی با ارزش حداقل ۵۰،۰۰۰ تومان در این گزارش وجود ندارد."])].join("\n\n"),shown);
 }
 function reportNumber(value){return Number(value).toLocaleString("fa-IR",{maximumFractionDigits:8});}
 function detailedAssetTextBlock(q,asset,index,quote,value){
@@ -1125,7 +1133,7 @@ function portfolioTable(q,vals,total,prices,usdIrr){
     "سهام":0,"صندوق سهامی":1,"صندوق بخشی":2,"صندوق کالایی":3,"صندوق طلا":4,"صندوق":5,
     "رمز ارز":0,"فیات":0
   };
-  const rows=Object.entries(vals).sort((a,b)=>{
+  const rows=Object.entries(vals).filter(([,value])=>value>=MIN_REPORT_VALUE_RIAL).sort((a,b)=>{
     const ga=categoryRank[categoryName(a[0])]??99,gb=categoryRank[categoryName(b[0])]??99;
     if(ga!==gb)return ga-gb;
     const sa=subgroupRank[REPORT_GROUP[a[0]]]??(categoryName(a[0])==="طلا و سکه"?9:99);
@@ -1169,13 +1177,16 @@ async function allocationReply(q,blackRockPriceRial=null){
   if(!total)return "Allocation unavailable: no current prices were obtained.";
   const reportPrices={...prices};
   if(blackRockPriceRial!==null&&!prices["بلک راک"]) reportPrices["بلک راک"]={priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
-  const table=portfolioTable(q,vals,total,reportPrices,usdIrr);
+  const selected=filteredReportValues(vals);total=selected.total;
+  if(!total)return "هیچ دارایی با ارزش حداقل ۵۰،۰۰۰ تومان در گزارش وجود ندارد.";
+  const table=portfolioTable(q,selected.vals,total,reportPrices,usdIrr);
   const sources=[...new Set(Object.keys(vals).map(a=>reportPrices[a]?.source).filter(Boolean))].join(", ");
   const lines=["<b>Portfolio valuation — live prices</b>","","<b>Total:</b> "+formatToman(total)+" | <b>USD:</b> $"+format(valueUsd(total,usdIrr)),"","<i>Unit prices and sources are shown below.</i>","",table];
   if(missing.length)lines.push("\n<b>Not valued:</b> "+missing.map(assetLabel).join(", "));
   lines.push("\n<b>Price sources:</b> "+sources);
   lines.push("<b>Retrieved:</b> "+boldPortfolioTime(new Date()));
-  return withAssetFootnotes(lines.join("\n"),[...Object.keys(vals),...missing]);
+  lines.push(REPORT_VISIBILITY_NOTE);
+  return withAssetFootnotes(lines.join("\n"),[...visibleReportAssets(vals),...missing]);
 }
 
 
@@ -1207,24 +1218,49 @@ const ALLOCATION_CATEGORIES=["طلا و سکه","نقره","سهام و صندو
 const ALLOCATION_LABELS={"طلا و سکه":"طلا و سکه","نقره":"نقره","سهام و صندوق":"سهام و صندوق‌ها","رمز ارز":"رمزارز","Tether":"تتر","US Dollar":"دلار نقدی"};
 const ALLOCATION_COLORS={"طلا و سکه":"#e9c51d","نقره":"#8799a8","سهام و صندوق":"#4c79b7","رمز ارز":"#e15353","Tether":"#00a767","US Dollar":"#98c87c"};
 function allocationGroups(vals,total){
+  ({vals,total}=filteredReportValues(vals));
   return ALLOCATION_CATEGORIES.map(category=>{
     const value=Object.entries(vals).filter(([asset])=>categoryName(asset)===category).reduce((sum,[,amount])=>sum+amount,0);
-    return {category,label:ALLOCATION_LABELS[category],value,percentage:value/total*100};
+    return {category,label:ALLOCATION_LABELS[category],value,percentage:total>0?value/total*100:0};
   });
 }
-function assetsReply(quantities,snapshot){
+async function filteredAssetsReply(quantities,snapshot){
+  // Without verified current quantities, retain the raw quantity list and do
+  // not decide visibility using stale valuations or historical purchase notes.
+  if(quantitySnapshotStatus(snapshot).stale)return assetsReply(quantities,snapshot)+
+    "\n\nبرای اعمال حداقل ارزش نمایش، ابتدا آخرین ترکیب دارایی را دریافت کنید.";
+  const {prices,errors}=await getPrices({includeEcoCoach:Number(quantities["بلک راک"])>0});
+  const usdIrr=prices["دلار"]?.priceRial;
+  let unknown=false;
+  const shown=ASSETS.filter(asset=>{
+    const qty=Number(quantities[asset]);
+    if(quantities[asset]===undefined||!Number.isFinite(qty)||qty<0){unknown=true;return true;}
+    if(qty===0)return false;
+    if(errors[asset]||!prices[asset]||(cryptoAsset(asset)&&(!Number.isFinite(usdIrr)||usdIrr<=0))){unknown=true;return true;}
+    const value=valueRial(asset,qty,prices[asset],usdIrr);
+    if(!Number.isFinite(value)||value<0){unknown=true;return true;}
+    return value>=MIN_REPORT_VALUE_RIAL;
+  });
+  return assetsReply(quantities,snapshot,{shown})+
+    "\n\nدارایی‌های با ارزش کمتر از ۵۰،۰۰۰ تومان در فهرست نمایش داده نمی‌شوند."+
+    (unknown?" دارایی‌های بدون ارزش‌گذاری معتبر در فهرست باقی می‌مانند.":"");
+}
+function assetsReply(quantities,snapshot,{shown=ASSETS}={}){
   const categories=[
     ["طلا و سکه","طلا و سکه"],["نقره","نقره"],["سهام و صندوق","سهام و صندوق‌ها"],
     ["رمز ارز","رمزارزها"],["Tether","تتر"],["US Dollar","دلار"]
   ];
   let index=0;
-  const sections=categories.map(([category,title])=>"<b><i><u>"+escXml(title)+"</u></i></b>\n\n"+ASSETS
-    .filter(asset=>categoryName(asset)===category)
-    .map(asset=>(++index)+". "+assetLabel(asset)+": "+(quantities[asset]===undefined?"همگام‌سازی نشده":format(quantities[asset])))
-    .join("\n"));
-  return withAssetFootnotes("دارایی‌های پرتفوی (۲۹ مورد)\n\n"+sections.join("\n\n")+
-    (snapshot?"\n\nSnapshot: "+boldPortfolioTime(snapshot.updated_at):""),ASSETS);
+  const sections=categories.filter(([category])=>shown.some(asset=>categoryName(asset)===category))
+    .map(([category,title])=>"<b><i><u>"+escXml(title)+"</u></i></b>\n\n"+shown
+      .filter(asset=>categoryName(asset)===category)
+      .map(asset=>(++index)+". "+assetLabel(asset)+": "+(quantities[asset]===undefined?"همگام‌سازی نشده":format(quantities[asset])))
+      .join("\n"));
+  return withAssetFootnotes("دارایی‌های پرتفوی ("+reportNumber(shown.length)+" مورد)\n\n"+
+    (sections.join("\n\n")||"هیچ دارایی با ارزش حداقل ۵۰،۰۰۰ تومان وجود ندارد.")+
+    (snapshot?"\n\nSnapshot: "+boldPortfolioTime(snapshot.updated_at):""),shown);
 }
+
 function escXml(s){return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function svgText(x,y,text,size,opts={}){
   const anchor=opts.anchor||"start",weight=opts.weight||400,fill=opts.fill||"#18324a";
@@ -1251,6 +1287,7 @@ function wrapReportText(text,maxChars=145){
 }
 
 function buildPortfolioSvg(q,vals,total,prices,usdIrr){
+  ({vals,total}=filteredReportValues(vals));
   const priceTime=portfolioTime(new Date());
   const enNum=n=>Number(n).toLocaleString("fa-IR",{maximumFractionDigits:2});
   const toman=moneyFa;
@@ -1272,7 +1309,7 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
     }
     return 0;
   }
-  const rows=Object.entries(vals).sort((a,b)=>{
+  const rows=Object.entries(vals).filter(([,value])=>value>=MIN_REPORT_VALUE_RIAL).sort((a,b)=>{
     const ga=categoryRank[categoryName(a[0])]??99,gb=categoryRank[categoryName(b[0])]??99;
     if(ga!==gb)return ga-gb;
     const sa=subgroupRank(a[0]),sb=subgroupRank(b[0]);
@@ -1291,8 +1328,9 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
 
   // The table is deliberately placed BELOW the dashboard panels. This prevents
   // the 29-row table from ever covering the chart, cards, or summary.
-  const noteY=1965;
+  const noteY=790+48+rows.length*37+54;
   const noteLines=[
+    REPORT_VISIBILITY_NOTE,
     "• قیمت واحد رمزارزها به دلار نمایش داده می‌شود.",
     "• ارزش دلاری سایر دارایی‌ها از تقسیم ارزش تومانی بر نرخ دلار آزاد به دست می‌آید.",
     "• ارزش دلاری رمزارزها حاصل ضرب مقدار در قیمت دلاری هر واحد است.",
@@ -1442,16 +1480,17 @@ async function prepareAllocation(q,blackRockPriceRial,{guest=false}={}){
     total+=vals[a];
   }
   if(effectiveBlackRockPrice!==null){const v=qSafe(q["بلک راک"])*effectiveBlackRockPrice;vals["بلک راک"]=v;total+=v;delete errors["بلک راک"];}
-  if(!total)return {text:"هیچ قیمت معتبر فعلی برای ارزش‌گذاری دریافت نشد."};
   const reportPrices={...prices};
   if(!prices["بلک راک"]&&effectiveBlackRockPrice!==null){
     reportPrices["بلک راک"]=guest
       ?{priceRial:GUEST_ECOCOACH_PRICE_RIAL,source:"Owner-approved guest fallback",fixedPrice:true,unit:"IRR/unit"}
       :{priceRial:blackRockPriceRial,source:"User input",retrievedAt:new Date().toISOString(),unit:"IRR/unit"};
   }
-  if(!Number.isFinite(total)||total<=0||Object.values(vals).some(value=>!Number.isFinite(value)||value<0))
+  if(!Number.isFinite(total)||total<0||Object.values(vals).some(value=>!Number.isFinite(value)||value<0))
     return {text:"ارزش‌گذاری کامل و معتبر نیست؛ هیچ جمع کل، درصد یا نموداری ارائه نمی‌شود."};
-  return {vals,total,prices:reportPrices,usdIrr,priceTime:new Date().toISOString()};
+  const selected=filteredReportValues(vals);
+  if(!selected.total)return {empty:true,text:"هیچ دارایی با ارزش حداقل ۵۰،۰۰۰ تومان در گزارش وجود ندارد."};
+  return {...selected,prices:reportPrices,usdIrr,priceTime:new Date().toISOString()};
 }
 function renderAllocationSvg(svg){
   const fontPath=path.join(process.cwd(),"assets/fonts/Estedad-Regular.ttf");
@@ -1463,14 +1502,16 @@ function allocationTextReport(q,report,snapshot){
   const header="<b>گزارش تفصیلی آخرین ترکیب دارایی</b>\n"+
     (snapshot?"همگام‌سازی مقادیر: "+boldPortfolioTime(snapshot.updated_at)+"\n":"")+
     "قیمت‌های بازار: "+boldPortfolioTime(report.priceTime)+"\n"+
-    "ارزش کل پرتفوی: <b>"+formatTomanAmount(report.total/10)+" تومان</b>";
+    "ارزش کل گزارش: <b>"+formatTomanAmount(report.total/10)+" تومان</b>\n"+REPORT_VISIBILITY_NOTE;
   const messages=[];let chunk=header;
-  ASSETS.forEach((asset,index)=>{
+  const shown=visibleReportAssets(report.vals);
+  shown.forEach((asset,index)=>{
     const block=detailedAssetTextBlock(q,asset,index,report.prices[asset],report.vals[asset]);
     if((chunk+"\n\n"+block).length>3500){messages.push(chunk);chunk="<b>ادامه گزارش ترکیب دارایی</b>";}
     chunk+="\n\n"+block;
   });
-  const notes=assetFootnotes(ASSETS);
+  if(!shown.length)chunk+="\n\nهیچ دارایی با ارزش حداقل ۵۰،۰۰۰ تومان وجود ندارد.";
+  const notes=assetFootnotes(shown);
   if((chunk+"\n\n"+notes).length>3500){messages.push(chunk);chunk=notes;}
   else chunk+="\n\n"+notes;
   messages.push(chunk);
@@ -1481,10 +1522,10 @@ function allocationTextReport(q,report,snapshot){
 }
 async function latestAllocationReport(q,blackRockPriceRial,format="image",snapshot=null,{guest=false}={}){
   const report=await prepareAllocation(q,blackRockPriceRial,{guest});
-  if(report.text)return guest?{text:"تهیه نمودار فعلاً ممکن نیست. لطفاً بعداً دوباره تلاش کنید."}:report;
+  if(report.text)return guest&&!report.empty?{text:"تهیه نمودار فعلاً ممکن نیست. لطفاً بعداً دوباره تلاش کنید."}:report;
   if(guest)return {png:renderAllocationSvg(buildAllocationPieSvg(report,snapshot,{guest:true})),guestSafe:true};
   if(format==="text")return allocationTextReport(q,report,snapshot);
-  if(format==="chart")return {png:renderAllocationSvg(buildAllocationPieSvg(report,snapshot)),total:report.total,captionFootnotes:assetFootnotes(ASSETS,{html:false})};
+  if(format==="chart")return {png:renderAllocationSvg(buildAllocationPieSvg(report,snapshot)),total:report.total,captionFootnotes:assetFootnotes(visibleReportAssets(report.vals),{html:false})};
   return {png:renderAllocationSvg(buildPortfolioSvg(q,report.vals,report.total,report.prices,report.usdIrr)),total:report.total};
 }
 async function allocationImageReply(q,blackRockPriceRial){
@@ -1492,6 +1533,10 @@ async function allocationImageReply(q,blackRockPriceRial){
 }
 
 function buildAllocationPieSvg(report,snapshot=null,{guest=false}={}){
+  if(!Number.isFinite(report.total)||report.total<=0||Object.values(report.vals).some(value=>!Number.isFinite(value)||value<0)||
+    Math.abs(Object.values(report.vals).reduce((sum,value)=>sum+value,0)-report.total)>Math.max(1,report.total)*1e-10)
+    throw new Error("invalid_allocation_chart");
+  report={...report,...filteredReportValues(report.vals)};
   const groups=allocationGroups(report.vals,report.total);
   if(!Number.isFinite(report.total)||report.total<=0||groups.some(group=>!Number.isFinite(group.value)||group.value<0)||
     Math.abs(groups.reduce((sum,group)=>sum+group.value,0)-report.total)>Math.max(1,report.total)*1e-10)
@@ -1606,7 +1651,7 @@ function buildAllocationPieSvg(report,snapshot=null,{guest=false}={}){
   }
   if(!guest){
     svg+='<rect x="36" y="1038" width="1528" height="91" rx="28" fill="'+theme.card+'"/>';
-    svg+=svgText(1510,1075,"ارزش کل پرتفوی",21,{anchor:"end",weight:700,fill:theme.muted});
+    svg+=svgText(1510,1075,"ارزش کل گزارش",21,{anchor:"end",weight:700,fill:theme.muted});
     svg+=svgText(1510,1110,moneyFa(report.total/10),29,{anchor:"end",weight:700,fill:theme.ink});
     svg+=svgText(78,1087,"درصد گروه‌ها بر اساس ارزش تومانی • دو رقم اعشار",20,{fill:theme.muted});
   }

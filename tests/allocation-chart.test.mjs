@@ -35,10 +35,11 @@ test('chart button and slash command independently refresh quantities before quo
 
 test('3D chart slices and Persian labels match computed percentages, including zero groups',async()=>{
   const a=await app();const vals={'طلا':40,'شمش نقره 999':5,'نهال':5,'طعام':10,'فملی':10,'BTC':10,Tether:10,'دلار':10};
-  const report={vals,total:100,priceTime:'2026-10-11T09:00:00Z'};
+  for(const asset of Object.keys(vals))vals[asset]*=1e6;
+  const report={vals,total:100e6,priceTime:'2026-10-11T09:00:00Z'};
   const svg=a.ns.buildAllocationPieSvg(report,{updated_at:'2026-10-11T08:59:00Z'});
   assert.match(svg,/data-layer="side"/);assert.equal((svg.match(/data-layer="top"/g)||[]).length,6);
-  const groups=a.ns.allocationGroups(vals,100);
+  const groups=a.ns.allocationGroups(vals,100e6);
   for(const group of groups){
     assert.ok(svg.includes('data-category="'+group.category+'" data-percentage="'+group.percentage+'"'));
     assert.ok(svg.includes('>'+group.label+'</text>'));
@@ -46,11 +47,11 @@ test('3D chart slices and Persian labels match computed percentages, including z
   }
   assert.ok(svg.includes('۱۴۰۵/۰۷/۱۹ • ۱۲:۳۰:۰۰ (تهران)'));assert.ok(svg.includes('۱۴۰۵/۰۷/۱۹ • ۱۲:۲۹:۰۰ (تهران)'));
   assert.equal(groups.find(x=>x.category==='سهام و صندوق').percentage,25);
-  const one=a.ns.buildAllocationPieSvg({...report,vals:{'طلا':100}});
+  const one=a.ns.buildAllocationPieSvg({...report,vals:{'طلا':100e6}});
   assert.equal((one.match(/data-layer="top"/g)||[]).length,1);
   assert.ok(one.includes('data-percentage="100"'));assert.equal((one.match(/>۰٫۰۰٪<\/text>/g)||[]).length,5);
   const png=a.ns.renderAllocationSvg(one);assert.ok(png.length>1000);
-  for(const invalid of [{...report,total:0},{...report,total:99},{...report,vals:{'طلا':-1}},{...report,vals:{BTC:NaN}}])
+  for(const invalid of [{...report,total:0},{...report,total:99e6},{...report,vals:{'طلا':-1}},{...report,vals:{BTC:NaN}}])
     assert.throws(()=>a.ns.buildAllocationPieSvg(invalid),/invalid_allocation_chart/);
 });
 

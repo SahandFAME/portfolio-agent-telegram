@@ -95,7 +95,7 @@ test('guest-only owner-approved fallback converts 1,030,000 toman to rial and co
     assert.equal(report.prices['بلک راک'].quotedAt,undefined);
     assert.equal(report.prices['بلک راک'].retrievedAt,undefined);
     assert.equal(report.vals['بلک راک'],154500000);
-    assert.equal(Object.keys(report.vals).length,29);
+    assert.ok(Object.values(report.vals).every(value=>value>=500000));
     assert.equal(report.total,Object.values(report.vals).reduce((sum,value)=>sum+value,0));
     const output=await a.ns.latestAllocationReport(q(a),null,'chart',a.payload,{guest:true});
     assert.ok(output.png);assert.equal(output.total,undefined);assert.equal(output.captionFootnotes,undefined);

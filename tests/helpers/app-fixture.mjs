@@ -10,7 +10,7 @@ import { BlobPreconditionFailedError } from '@vercel/blob';
 const source = await fs.readFile(new URL('../../api/telegram.js', import.meta.url), 'utf8');
 // Evaluate the actual unmodified handler, injecting only external dependencies.
 // Named exports below exist only inside the test VM, not in application code.
-export async function app({readError=false, dispatchStatus=204, env={}, telegramReply=null,beforeWrite=null,beforeMarketFetch=null,ecoCoachHtml=null,ecoCoachError=false,ecoCoachStatus=200,compressAccessReads=false,forceWeakEtag=false}={}) {
+export async function app({readError=false, dispatchStatus=204, env={}, telegramReply=null,beforeWrite=null,beforeMarketFetch=null,ecoCoachHtml=null,ecoCoachError=false,ecoCoachStatus=200,compressAccessReads=false,forceWeakEtag=false,cryptoPriceUsd=2}={}) {
   const store = new Map(), writes = [], sends = [], background = [], dispatches=[], marketCalls=[];
   const tokenEnv = {PORTFOLIO_SYNC_SECRET:'fixture-primary',PORTFOLIO_SYNC_SECRET_AGENT:'fixture-secondary',
     GITHUB_ACTIONS_TOKEN:'fixture-actions',TELEGRAM_WEBHOOK_SECRET:'fixture-webhook',TELEGRAM_BOT_TOKEN:'fixture-bot',TELEGRAM_ADMIN_USER_IDS:'1',...env};
@@ -27,7 +27,7 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
       return {ok:ecoCoachStatus===200,status:ecoCoachStatus,text:async()=>ecoCoachHtml||'<h1>صندوق شاخصی بلک راک</h1><p>به زودی</p>'};
     }
     if(url.includes('coingecko')) return {ok:true,json:async()=>Object.fromEntries(
-      ['bitcoin','ethereum','tether','chainlink','cardano','solana','ondo-finance'].map(k=>[k,{usd:2}]))};
+      ['bitcoin','ethereum','tether','chainlink','cardano','solana','ondo-finance'].map(k=>[k,{usd:cryptoPriceUsd}]))};
     let text = 'آخرین قیمت 1,200,000';
     if(url.includes('/ime/')) text = 'SilverBar 999.9 1,200,000';
     if(url.includes('/profile/')) {
@@ -71,7 +71,7 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
     '@vercel/functions':{waitUntil:promise=>background.push(promise)},
     sharp:{default:sharp},'@resvg/resvg-js':{Resvg},path:{default:path}
   };
-  const module = new vm.SourceTextModule(source + '\nexport {monetaryNumber,formatTomanAmount,ASSETS,MANUAL,ASSET_COMMENTS,assetLabel,assetFootnotes,assetsReply,valuationReply,wrapReportText,parseEcoCoachPrice,ecoCoachPrice,parseUserPrice,valueRial,quantitySnapshotStatus,getPrices,buildPortfolioSvg,allocationImageReply,sendTelegram,sendTelegramPhoto,portfolioTime,boldPortfolioTime,allocationReply,latestAllocationReport,prepareAllocation,allocationGroups,renderAllocationSvg,buildAllocationPieSvg};', {context});
+  const module = new vm.SourceTextModule(source + '\nexport {filteredReportValues,filteredAssetsReply,MIN_REPORT_VALUE_RIAL,visibleReportAssets,monetaryNumber,formatTomanAmount,ASSETS,MANUAL,ASSET_COMMENTS,assetLabel,assetFootnotes,assetsReply,valuationReply,wrapReportText,parseEcoCoachPrice,ecoCoachPrice,parseUserPrice,valueRial,quantitySnapshotStatus,getPrices,buildPortfolioSvg,allocationImageReply,sendTelegram,sendTelegramPhoto,portfolioTime,boldPortfolioTime,allocationReply,latestAllocationReport,prepareAllocation,allocationGroups,renderAllocationSvg,buildAllocationPieSvg};', {context});
   await module.link(async specifier => {
     const exports = dependencies[specifier];
     assert.ok(exports, `unexpected dependency ${specifier}`);

@@ -10,7 +10,7 @@ async function report(a,text='/assets',id=1){
 const names=text=>[...text.matchAll(/^\d+\. (.*?): /gm)].map(x=>x[1].replace(/\*$/,''));
 
 test('assets report groups all 29 holdings exactly once using allocation categories',async()=>{
-  const a=await app();a.store.set('portfolio/latest.json',a.payload);
+  const a=await app();for(const asset of Object.keys(a.assets)){a.assets[asset]=1;a.payload.assets[asset]=1;}a.store.set('portfolio/latest.json',a.payload);
   const before=JSON.stringify(a.store.get('portfolio/latest.json'));
   const {text,reply_markup,parse_mode}=await report(a);
   assert.equal(names(text).length,29);
@@ -35,7 +35,7 @@ test('assets report groups all 29 holdings exactly once using allocation categor
     assert.ok(text.includes(a.ns.assetLabel(asset)+': '+Number(quantity).toLocaleString('en-US',{maximumFractionDigits:8})),asset);
   }
   assert.equal(JSON.stringify(a.store.get('portfolio/latest.json')),before);
-  assert.equal(a.marketCalls.length,0);assert.equal(a.dispatches.length,0);
+  assert.ok(a.marketCalls.length>0);assert.equal(a.dispatches.length,0);
   assert.ok(reply_markup.keyboard);
 });
 
