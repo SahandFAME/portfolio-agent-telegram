@@ -38,3 +38,9 @@ financial advisors must never receive access-control or operational privileges.
 Round monetary amounts only when rendering; preserve exact arithmetic and
 quantities. Current role and formatting details are in docs/ADMIN_DASHBOARD.md
 and docs/BOT_MENU.md.
+
+
+The owner's report cutoff (2026-10-14) excludes exact asset valuations below
+50,000 toman from rows, notes, report totals and allocation percentages. Validate
+complete data before applying the cutoff; retain the underlying 29 holdings.
+Unknown valuation is not proof of a value below the cutoff. See docs/BOT_MENU.md.

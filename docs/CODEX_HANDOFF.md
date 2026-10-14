@@ -28,6 +28,13 @@
 > remain unchanged. Details: [admin roles](ADMIN_DASHBOARD.md#financial-advisor-role--مشاور-مالی-2026-10-14)
 > and [report formatting](BOT_MENU.md#monetary-formatting-2026-10-14).
 
+> **2026-10-14 minimum-value rule (owner confirmed):** exclude asset valuations
+> below **50,000 toman** from rows, related footnotes, totals and group
+> percentages; include the exact boundary. Compare exact values before rounding
+> after complete input validation. Stored quantities remain intact. Quantities
+> lists retain unpriced/stale holdings pending a trustworthy valuation. See
+> [report cutoff](BOT_MENU.md#minimum-report-valuation-owner-confirmed-2026-10-14).
+
 **As of:** 2026-10-10 (Tehran time)  
 **Primary repository:** https://github.com/SahandFAME/portfolio-agent-telegram  
 **Branch:** `main`  

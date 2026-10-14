@@ -43,19 +43,19 @@ test('category footnotes are restricted to related assets and acquisition figure
   assert.equal(JSON.stringify(q),before);
 });
 
-test('detailed text keeps all 29 asset rows, exact valuation, bounded chunks and footnotes at the end',async()=>{
+test('detailed text keeps qualifying asset rows, exact valuation, bounded chunks and footnotes at the end',async()=>{
   const a=await app(),q=quantities(a);
   const output=await a.ns.latestAllocationReport(q,100000,'text',a.payload);
   const data=await a.ns.prepareAllocation(q,100000);
   const text=output.messages.join('\n');
   const rows=[...text.matchAll(/^[۰-۹]+\. <b>([^<]+)<\/b>$/gm)];
-  assert.equal(rows.length,29);assert.equal(output.total,data.total);
-  for(const [index,asset] of [...a.ns.ASSETS].entries())assert.equal(rows[index][1],asset+(commented.includes(asset)?'*':''));
+  const shown=[...a.ns.visibleReportAssets(data.vals)];assert.equal(rows.length,shown.length);assert.equal(output.total,data.total);
+  for(const [index,asset] of shown.entries())assert.equal(rows[index][1],asset+(commented.includes(asset)?'*':''));
   const notes=text.slice(text.indexOf('<b>یادداشت دارایی‌ها'));
   for(const asset of commented)assert.equal(notes.split('<b>'+asset+'*</b>:').length-1,1);
   assert.ok(output.messages.every(chunk=>chunk.length<=3500));
   assert.ok(output.messages.at(-1).includes('یادداشت دارایی‌ها'));
-  assert.ok(text.includes('مقدار: ۰٫۰۰۵۱۹۱۵۳ BTC'));assert.ok(text.includes('مقدار: ۰٫۴۰۶۰۲ ETH'));
+  assert.doesNotMatch(text,/\. <b>BTC<\/b>/);assert.ok(text.includes('مقدار: ۰٫۴۰۶۰۲ ETH'));
   assert.equal((output.percentages.match(/٪/g)||[]).length,6);
 });
 
@@ -73,7 +73,7 @@ test('pictured footnotes use readable Persian EcoCoach text and remain inside an
   }
   assert.ok(footer.includes('بلک راک*: صندوق خصوصی اکوکوچ است؛ قیمت واحد ابتدا در سایت صندوق بررسی می‌شود؛ در صورت نبود قیمت معتبر، مدیر آن را وارد می‌کند.'));
   assert.doesNotMatch(footer,/EcoCoach|<tspan/);
-  assert.ok(imageHeight>2160);
+  assert.ok(imageHeight>1000);
   for(const node of texts){assert.equal(+node[1],1730);assert.ok(+node[2]<+rect[1]+Number(rect[2])-20);}
   assert.ok(+rect[1]+Number(rect[2])<imageHeight);
   const metadata=await sharp(a.ns.renderAllocationSvg(svg)).metadata();assert.equal(metadata.height,imageHeight);

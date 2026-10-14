@@ -9,11 +9,11 @@ const money=value=>Math.round(Number(value)).toLocaleString('fa-IR',{maximumFrac
 const number=value=>Number(value).toLocaleString('fa-IR',{maximumFractionDigits:8});
 const messages=a=>a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body));
 const request=(a,text,id=1)=>a.request('POST',{}, {message:{chat:{id,type:'private'},from:{id},text}},headers);
-const q=a=>({...a.assets,...a.ns.MANUAL,BTC:.00519153,ETH:.40602,Tether:2617.574383,'طلا':386,'شمش نقره 999':256});
+const q=a=>({...Object.fromEntries(Object.keys(a.assets).map(asset=>[asset,1])),...a.ns.MANUAL,BTC:.00519153,ETH:.40602,Tether:2617.574383,'طلا':386,'شمش نقره 999':256});
 
 for(const [command,names,title] of [['/crypto',crypto,'رمزارز'],['/gold_and_other_precious_metals',gold,'طلا و فلزات گرانبها'],['/cash_dollar',['دلار'],'دلار نقدی']]){
   test(`${command} uses complete numbered Persian asset blocks and the correct category-only toman total`,async()=>{
-    const a=await app(),quantities=q(a),snapshot={...a.payload,assets:Object.fromEntries(Object.keys(a.assets).map(asset=>[asset,quantities[asset]]))};
+    const a=await app({cryptoPriceUsd:200}),quantities=q(a),snapshot={...a.payload,assets:Object.fromEntries(Object.keys(a.assets).map(asset=>[asset,quantities[asset]]))};
     a.store.set('portfolio/latest.json',snapshot);const before=JSON.stringify(snapshot);
     await request(a,command);
     const chunks=messages(a),text=chunks.map(x=>x.text).join('\n\n');
@@ -37,8 +37,8 @@ for(const [command,names,title] of [['/crypto',crypto,'رمزارز'],['/gold_an
     if(command==='/crypto'){
       assert.ok(text.includes('مقدار: ۰٫۰۰۵۱۹۱۵۳ BTC'));assert.ok(text.includes('مقدار: ۰٫۴۰۶۰۲ ETH'));
       assert.doesNotMatch(text,/یادداشت دارایی‌ها/);
-      assert.ok(text.includes('قیمت واحد: ۲ دلار • منبع: CoinGecko'));
-      assert.ok(text.includes('ارزش: <b>۱،۰۳۸ تومان</b>'));
+      assert.ok(text.includes('قیمت واحد: ۲۰۰ دلار • منبع: CoinGecko'));
+      assert.ok(text.includes('ارزش: <b>۱۰۳،۸۳۱ تومان</b>'));
     }
     if(command.includes('gold')){
       assert.doesNotMatch(text,/طعام|نهال|خریدهای تاریخی:/);

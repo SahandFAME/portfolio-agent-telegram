@@ -162,3 +162,29 @@ when applicable, for example `۱،۲۳۴/۵۶ دلار`. English dollar amounts 
 grouping and dot decimals (`1,234.56`). Dollar price precision and pictured
 valuation precision are retained. Asset quantity and percentage formatting is
 unchanged, including ETH/BTC image quantity limits and full text quantities.
+
+
+## Minimum report valuation (owner-confirmed 2026-10-14)
+
+An asset with exact total valuation **below 50,000 toman (500,000 rial)** is
+excluded from report rows, their asset footnotes, displayed totals, dollar
+aggregates, group values and allocation percentages. Exactly 50,000 toman is
+included. Compare quantity × live unit price before rounding; this is an
+asset-level threshold, not a threshold on the price of one unit or on pooled
+group value. Row numbering and displayed counts follow the retained assets.
+Totals are explicitly labelled as report totals. The report explains the cutoff.
+Guest charts use the same selected values and retain their no-total/no-notes
+policy. An empty selection yields an informative response, without a chart or
+allocation percentages.
+
+All 29 raw quantities and prices still undergo the complete valuation checks
+before selection. Missing/invalid inputs cannot be filtered away to bypass
+pricing or freshness failures. Workbook and private snapshot quantities are
+unchanged; a holding can reappear when its value reaches the threshold.
+
+The quantities-only assets list retrieves current quotes to decide visibility
+when its snapshot passes the existing freshness guard. Unknown valuations stay
+listed and are labelled as such in the report's explanation. Stale/missing
+snapshots retain the raw quantity list and ask for a fresh latest allocation
+before applying the cutoff. No OneDrive job or quantity write is triggered by
+opening the asset list. Empty asset groups are omitted from that list.

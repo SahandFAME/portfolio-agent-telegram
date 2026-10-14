@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import {app} from './helpers/app-fixture.mjs';
 
 test('pictured report uses Persian headings, holdings, groups, units and a right-to-left table',async()=>{
-  const a=await app();const q=Object.fromEntries([...a.ns.ASSETS].map(asset=>[asset,1]));q.BTC=0.00519153;q.ETH=0.40602;
+  const a=await app({cryptoPriceUsd:200});const q=Object.fromEntries([...a.ns.ASSETS].map(asset=>[asset,1]));q.BTC=0.00519153;q.ETH=0.40602;q['بلک راک']=15;
   const data=await a.ns.prepareAllocation(q,100000);
   const svg=a.ns.buildPortfolioSvg(q,data.vals,data.total,data.prices,data.usdIrr);
   for(const label of ['گزارش ارزش‌گذاری و ترکیب دارایی','ترکیب دارایی','خلاصه پرتفوی','توضیحات','ردیف','دارایی','گروه','مقدار','واحد','قیمت واحد','ارزش (تومان)','ارزش (دلار)','درصد','منبع'])assert.ok(svg.includes('>'+label+'</text>'),label);
