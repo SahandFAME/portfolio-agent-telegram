@@ -141,7 +141,8 @@ async function readAccessHealth(req,res){
     return res.status(200).json({ok:true,owner_count:adminUserIds().length,
       approved_count:state.approved.length,pending_count:Object.keys(state.pending).length,
       delegated_admin_count:state.delegatedAdmins.length,audit_count:state.audit.length,
-      guest_count:state.approved.filter(id=>!isBotAdmin(id,state)).length,guest_chart_only:true,
+      guest_count:state.approved.filter(id=>!canReadReports(id,state)).length,guest_chart_only:true,
+      financial_advisor_count:state.financialAdvisors.length,advisor_reports_only:true,
       conditional_updates_ready:!state._exists||!!state._etag});
   }catch(_){return res.status(503).json({ok:false,error:"Access storage unavailable"});}
 }
@@ -242,7 +243,7 @@ async function telegram(req,res){
     return res.status(200).json({ok:true});
   }
 
-  if(!isAdmin){
+  if(!canReadReports(uid,state)){
     waitUntil((async()=>{
       try{
       if(command==="/allocation_chart"){
@@ -251,6 +252,13 @@ async function telegram(req,res){
       }else await sendTelegram(message.chat.id,guestHelp(),{menu:true,audience:"guest"});
       }catch(_){await sendTelegram(message.chat.id,"دریافت نمودار ناموفق بود. لطفاً دوباره تلاش کنید.",{menu:true,audience:"guest"});}
     })());
+    return res.status(200).json({ok:true});
+  }
+
+  const reportCommands=new Set(["/start","/help","/menu","/assets","/latest_allocation","/allocation_chart",
+    "/gold","/gold_and_other_precious_metals","/crypto","/cash_dollar"]);
+  if(!isAdmin&&!reportCommands.has(command)&&(command.startsWith("/")||parseUserPrice(command)===null)){
+    waitUntil(sendTelegram(message.chat.id,"دسترسی مشاور مالی فقط شامل گزارش‌های دارایی است؛ از منوی گزارش‌ها استفاده کنید.",{menu:true}));
     return res.status(200).json({ok:true});
   }
 
@@ -282,7 +290,7 @@ async function telegram(req,res){
       const valuationCommands=["/allocation","/refresh","/gold","/gold_and_other_precious_metals","/crypto","/cash_dollar"];
       const quantityStatus=quantitySnapshotStatus(snapshot);
       if((valuationCommands.includes(command)||(pending?.type==="blackrock_price"&&!command.startsWith("/")))&&quantityStatus.stale){
-        reply=quantityStatus.message;
+        reply=isAdmin?quantityStatus.message:quantityStatus.message.replace("/status","/latest_allocation");
       }else if(pending?.type==="blackrock_price"&&!command.startsWith("/")){
         const priceRial=parseUserPrice(command);
         if(priceRial===null){
@@ -293,7 +301,7 @@ async function telegram(req,res){
           else await sendTelegramPhoto(message.chat.id,report.png,"گزارش ارزش‌گذاری پرتفوی • قیمت‌های زنده");
           await savePendingBlackRock(message.chat.id,{type:"none",updatedAt:new Date().toISOString()});
         }
-      }else if(command==="/start"||command==="/help"||command==="/menu")reply=help();
+      }else if(command==="/start"||command==="/help"||command==="/menu")reply=help({reportsOnly:!isAdmin});
       else if(command==="/status"){
         const status=quantitySnapshotStatus(snapshot);
         reply=snapshot?("پورتفولیو متصل است.\n\nآخرین Snapshot معاملات: "+boldPortfolioTime(snapshot.updated_at)+(snapshot.workbook_updated_at?"\nآخرین به‌روزرسانی فایل: "+boldPortfolioTime(snapshot.workbook_updated_at):"")+(status.stale?"\n\n⚠️ "+status.message:"\n\nوضعیت Snapshot: به‌روز")):"پورتفولیو متصل است، اما Snapshot معاملات هنوز همگام‌سازی نشده است.";
@@ -302,12 +310,12 @@ async function telegram(req,res){
       else if(command==="/gold_and_other_precious_metals"||command==="/gold")reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"طلا و فلزات گرانبها",snapshot);
       else if(command==="/crypto")reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"رمزارز",snapshot);
       else if(command==="/cash_dollar")reply=await valuationReply(quantities,["دلار"],"دلار نقدی",snapshot);
-      else reply=help();
+      else reply=help({reportsOnly:!isAdmin});
       if(reply){
         const categoryReport=["/gold","/gold_and_other_precious_metals","/crypto","/cash_dollar"].includes(command);
         const chunks=categoryReport?splitAssetReportParagraphs(reply):[reply];
         for(const chunk of chunks){
-          if(!await sendTelegram(message.chat.id,chunk,{menu:true,temporary:chunk.includes("قیمت فعلی هر واحد بلک راک")}))break;
+          if(!await sendTelegram(message.chat.id,chunk,{menu:true,audience:command==="/status"?"admin":"report",temporary:chunk.includes("قیمت فعلی هر واحد بلک راک")}))break;
         }
       }
     }catch(e){console.error("Telegram handler error:",e);try{await sendTelegram(message.chat.id,"خطا در تهیه گزارش. لطفاً دوباره تلاش کنید.",{menu:true});}catch(_){}}
@@ -319,12 +327,12 @@ const ALLOCATION_ACTIVE_PREFIX="portfolio/latest-allocation/active/";
 const ALLOCATION_SELECTION_PREFIX="portfolio/latest-allocation/selections/";
 const ALLOCATION_DEADLINE_MS=10*60*1000;
 async function showAllocationMenu(chatId){
-  if(!isBotAdmin(String(chatId),await loadAccessState({strict:true})))return;
+  if(!canReadReports(String(chatId),await loadAccessState({strict:true})))return;
   const selection={selection_id:crypto.randomUUID(),created_at:new Date().toISOString(),used:false};
   await writePrivateJson(ALLOCATION_SELECTION_PREFIX+chatId+".json",selection);
   await savePendingBlackRock(chatId,{type:"allocation_format_selection",selection_id:selection.selection_id});
   await sendMainMenu(chatId);
-  if(!isBotAdmin(String(chatId),await loadAccessState({strict:true})))return;
+  if(!canReadReports(String(chatId),await loadAccessState({strict:true})))return;
   const data=format=>"allocation:pick:"+selection.selection_id+":"+format;
   await deliverTelegram(chatId,"sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
     chat_id:chatId,text:"آخرین ترکیب دارایی\n\nنوع گزارش را انتخاب کنید. پس از انتخاب، مقادیر تازه از OneDrive و قیمت‌های تازه بازار دریافت می‌شوند.",
@@ -339,7 +347,7 @@ async function handleAllocationCallback(callback){
     const state=await loadAccessState({strict:true});
     if(!isOwner(uid)&&!state.approved.includes(uid)){await answerCallback(callback.id,"دسترسی ندارید.");return;}
     const match=String(callback.data||"").match(/^allocation:pick:([0-9a-f-]{36}):(image|text|menu)$/);
-    if(match?.[2]!=="menu"&&!isBotAdmin(uid,state)){await answerCallback(callback.id,"فقط نمودار درصدی برای مهمان قابل دسترسی است.");return;}
+    if(match?.[2]!=="menu"&&!canReadReports(uid,state)){await answerCallback(callback.id,"فقط نمودار درصدی برای مهمان قابل دسترسی است.");return;}
     const selection=await readPrivateJson(ALLOCATION_SELECTION_PREFIX+chat.id+".json");
     const age=Date.now()-Date.parse(selection?.created_at);
     if(!match||selection?.selection_id!==match[1]||selection.used||!Number.isFinite(age)||age<0||age>ALLOCATION_DEADLINE_MS){
@@ -369,7 +377,7 @@ async function writePrivateJson(key,value){
 async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null,reportFormat="image"){
   const state=await loadAccessState({strict:true}),uid=String(userId);
   if(String(chatId)!==uid||(!isOwner(uid)&&!state.approved.includes(uid)))return "دسترسی ندارید.";
-  if(!isBotAdmin(uid,state)&&(reportFormat!=="chart"||blackRockPriceRial!==null))return guestHelp();
+  if(!canReadReports(uid,state)&&(reportFormat!=="chart"||blackRockPriceRial!==null))return guestHelp();
   const token=process.env.GITHUB_ACTIONS_TOKEN;
   if(!token)return "دریافت تازه از OneDrive هنوز پیکربندی نشده است. گزارش قبلی به‌عنوان گزارش تازه نمایش داده نمی‌شود.";
   const active=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+chatId+".json");
@@ -414,7 +422,7 @@ async function completeLatestAllocation(req,res){
     try{
       const state=await loadAccessState();
       if(!new Set([...(state.approved||[]).map(String),...adminUserIds()]).has(record.user_id))return;
-      const guest=!isBotAdmin(record.user_id,state);
+      const guest=!canReadReports(record.user_id,state);
       await savePendingBlackRock(record.chat_id,{type:"none",updatedAt:new Date().toISOString()});
       if(!body.ok||Date.now()-Date.parse(record.requested_at)>ALLOCATION_DEADLINE_MS){
         await sendTelegram(record.chat_id,"دریافت تازه ناموفق بود. لطفاً گزارش را دوباره درخواست کنید.",{menu:true,audience:"guest"});return;
@@ -476,7 +484,12 @@ function isBotAdmin(uid,state){
   uid=String(uid);
   return isOwner(uid)||((state.approved||[]).includes(uid)&&(state.delegatedAdmins||[]).includes(uid));
 }
-function emptyAccessState(){return {approved:[],pending:{},delegatedAdmins:[],users:{},audit:[]};}
+function canReadReports(uid,state){
+  uid=String(uid);
+  return isBotAdmin(uid,state)||((state.approved||[]).includes(uid)&&(state.financialAdvisors||[]).includes(uid));
+}
+function roleLabel(uid,state){return isOwner(uid)?"مالک":isBotAdmin(uid,state)?"مدیر":canReadReports(uid,state)?"مشاور مالی":"مهمان";}
+function emptyAccessState(){return {approved:[],pending:{},delegatedAdmins:[],financialAdvisors:[],users:{},audit:[]};}
 async function loadAccessState({strict=false}={}){
   try{
     const r=await get(ACCESS_STATE,ACCESS_READ_OPTIONS);
@@ -490,6 +503,8 @@ async function loadAccessState({strict=false}={}){
       delegatedAdmins:[...new Set((Array.isArray(raw.delegatedAdmins)?raw.delegatedAdmins:[]).map(String))].filter(x=>approved.includes(x)&&!isOwner(x)),
       users:raw.users&&typeof raw.users==="object"&&!Array.isArray(raw.users)?raw.users:{},
       audit:Array.isArray(raw.audit)?raw.audit.slice(-100):[]};
+    state.financialAdvisors=[...new Set((Array.isArray(raw.financialAdvisors)?raw.financialAdvisors:[]).map(String))]
+      .filter(id=>approved.includes(id)&&!isOwner(id)&&!state.delegatedAdmins.includes(id));
     Object.defineProperties(state,{_etag:{value:r.blob?.etag},_exists:{value:true}});
     return state;
   }catch(_){
@@ -515,7 +530,7 @@ async function requestAccess(uid,user){
   const who=display+(user.username?" (@"+user.username+")":"")+"\nUser ID: "+uid;
   for(const adminId of adminIds){
     await sendTelegramWithKeyboard(adminId,"درخواست دسترسی جدید\n\n"+who,[[{text:"تأیید به‌عنوان مهمان",callback_data:"admin:approve_guest:"+uid},{text:"تأیید به‌عنوان مدیر",callback_data:"admin:approve_admin:"+uid}],
-      [{text:"رد درخواست",callback_data:"access:reject:"+uid}]],{temporary:false});
+      [{text:"تأیید به‌عنوان مشاور مالی",callback_data:"admin:approve_advisor:"+uid},{text:"رد درخواست",callback_data:"access:reject:"+uid}]],{temporary:false});
   }
   return "Your access request has been sent to the bot admin. You will receive a message when it is reviewed.";
 }
@@ -551,7 +566,7 @@ async function handleAccessCallback(callback){
     }
     const page=data.match(/^admin:(home|users|pending|admins|status|audit)(?::(\d+))?$/);
     if(page){await answerCallback(callback.id,"");await showAdminDashboard(chat.id,uid,page[1],Number(page[2]||0),previousPanel);return;}
-    const action=data.match(/^admin:(approve_guest|approve_admin|approve|reject|revoke|confirm_revoke|grant|demote):([1-9]\d*)$/);
+    const action=data.match(/^admin:(approve_guest|approve_admin|approve_advisor|approve|reject|revoke|confirm_revoke|grant|demote|advisor|guest):([1-9]\d*)$/);
     if(!action){await answerCallback(callback.id,"گزینه نامعتبر.");return;}
     const [_,operation,target]=action;
     if((operation.startsWith("approve")||operation==="reject")&&!state.pending[target])throw new Error("request_not_pending");
@@ -570,7 +585,7 @@ async function handleAccessCallback(callback){
       "owner_permission_required","unknown_user","request_not_pending","unknown_action"]);
     const kind=error instanceof BlobPreconditionFailedError?"precondition_failed":codes.has(error?.message)?error.message:"unexpected_error";
     try{await writePrivateJson("portfolio/diagnostics/last-access-change.json",{at:new Date().toISOString(),
-      operation:String(callback.data||"").match(/^admin:(grant|demote|approve_guest|approve_admin|confirm_revoke|reject):/)?.[1]||"admin_control",
+      operation:String(callback.data||"").match(/^admin:(grant|demote|advisor|guest|approve_guest|approve_admin|approve_advisor|confirm_revoke|reject):/)?.[1]||"admin_control",
       kind,committed:changed});}catch(_){}
     await answerCallback(callback.id,changed?"تغییر ثبت شد. برای نمایش وضعیت جدید، پنل را دوباره باز کنید.":
     "عملیات انجام نشد. مجوزها یا وضعیت تغییر کرده است؛ پنل را دوباره باز کنید.");}
@@ -598,7 +613,7 @@ async function handleAdminAccessCommand(chatId,command,uid){
 }
 function validateAccessChange(actor,target,action,state){
   if(!isBotAdmin(actor,state)||!/^[1-9]\d*$/.test(target)||!Number.isSafeInteger(Number(target))||isOwner(target))throw new Error("access_change_denied");
-  if(action==="grant"||action==="demote"){
+  if(["grant","demote","advisor","guest"].includes(action)){
     if(actor===target||!state.approved.includes(target))throw new Error("role_change_denied");
     if(action==="demote"&&!state.delegatedAdmins.includes(target))throw new Error("not_an_admin");
   }else if(action==="revoke"){
@@ -606,18 +621,24 @@ function validateAccessChange(actor,target,action,state){
     if(!isOwner(actor)&&state.delegatedAdmins.includes(target))throw new Error("owner_permission_required");
   }else if(action==="reject"){
     if(!state.pending[target]||state.approved.includes(target))throw new Error("request_not_pending");
-  }else if(action==="approve_guest"||action==="approve_admin"){
+  }else if(action==="approve_guest"||action==="approve_admin"||action==="approve_advisor"){
     if(!state.pending[target]||state.approved.includes(target))throw new Error("request_not_pending");
   }else throw new Error("unknown_action");
 }
 async function changeAccess(actor,target,action,state){
   validateAccessChange(actor,target,action,state);
-  if(action==="grant")state.delegatedAdmins=[...new Set([...state.delegatedAdmins,target])];
+  if(["grant","demote","advisor","guest","revoke"].includes(action))state.financialAdvisors=state.financialAdvisors.filter(id=>id!==target);
+  if(action==="advisor"){
+    state.delegatedAdmins=state.delegatedAdmins.filter(id=>id!==target);
+    state.financialAdvisors.push(target);
+  }else if(action==="guest")state.delegatedAdmins=state.delegatedAdmins.filter(id=>id!==target);
+  else if(action==="grant")state.delegatedAdmins=[...new Set([...state.delegatedAdmins,target])];
   else if(action==="demote")state.delegatedAdmins=state.delegatedAdmins.filter(x=>x!==target);
-  else if(action==="approve_guest"||action==="approve_admin"){
+  else if(action==="approve_guest"||action==="approve_admin"||action==="approve_advisor"){
     state.approved=[...new Set([...state.approved,target])];
     if(state.pending[target])state.users[target]=state.pending[target];
     delete state.pending[target];
+    if(action==="approve_advisor")state.financialAdvisors.push(target);
     if(action==="approve_admin")state.delegatedAdmins=[...new Set([...state.delegatedAdmins,target])];
   }else{
     if(action==="revoke"){
@@ -629,15 +650,17 @@ async function changeAccess(actor,target,action,state){
   state.audit.push({at:new Date().toISOString(),actor_id:actor,target_id:target,action});
   state.audit=state.audit.slice(-100);
   await saveAccessState(state);
-  if(action==="revoke"||action==="demote"){
+  if(["revoke","demote","guest","advisor"].includes(action)){
     try{await savePendingBlackRock(target,{type:"none",updatedAt:new Date().toISOString()});}catch(_){}
   }
-  const notices={approve_guest:"دسترسی مهمان شما تأیید شد؛ فقط نمودار درصد ترکیب دارایی در دسترس است.",
+  const notices={approve_advisor:"دسترسی شما به‌عنوان مشاور مالی تأیید شد؛ فقط گزارش‌های دارایی در دسترس است.",
+    advisor:"نقش شما به مشاور مالی تغییر کرد؛ فقط گزارش‌های دارایی در دسترس است.",
+    guest:"نقش شما به مهمان تغییر کرد؛ فقط نمودار درصد ترکیب دارایی در دسترس است.",approve_guest:"دسترسی مهمان شما تأیید شد؛ فقط نمودار درصد ترکیب دارایی در دسترس است.",
     approve_admin:"دسترسی شما به‌عنوان مدیر تأیید شد. برای نمایش منو /start را ارسال کنید.",
     reject:"درخواست دسترسی شما رد شد.",revoke:"دسترسی شما به ربات پرتفوی لغو شد.",
     grant:"دسترسی مدیریت برای شما فعال شد. برای نمایش پنل مدیریت /start را ارسال کنید.",
     demote:"نقش شما به مهمان تغییر کرد؛ فقط نمودار درصد ترکیب دارایی در دسترس است."};
-  await sendTelegram(Number(target),notices[action],{menu:["grant","approve_guest","approve_admin","demote"].includes(action),
+  await sendTelegram(Number(target),notices[action],{menu:["grant","approve_guest","approve_admin","approve_advisor","demote","advisor","guest"].includes(action),
     removeMenu:action==="revoke"||action==="reject",audience:"guest"});
 }
 async function showApprovalRoles(chatId,target,previousPanel=null){
@@ -645,7 +668,7 @@ async function showApprovalRoles(chatId,target,previousPanel=null){
   if(!isBotAdmin(String(chatId),state)||!state.pending[target])throw new Error("request_not_pending");
   await sendTelegramWithKeyboard(chatId,"نقش کاربر "+target+" را هنگام تأیید انتخاب کنید:",[
     [{text:"تأیید به‌عنوان مهمان",callback_data:"admin:approve_guest:"+target},{text:"تأیید به‌عنوان مدیر",callback_data:"admin:approve_admin:"+target}],
-    [{text:"رد درخواست",callback_data:"admin:reject:"+target}]],{previousPanel});
+    [{text:"تأیید به‌عنوان مشاور مالی",callback_data:"admin:approve_advisor:"+target},{text:"رد درخواست",callback_data:"admin:reject:"+target}]],{previousPanel});
 }
 async function memberLabel(id,state){
   let user=state.users[id]||state.pending[id];
@@ -673,7 +696,7 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
     await sendTelegramWithKeyboard(chatId,"پنل مدیریت • "+(owner?"مالک":"مدیر منتخب")+
       "\n\nکاربران مجاز: "+new Set([...state.approved,...adminUserIds()]).size+
       "\nدرخواست‌های در انتظار: "+Object.keys(state.pending).length+
-      "\nمدیران منتخب: "+state.delegatedAdmins.length,buttons,{previousPanel});return;
+      "\nمشاوران مالی: "+state.financialAdvisors.length+"\nمدیران منتخب: "+state.delegatedAdmins.length,buttons,{previousPanel});return;
   }
   if(section==="status"){
     const snapshot=await safeSnapshot(),status=quantitySnapshotStatus(snapshot);
@@ -693,7 +716,7 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
       [{text:"بررسی دوباره",callback_data:"admin:status"},{text:"آزمون ذخیره‌سازی",callback_data:"admin:storage_check"}],adminBack()],{previousPanel,html:true});return;
   }
   if(section==="audit"){
-    const labels={approve:"تأیید دسترسی",approve_guest:"تأیید مهمان",approve_admin:"تأیید مدیر",reject:"رد درخواست",revoke:"لغو دسترسی",grant:"ارتقا به مدیر",demote:"تغییر نقش به مهمان"};
+    const labels={approve_advisor:"تأیید مشاور مالی",advisor:"تغییر به مشاور مالی",guest:"تغییر به مهمان",approve:"تأیید دسترسی",approve_guest:"تأیید مهمان",approve_admin:"تأیید مدیر",reject:"رد درخواست",revoke:"لغو دسترسی",grant:"ارتقا به مدیر",demote:"تغییر نقش به مهمان"};
     const lines=state.audit.slice(-10).reverse().map(event=>
       boldPortfolioTime(event.at)+" • "+(labels[event.action]||"تغییر دسترسی")+
       "\nکاربر: "+escXml(event.target_id)+" • مدیر: "+escXml(event.actor_id));
@@ -707,10 +730,18 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
   const title=section==="pending"?"درخواست‌های دسترسی":section==="admins"?"مدیریت نقش‌ها":"کاربران مجاز";
   const lines=[],keyboard=[];
   selected.forEach((id,i)=>{
-    const role=isOwner(id)?"مالک":state.delegatedAdmins.includes(id)?"مدیر":"مهمان";
+    const role=roleLabel(id,state);
     lines.push((i+1)+". "+names[i]+(section==="pending"?"":" • "+role));
-    if(section==="pending")keyboard.push([{text:"تأیید مهمان "+(i+1),callback_data:"admin:approve_guest:"+id},{text:"تأیید مدیر "+(i+1),callback_data:"admin:approve_admin:"+id},{text:"رد "+(i+1),callback_data:"admin:reject:"+id}]);
-    else if(section==="admins"&&id!==uid)keyboard.push([{text:(state.delegatedAdmins.includes(id)?"تغییر به مهمان ":"ارتقا به مدیر ")+(i+1),callback_data:"admin:"+(state.delegatedAdmins.includes(id)?"demote":"grant")+":"+id}]);
+    if(section==="pending")keyboard.push(
+      [{text:"تأیید مهمان "+(i+1),callback_data:"admin:approve_guest:"+id},{text:"تأیید مدیر "+(i+1),callback_data:"admin:approve_admin:"+id}],
+      [{text:"تأیید مشاور مالی "+(i+1),callback_data:"admin:approve_advisor:"+id},{text:"رد "+(i+1),callback_data:"admin:reject:"+id}]);
+    else if(section==="admins"&&id!==uid){
+      const buttons=[];
+      if(role!=="مدیر")buttons.push({text:"ارتقا به مدیر "+(i+1),callback_data:"admin:grant:"+id});
+      if(role!=="مشاور مالی")buttons.push({text:"مشاور مالی "+(i+1),callback_data:"admin:advisor:"+id});
+      if(role!=="مهمان")buttons.push({text:"تغییر به مهمان "+(i+1),callback_data:"admin:"+(role==="مدیر"?"demote":"guest")+":"+id});
+      keyboard.push(buttons);
+    }
     else if(!isOwner(id)&&(owner||!state.delegatedAdmins.includes(id)))keyboard.push([{text:"لغو دسترسی "+(i+1),callback_data:"admin:revoke:"+id}]);
   });
   const navigation=[];
@@ -719,7 +750,7 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
   if(navigation.length)keyboard.push(navigation);
   keyboard.push(adminBack());
   await sendTelegramWithKeyboard(chatId,title+"\nصفحه "+(page+1)+"\n\n"+(lines.join("\n\n")||"موردی وجود ندارد.")+
-    (section==="admins"?"\n\nمهمان فقط نمودار درصدی را می‌بیند. نقش مالک و نقش خودتان قابل تغییر نیست.":""),keyboard,{previousPanel});
+    (section==="admins"?"\n\nمهمان فقط نمودار درصدی را می‌بیند؛ مشاور مالی فقط گزارش‌ها را می‌بیند. نقش مالک و نقش خودتان قابل تغییر نیست.":""),keyboard,{previousPanel});
 }
 function callbackPanelToReplace(callback){
   const message=callback.message;
@@ -1589,7 +1620,7 @@ function formatToman(rial){return formatTomanAmount(rial/10,{persian:false})+" t
 function format(v){return Number(v).toLocaleString("en-US",{maximumFractionDigits:8});}
 function group(q,names){return withAssetFootnotes(names.map(n=>assetLabel(n)+": "+(q[n]===undefined?"not synchronized":format(q[n]))).join("\n"),names);}
 function guestHelp(){return "دسترسی شما مهمان است. فقط نمودار درصد ترکیب دارایی در دسترس است؛ از دکمه زیر استفاده کنید.";}
-function help(){return withAssetFootnotes("Portfolio Agent is online.\nبرای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n/status — portfolio status\n/assets — asset list\n/latest_allocation — آخرین ترکیب دارایی: انتخاب گزارش تصویری یا متنی با مقادیر و قیمت‌های تازه\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/allocation_chart — نمودار سه‌بعدی ترکیب دارایی با مقادیر و قیمت‌های تازه\n/cash_dollar — Cash Dollar (دلار نقدی)\n\nبرای تهیه گزارش ارزش‌گذاری، ربات قیمت فعلی هر واحد "+assetLabel("بلک راک")+" (EcoCoach) را به تومان از شما می‌پرسد.",["بلک راک"]);}
+function help({reportsOnly=false}={}){return withAssetFootnotes((reportsOnly?"دسترسی مشاور مالی • گزارش‌های دارایی\n":"Portfolio Agent is online.\n")+"برای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n"+(reportsOnly?"":"/status — portfolio status\n")+"/assets — asset list\n/latest_allocation — آخرین ترکیب دارایی: انتخاب گزارش تصویری یا متنی با مقادیر و قیمت‌های تازه\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/allocation_chart — نمودار سه‌بعدی ترکیب دارایی با مقادیر و قیمت‌های تازه\n/cash_dollar — Cash Dollar (دلار نقدی)\n\nبرای تهیه گزارش ارزش‌گذاری، ربات قیمت فعلی هر واحد "+assetLabel("بلک راک")+" (EcoCoach) را به تومان از شما می‌پرسد.",["بلک راک"]);}
 async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return null;}}
 function quantitySnapshotStatus(snapshot){
   const stamp=snapshot?.updated_at;
@@ -1621,11 +1652,12 @@ async function portfolioKeyboard(chatId){
   const state=await loadAccessState();
   if(!isOwner(String(chatId))&&!state.approved.includes(String(chatId)))return null;
   const admin=isBotAdmin(String(chatId),state);
-  const keyboard=admin?BUTTON_MENU.map(row=>row.map(button=>({text:button.text}))):[[{text:"نمودار ترکیب دارایی"}]];
+  const reports=canReadReports(String(chatId),state);
+  const keyboard=reports?BUTTON_MENU.map(row=>row.filter(button=>admin||button.command!=="/status").map(button=>({text:button.text}))).filter(row=>row.length):[[{text:"نمودار ترکیب دارایی"}]];
   if(admin)keyboard.at(-1).push({text:"پنل مدیریت"});
   return {keyboard,
     resize_keyboard:true,is_persistent:false,one_time_keyboard:false,
-    input_field_placeholder:admin?"یک گزینه انتخاب کنید یا قیمت "+assetLabel("بلک راک")+" را وارد کنید":"نمایش نمودار درصد ترکیب دارایی"};
+    input_field_placeholder:reports?"یک گزینه انتخاب کنید یا قیمت "+assetLabel("بلک راک")+" را وارد کنید":"نمایش نمودار درصد ترکیب دارایی"};
 }
 
 const TEMPORARY_REPLY_PREFIX="portfolio/temporary-replies/";
@@ -1687,7 +1719,7 @@ async function deliverTelegram(chatId,method,options,{temporary=false,menuAnchor
   }catch(_){console.warn("Telegram delivery unavailable",method);return false;}
 }
 
-async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=false,menuAnchor=false,audience="admin"}={}){
+async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=false,menuAnchor=false,audience="report"}={}){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
 
@@ -1695,7 +1727,7 @@ async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=f
     const markup=menu?await portfolioKeyboard(chatId):removeMenu?{remove_keyboard:true}:null;
     if(menu&&!markup)return false;
     if(menu&&audience!=="guest"){
-      try{if(!isBotAdmin(String(chatId),await loadAccessState({strict:true})))return false;}catch(_){return false;}
+      try{const access=await loadAccessState({strict:true});if(!(audience==="admin"?isBotAdmin(String(chatId),access):canReadReports(String(chatId),access)))return false;}catch(_){return false;}
     }
     return deliverTelegram(chatId,"sendMessage",{
       method:"POST",
@@ -1748,7 +1780,7 @@ async function sendTelegramPhoto(chatId,png,caption,{guestSafe=false}={}){
   const form=new FormData();
   const keyboard=await portfolioKeyboard(chatId);
   if(!keyboard)return false;
-  if(!guestSafe){try{if(!isBotAdmin(String(chatId),await loadAccessState({strict:true})))return false;}catch(_){return false;}}
+  if(!guestSafe){try{if(!canReadReports(String(chatId),await loadAccessState({strict:true})))return false;}catch(_){return false;}}
   form.append("chat_id",String(chatId));
   form.append("photo",new Blob([png],{type:"image/png"}),"portfolio-report.png");
   form.append("reply_markup",JSON.stringify(keyboard));

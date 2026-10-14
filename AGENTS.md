@@ -27,3 +27,14 @@ Read [docs/CODEX_HANDOFF.md](docs/CODEX_HANDOFF.md) **before changing this proje
 ## Suggested first Codex task
 
 Audit the source against the handoff; identify the **original external sync sender** if possible without exposing secrets; ensure recurring live workbook sync succeeds; correct data-integrity gaps; add unit/integration tests and verify Telegram commands end-to-end. The ChatGPT scheduled task created 2026-10-10 is an **external automation**, not a workflow stored in this repository; its future runs have not yet been verified.
+
+
+## Report and administration permissions
+
+`canReadReports` permits owners, admins and approved **مشاور مالی** users.
+`isBotAdmin` alone permits administrative actions and diagnostics. Keep these
+capabilities separate. Guests remain limited to a redacted percentage chart;
+financial advisors must never receive access-control or operational privileges.
+Round monetary amounts only when rendering; preserve exact arithmetic and
+quantities. Current role and formatting details are in docs/ADMIN_DASHBOARD.md
+and docs/BOT_MENU.md.
