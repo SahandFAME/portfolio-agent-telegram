@@ -51,7 +51,7 @@ test('gold, crypto and dollar price retrieval timestamps are bold Persian Tehran
   const a=await app();a.store.set('portfolio/latest.json',a.payload);
   for(const text of ['/gold','/crypto','/cash_dollar']){
     const reply=await command(a,text);assert.equal(reply.parse_mode,'HTML');
-    assert.match(reply.text,new RegExp('Prices retrieved: '+boldPattern.source));
+    assert.match(reply.text,new RegExp('قیمت‌های بازار: '+boldPattern.source));
     assert.doesNotMatch(reply.text,/\d{4}-\d{2}-\d{2}T/);
   }
 });

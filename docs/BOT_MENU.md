@@ -131,3 +131,20 @@ root. The tests cover menu routing, access control, stale snapshots,
 EcoCoach input, report-image precision and the precious-metal pricing fixes.
 A successful preview build is separate from a successful production deployment
 and a verified menu interaction in the owner's Telegram chat.
+
+
+## Category text reports (2026-10-14)
+
+Crypto, gold/other precious metals and Cash Dollar use the same numbered asset
+blocks as the detailed text allocation report: bold asset name, quantity/unit,
+asset group, bold toman value, unit price and source. Headers show bold Persian
+calendar/Tehran price and last quantity-sync timestamps, plus the total of only
+that report's assets. Dollar quantities explicitly use the dollar unit.
+
+These commands retain their existing cached-snapshot freshness checks and fetch
+new market quotes; they do not dispatch a new OneDrive sync. Historical asset
+notes remain marked by asterisks and appear only at the end of their related
+report. Missing prices or quantities omit the category total and show a Persian
+incomplete-data notice. Long replies split between complete asset/footnote
+paragraphs at 3,500 characters, and current admin access is checked before each
+chunk. Guests retain chart-only access. Gold excludes طعام and نهال.

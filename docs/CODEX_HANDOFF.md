@@ -14,6 +14,12 @@
 > conditional writes. Owner protection and conflict rejection remain required.
 > Production reproduction and regression coverage: [admin dashboard](ADMIN_DASHBOARD.md).
 
+> **2026-10-14 category presentation:** crypto, precious metals and Cash Dollar
+> now share the detailed allocation text asset blocks, with Persian headings,
+> quantity/group, toman value, unit price/source and relevant final footnotes.
+> Cached-snapshot freshness and live pricing behavior are retained. See
+> [bot menu](BOT_MENU.md#category-text-reports-2026-10-14).
+
 **As of:** 2026-10-10 (Tehran time)  
 **Primary repository:** https://github.com/SahandFAME/portfolio-agent-telegram  
 **Branch:** `main`  
