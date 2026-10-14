@@ -100,7 +100,7 @@ test('the image table shows the same 18K unit price for both gold holdings',asyn
   const svg=a.ns.buildPortfolioSvg(q,values,total,prices,prices['دلار'].priceRial);
   assert.ok(svg.includes('آبشده (طلب)'));
   assert.ok(svg.includes('آبشده (شمش زربد)'));
-  assert.equal(svg.split('۲۶٬۵۰۰٬۰۰۰').length-1,2);
+  assert.equal(svg.split('۲۶،۵۰۰،۰۰۰').length-1,2);
   const report=await a.ns.allocationImageReply(q,8500000);
   assert.ok(report.png.length>1000);
 });

@@ -1046,16 +1046,16 @@ async function valuationReply(q,names,title,snapshot=null){
     (snapshot?"آخرین همگام‌سازی مقادیر: "+boldPortfolioTime(snapshot.updated_at)+"\n":"")+
     "قیمت‌های بازار: "+boldPortfolioTime(new Date())+"\n"+
     (incomplete||!Number.isFinite(total)?"<b>گزارش ناقص است؛ جمع کل ارائه نمی‌شود.</b>":
-      "ارزش کل دارایی‌های این گزارش: <b>"+reportNumber(total/10)+" تومان</b>");
+      "ارزش کل دارایی‌های این گزارش: <b>"+formatTomanAmount(total/10)+" تومان</b>");
   return withAssetFootnotes([header,...blocks].join("\n\n"),names);
 }
 function reportNumber(value){return Number(value).toLocaleString("fa-IR",{maximumFractionDigits:8});}
 function detailedAssetTextBlock(q,asset,index,quote,value){
   const unit=cryptoAsset(asset)?asset:asset==="دلار"?"دلار":REPORT_UNIT[asset];
-  const price=quote.priceUsd!==undefined?reportNumber(quote.priceUsd)+" دلار":reportNumber(quote.priceRial/10)+" تومان";
+  const price=quote.priceUsd!==undefined?monetaryNumber(quote.priceUsd)+" دلار":formatTomanAmount(quote.priceRial/10)+" تومان";
   return reportNumber(index+1)+". <b>"+escXml(assetLabel(asset))+"</b>\n"+
     "مقدار: "+reportNumber(q[asset])+" "+escXml(unit)+" • گروه: "+escXml(REPORT_GROUP[asset])+"\n"+
-    "ارزش: <b>"+reportNumber(value/10)+" تومان</b>\n"+
+    "ارزش: <b>"+formatTomanAmount(value/10)+" تومان</b>\n"+
     "قیمت واحد: "+price+" • منبع: "+escXml(sourceFa(quote.source));
 }
 function splitAssetReportParagraphs(text){
@@ -1105,7 +1105,7 @@ function portfolioTable(q,vals,total,prices,usdIrr){
     if(!p) throw new Error("Missing price metadata for "+a);
     const qty=q[a]||0;
     const unit=p.priceUsd!==undefined ? "$"+format(p.priceUsd) : formatToman(p.priceRial);
-    return [String(i+1),REPORT_GROUP[a]||"-",assetLabel(a),format(qty),REPORT_UNIT[a]||"-",unit,format(v/10),format(valueUsd(v,usdIrr)),(v/total*100).toFixed(1)+"%",p.source||"-"];
+    return [String(i+1),REPORT_GROUP[a]||"-",assetLabel(a),format(qty),REPORT_UNIT[a]||"-",unit,formatTomanAmount(v/10,{persian:false}),format(valueUsd(v,usdIrr)),(v/total*100).toFixed(1)+"%",p.source||"-"];
   });
   const widths=header.map((h,i)=>Math.max(h.length,...rows.map(r=>r[i].length)));
   const line=r=>r.map((x,i)=>String(x).padEnd(widths[i]," ")).join(" | ");
@@ -1199,8 +1199,15 @@ function svgText(x,y,text,size,opts={}){
   const anchor=opts.anchor||"start",weight=opts.weight||400,fill=opts.fill||"#18324a";
   return '<text x="'+x+'" y="'+y+'" font-family="Estedad" font-size="'+size+'" font-weight="'+weight+'" fill="'+fill+'" text-anchor="'+anchor+'">'+escXml(text)+"</text>";
 }
-function compactNumber(n){return Number(n).toLocaleString("fa-IR",{maximumFractionDigits:2});}
-function moneyFa(n){return compactNumber(n)+" تومان";}
+function monetaryNumber(value,{persian=true,decimals=8,fixed=false}={}){
+  const number=decimals===0?Math.round(Number(value)):Number(value);
+  const text=number.toLocaleString(persian?"fa-IR":"en-US",{
+    maximumFractionDigits:decimals,minimumFractionDigits:fixed?decimals:0});
+  return persian?text.replace(/٬/g,"،").replace(/٫/g,"/"):text;
+}
+function formatTomanAmount(value,{persian=true}={}){return monetaryNumber(value,{persian,decimals:0});}
+function compactNumber(n){return monetaryNumber(n,{decimals:2});}
+function moneyFa(n){return formatTomanAmount(n)+" تومان";}
 function usdFa(n){return "$"+Number(n).toLocaleString("en-US",{maximumFractionDigits:2});}
 function wrapReportText(text,maxChars=145){
   const lines=[];let line="";
@@ -1215,11 +1222,11 @@ function wrapReportText(text,maxChars=145){
 function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   const priceTime=portfolioTime(new Date());
   const enNum=n=>Number(n).toLocaleString("fa-IR",{maximumFractionDigits:2});
-  const toman=n=>(Math.round(Number(n)/1000)*1000).toLocaleString("fa-IR")+" تومان";
-  const usdText=n=>Number(n).toLocaleString("fa-IR",{minimumFractionDigits:2,maximumFractionDigits:2})+" دلار";
+  const toman=moneyFa;
+  const usdText=n=>monetaryNumber(n,{decimals:2,fixed:true})+" دلار";
   const unitPriceFa=(asset,p)=>cryptoAsset(asset)
-    ? Number(p.priceUsd).toLocaleString("fa-IR",{maximumFractionDigits:8})+" دلار"
-    : Number(p.priceRial/10).toLocaleString("fa-IR",{maximumFractionDigits:8})+" تومان";
+    ? monetaryNumber(p.priceUsd)+" دلار"
+    : formatTomanAmount(p.priceRial/10)+" تومان";
   const categoryRank={"طلا و سکه":0,"نقره":1,"سهام و صندوق":2,"رمز ارز":3,"Tether":4,"US Dollar":5};
   function subgroupRank(asset){
     const category=categoryName(asset);
@@ -1292,7 +1299,7 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   svg+=svgText(1730,120,"قیمت‌های زنده بازار • "+priceTime,21,{anchor:"end",weight:700,fill:"#dce9f4"});
   svg+=svgText(70,78,toman(total/10),34,{anchor:"start",weight:700,fill:"#ffffff"});
   svg+=svgText(70,120,usdText(valueUsd(total,usdIrr)),25,{anchor:"start",fill:"#dce9f4"});
-  svg+=svgText(70,160,"قیمت دلار: "+Math.round(usdIrr/10).toLocaleString("fa-IR")+" تومان",18,{anchor:"start",fill:"#dce9f4"});
+  svg+=svgText(70,160,"قیمت دلار: "+formatTomanAmount(usdIrr/10)+" تومان",18,{anchor:"start",fill:"#dce9f4"});
   svg+=svgText(70,200,"قیمت واحد رمزارزها به دلار است",18,{anchor:"start",fill:"#dce9f4"});
 
   const cards=catOrder.map(name=>[name,cats[name]||0]);
@@ -1300,7 +1307,7 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   for(const [name,val] of cards){
     const pct=total?val/total*100:0;
     const cardW=285;
-    const cardToman=(Math.round((val/10)/1000)*1000).toLocaleString("fa-IR");
+    const cardToman=formatTomanAmount(val/10);
     svg+='<rect x="'+cardX+'" y="285" width="'+cardW+'" height="105" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
     svg+=svgText(cardX+cardW-14,320,catEn[name],17,{anchor:"end",weight:700});
     svg+=svgText(cardX+cardW-14,360,pct.toLocaleString("fa-IR",{minimumFractionDigits:1,maximumFractionDigits:1})+"٪",25,{anchor:"end",weight:700,fill:catColors[name]});
@@ -1326,7 +1333,7 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
     angle=a2;
   }
   // Keep the total value in the donut center on a clean two-line label.
-  svg+=svgText(cx0,cy0-7,enNum(Math.round(total/10/1000)*1000),17,{anchor:"middle",weight:700});
+  svg+=svgText(cx0,cy0-7,formatTomanAmount(total/10),17,{anchor:"middle",weight:700});
   svg+=svgText(cx0,cy0+20,"تومان",12,{anchor:"middle",fill:"#607080"});
 
   // Legend is deliberately shifted to the right of the donut.
@@ -1342,7 +1349,7 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   const tx=40,ty=425,tw=850;
   svg+='<rect x="'+tx+'" y="'+ty+'" width="'+tw+'" height="330" rx="16" fill="#ffffff" stroke="#d7e2eb"/>';
   svg+=svgText(tx+tw-25,ty+42,"خلاصه پرتفوی",25,{anchor:"end",weight:700});
-  const summary=[["ارزش کل",toman(total/10)],["ارزش دلاری",usdText(valueUsd(total,usdIrr))],["تعداد دارایی‌ها",enNum(rows.length)],["نرخ دلار (تومان)",Math.round(usdIrr/10).toLocaleString("fa-IR")],["زمان قیمت‌ها",priceTime]];
+  const summary=[["ارزش کل",toman(total/10)],["ارزش دلاری",usdText(valueUsd(total,usdIrr))],["تعداد دارایی‌ها",enNum(rows.length)],["نرخ دلار (تومان)",formatTomanAmount(usdIrr/10)],["زمان قیمت‌ها",priceTime]];
   summary.forEach(([k,v],i)=>{
     const yy=ty+92+i*48;
     svg+=svgText(tx+tw-25,yy,k,17,{anchor:"end",weight:600});
@@ -1361,7 +1368,7 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
       let v=r[k];
       if(k==="rank")v=enNum(v);
       if(k==="asset")v=assetLabel(v);
-      if(k==="valueToman")v=(Math.round(Number(v)/1000)*1000).toLocaleString("fa-IR");
+      if(k==="valueToman")v=formatTomanAmount(v);
       else if(k==="valueUsd")v=usdText(v);
       else if(k==="pct")v=r.pct.toLocaleString("fa-IR",{minimumFractionDigits:1,maximumFractionDigits:1})+"٪";
       else if(k==="qty")v=r.qtyDecimals===null?enNum(v):Number(v).toLocaleString("fa-IR",{minimumFractionDigits:r.qtyDecimals,maximumFractionDigits:r.qtyDecimals});
@@ -1422,11 +1429,10 @@ function renderAllocationSvg(svg){
   return rendered.asPng();
 }
 function allocationTextReport(q,report,snapshot){
-  const number=value=>Number(value).toLocaleString("fa-IR",{maximumFractionDigits:8});
   const header="<b>گزارش تفصیلی آخرین ترکیب دارایی</b>\n"+
     (snapshot?"همگام‌سازی مقادیر: "+boldPortfolioTime(snapshot.updated_at)+"\n":"")+
     "قیمت‌های بازار: "+boldPortfolioTime(report.priceTime)+"\n"+
-    "ارزش کل پرتفوی: <b>"+number(report.total/10)+" تومان</b>";
+    "ارزش کل پرتفوی: <b>"+formatTomanAmount(report.total/10)+" تومان</b>";
   const messages=[];let chunk=header;
   ASSETS.forEach((asset,index)=>{
     const block=detailedAssetTextBlock(q,asset,index,report.prices[asset],report.vals[asset]);
@@ -1579,7 +1585,7 @@ function buildAllocationPieSvg(report,snapshot=null,{guest=false}={}){
 function formatPrice(asset,p){
   return p.priceUsd!==undefined?"$"+format(p.priceUsd):formatToman(p.priceRial);
 }
-function formatToman(rial){return format(rial/10)+" toman";}
+function formatToman(rial){return formatTomanAmount(rial/10,{persian:false})+" toman";}
 function format(v){return Number(v).toLocaleString("en-US",{maximumFractionDigits:8});}
 function group(q,names){return withAssetFootnotes(names.map(n=>assetLabel(n)+": "+(q[n]===undefined?"not synchronized":format(q[n]))).join("\n"),names);}
 function guestHelp(){return "دسترسی شما مهمان است. فقط نمودار درصد ترکیب دارایی در دسترس است؛ از دکمه زیر استفاده کنید.";}

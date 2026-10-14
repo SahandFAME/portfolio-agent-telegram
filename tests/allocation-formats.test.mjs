@@ -59,7 +59,7 @@ test('text values and category percentages use the same complete valuation and t
   const expected=Object.fromEntries([...a.ns.ASSETS].map(asset=>[asset,a.ns.valueRial(asset,q[asset],report.prices[asset],report.usdIrr)]));
   assert.equal(report.total,Object.values(expected).reduce((sum,value)=>sum+value,0));
   const all=output.messages.join('\n');
-  for(const asset of a.ns.ASSETS){assert.ok(all.includes('ارزش: <b>'+Number(expected[asset]/10).toLocaleString('fa-IR',{maximumFractionDigits:8})+' تومان</b>'));}
+  for(const asset of a.ns.ASSETS){assert.ok(all.includes('ارزش: <b>'+Math.round(expected[asset]/10).toLocaleString('fa-IR',{maximumFractionDigits:0}).replace(/٬/g,'،')+' تومان</b>'));}
   assert.ok(all.includes('مقدار: ۰٫۰۰۵۱۹۱۵۳ BTC'));assert.ok(all.includes('مقدار: ۰٫۴۰۶۰۲ ETH'));
   const groups=a.ns.allocationGroups(report.vals,report.total);
   assert.ok(Math.abs(groups.reduce((sum,g)=>sum+g.percentage,0)-100)<1e-10);

@@ -71,7 +71,7 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
     '@vercel/functions':{waitUntil:promise=>background.push(promise)},
     sharp:{default:sharp},'@resvg/resvg-js':{Resvg},path:{default:path}
   };
-  const module = new vm.SourceTextModule(source + '\nexport {ASSETS,MANUAL,ASSET_COMMENTS,assetLabel,assetFootnotes,assetsReply,valuationReply,wrapReportText,parseEcoCoachPrice,ecoCoachPrice,parseUserPrice,valueRial,quantitySnapshotStatus,getPrices,buildPortfolioSvg,allocationImageReply,sendTelegram,sendTelegramPhoto,portfolioTime,boldPortfolioTime,allocationReply,latestAllocationReport,prepareAllocation,allocationGroups,renderAllocationSvg,buildAllocationPieSvg};', {context});
+  const module = new vm.SourceTextModule(source + '\nexport {monetaryNumber,formatTomanAmount,ASSETS,MANUAL,ASSET_COMMENTS,assetLabel,assetFootnotes,assetsReply,valuationReply,wrapReportText,parseEcoCoachPrice,ecoCoachPrice,parseUserPrice,valueRial,quantitySnapshotStatus,getPrices,buildPortfolioSvg,allocationImageReply,sendTelegram,sendTelegramPhoto,portfolioTime,boldPortfolioTime,allocationReply,latestAllocationReport,prepareAllocation,allocationGroups,renderAllocationSvg,buildAllocationPieSvg};', {context});
   await module.link(async specifier => {
     const exports = dependencies[specifier];
     assert.ok(exports, `unexpected dependency ${specifier}`);
