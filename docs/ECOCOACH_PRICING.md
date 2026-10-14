@@ -23,7 +23,7 @@ HTTPS, no authentication or cache, an eight-second timeout, a one-megabyte
 response limit, and reject redirects. No credentials or login session are sent
 to EcoCoach. Category commands that do not contain the fund skip this lookup.
 
-When the site is unreachable or provides no reliable quote, owner/admin reports
+When the site is unreachable or provides no reliable quote, owner/admin/advisor reports
 retain the existing manual-price flow. As explicitly authorized by the owner on
 2026-10-13, **guest charts only** instead use a fixed **1,030,000 toman per unit**
 (**10,300,000 rial per unit**). A valid website quote always takes precedence.

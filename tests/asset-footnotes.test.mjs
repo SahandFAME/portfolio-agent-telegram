@@ -34,7 +34,7 @@ test('category footnotes are restricted to related assets and acquisition figure
   assert.doesNotMatch(gold,/بلک راک|خریدهای تاریخی:/);
   const cash=await a.ns.valuationReply(q,['دلار'],'دلار نقدی');
   assert.ok(cash.includes('مقدار: ۳٬۰۳۰ دلار • گروه: فیات'));
-  assert.ok(cash.includes('ارزش کل دارایی‌های این گزارش: <b>۳۰۳٬۰۰۰٬۰۰۰ تومان</b>'));
+  assert.ok(cash.includes('ارزش کل دارایی‌های این گزارش: <b>۳۰۳،۰۰۰،۰۰۰ تومان</b>'));
   assert.ok(cash.includes(a.ns.ASSET_COMMENTS['دلار']));assert.doesNotMatch(cash,/آبشده|بلک راک/);
   const crypto=await a.ns.valuationReply(q,['BTC','ETH'],'رمزارز');
   assert.doesNotMatch(crypto,/یادداشت دارایی‌ها|خریدهای تاریخی|BTC\*|ETH\*/);

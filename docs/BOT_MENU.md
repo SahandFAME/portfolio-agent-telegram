@@ -148,3 +148,17 @@ report. Missing prices or quantities omit the category total and show a Persian
 incomplete-data notice. Long replies split between complete asset/footnote
 paragraphs at 3,500 characters, and current admin access is checked before each
 chunk. Guests retain chart-only access. Gold excludes طعام and نهال.
+
+
+## Monetary formatting (2026-10-14)
+
+All displayed toman unit prices, asset values and totals round to the nearest
+whole toman, including image cards, tables, summaries and chart footers. Images
+no longer round to thousands. Round only at presentation; raw quantities,
+quotes, valuations and percentage calculations retain full precision.
+
+Persian monetary numbers use `،` for thousands grouping and `/` for decimals
+when applicable, for example `۱،۲۳۴/۵۶ دلار`. English dollar amounts keep comma
+grouping and dot decimals (`1,234.56`). Dollar price precision and pictured
+valuation precision are retained. Asset quantity and percentage formatting is
+unchanged, including ETH/BTC image quantity limits and full text quantities.

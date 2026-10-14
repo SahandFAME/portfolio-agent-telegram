@@ -20,6 +20,14 @@
 > Cached-snapshot freshness and live pricing behavior are retained. See
 > [bot menu](BOT_MENU.md#category-text-reports-2026-10-14).
 
+> **2026-10-14 money/roles:** every displayed toman amount rounds to the nearest
+> whole toman without changing calculations. Persian monetary grouping uses `،`
+> and dollar decimals `/`; English dollar punctuation remains comma/dot.
+> **مشاور مالی** has full financial reports but no status/admin/access controls.
+> Owner/admins choose the role on approval or in role management; legacy roles
+> remain unchanged. Details: [admin roles](ADMIN_DASHBOARD.md#financial-advisor-role--مشاور-مالی-2026-10-14)
+> and [report formatting](BOT_MENU.md#monetary-formatting-2026-10-14).
+
 **As of:** 2026-10-10 (Tehran time)  
 **Primary repository:** https://github.com/SahandFAME/portfolio-agent-telegram  
 **Branch:** `main`  

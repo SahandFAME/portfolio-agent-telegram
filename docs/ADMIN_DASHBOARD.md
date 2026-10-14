@@ -41,7 +41,7 @@ to the guest chart. Revoking portfolio
 access removes both permissions, clears pending price input and removes the
 keyboard. Users receive the result of the access change.
 
-Existing approved users without a delegated admin role are guests automatically;
+Existing approved users without a delegated admin or financial advisor role are guests automatically;
 no ownership/access-state rewrite is needed. Guests receive only the percentage
 composition chart. They cannot access quantities, total valuation, notes,
 category reports, the image/text report submenu, status diagnostics or admin
@@ -69,7 +69,7 @@ eight entries at a time. Display names are sent as plain text, not HTML.
 - Callbacks require the actor's own private chat and current permissions. Old
   approval buttons cannot reapprove a revoked user without a new pending request.
 - Admin list delivery and portfolio text/image delivery recheck current roles.
-  Sensitive report delivery requires an admin role, including between text
+  Sensitive report delivery requires an admin or financial advisor role, including between text
   chunks. An image prepared before demotion cannot be delivered as a guest
   image. Guest-safe image delivery is a separate renderer path.
   Revoked users cannot resume queued allocations or receive images after access
@@ -134,3 +134,29 @@ Access-state and canary version reads now request `Accept-Encoding: identity`
 while bypassing the cache. Weak ETags remain rejected; they are never stripped
 or replaced by an unconditional overwrite. Regression tests cover promotion,
 demotion, weak-tag refusal and concurrent-update rejection.
+
+
+## Financial advisor role — مشاور مالی (2026-10-14)
+
+Owner/admins can approve new requests as guest, financial advisor or admin and
+assign these roles to an existing approved user in **مدیریت نقش‌ها**. The new
+`financialAdvisors` list is private, restricted to approved users, excludes the
+owner/admin identities and is mutually exclusive with delegated admin rights.
+Existing roles stay unchanged; no automatic live permission migration is needed.
+Role assignment uses the same strong-ETag conditional update and audit log.
+Owner/self role protections, revocation and conflict rejection remain in force.
+
+Advisors receive report buttons for assets, latest allocation (picture/text),
+composition chart, precious metals, crypto and Cash Dollar. Start/help/menu and
+manual price input support those reports. System/portfolio status, admin panels,
+access approval/revocation, role changes, audit and storage diagnostics remain
+admin-only and are denied even through typed commands or forged callbacks.
+Access requests notify only admins, never advisors.
+
+Full financial reports may show totals and related notes. Advisors use the
+normal website-first EcoCoach lookup and manual-price prompt, not the guest
+fixed fallback. Reports require fresh verified quantities where applicable,
+complete prices, and current report permissions before each text/image send.
+Demoting an advisor to guest or revoking access blocks detailed report delivery,
+including during a pending request. Guests retain chart-only access with no
+total or notes. Authenticated operational health discloses advisor counts only.

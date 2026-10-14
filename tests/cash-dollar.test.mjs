@@ -16,7 +16,7 @@ test('Cash Dollar command, Persian button and legacy aliases give the same dolla
   let expected;
   for(const text of aliases){
     const reply=await report(a,text);assert.ok(reply.text.startsWith('<b>گزارش تفصیلی دلار نقدی</b>\n'));
-    assert.ok(reply.text.includes('ارزش کل دارایی‌های این گزارش: <b>'+(a.ns.MANUAL['دلار']*prices['دلار'].priceRial/10).toLocaleString('fa-IR',{maximumFractionDigits:8})+' تومان</b>'));
+    assert.ok(reply.text.includes('ارزش کل دارایی‌های این گزارش: <b>'+(a.ns.MANUAL['دلار']*prices['دلار'].priceRial/10).toLocaleString('fa-IR',{maximumFractionDigits:0}).replace(/٬/g,'،')+' تومان</b>'));
     assert.doesNotMatch(reply.text,/Tether|EcoCoach|بلک راک/);
     const normalized=reply.text.replace(/قیمت‌های بازار: [^\n]+/g,'قیمت‌های بازار: <timestamp>');
     expected??=normalized;assert.equal(normalized,expected);
