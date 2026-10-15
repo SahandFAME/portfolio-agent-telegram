@@ -153,7 +153,12 @@ access approval/revocation, role changes, audit and storage diagnostics remain
 admin-only and are denied even through typed commands or forged callbacks.
 Access requests notify only admins, never advisors.
 
-Full financial reports may show totals and related notes. Advisors use the
+Full financial reports may show totals. Historical asset comments are restricted
+to owners/admins; advisors see only BlackRock's `صندوق خصوصی اکوکوچ` description,
+without asterisks for hidden comments. This applies to text, image footers,
+chart captions and error replies (owner request, 2026-10-15). Any report prepared
+with private notes requires current admin permission at each text/image send,
+even if the former admin remains an approved advisor. Advisors use the
 normal website-first EcoCoach lookup and manual-price prompt, not the guest
 fixed fallback. Reports require fresh verified quantities where applicable,
 complete prices, and current report permissions before each text/image send.

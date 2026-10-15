@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import {app} from './helpers/app-fixture.mjs';
 
+const privateNotes={includePrivateNotes:true};
 const commented=['بلک راک','آبشده (طلب)','آبشده (شمش زربد)','دلار'];
 const quantities=a=>({...a.assets,...a.ns.MANUAL,'بلک راک':15,BTC:.00519153,ETH:.40602});
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
@@ -11,7 +12,7 @@ const message=(text,id=1)=>({message:{chat:{id,type:'private'},from:{id},text}})
 
 test('asset list marks only the four commented holdings and preserves every canonical quantity and historical comment',async()=>{
   const a=await app(),q=quantities(a),before=JSON.stringify(q);
-  const text=a.ns.assetsReply(q,a.payload);
+  const text=a.ns.assetsReply(q,a.payload,privateNotes);
   const rows=[...text.matchAll(/^\d+\. ([^\n]+): ([^\n]+)$/gm)];
   assert.equal(rows.length,29);
   for(const asset of a.ns.ASSETS){
@@ -32,23 +33,23 @@ test('asset list marks only the four commented holdings and preserves every cano
 
 test('category footnotes are restricted to related assets and acquisition figures never replace live valuation',async()=>{
   const a=await app(),q=quantities(a),before=JSON.stringify(q);
-  const gold=await a.ns.valuationReply(q,['آبشده (طلب)','آبشده (شمش زربد)'],'طلا و فلزات گرانبها');
+  const gold=await a.ns.valuationReply(q,['آبشده (طلب)','آبشده (شمش زربد)'],'طلا و فلزات گرانبها',null,privateNotes);
   for(const asset of commented.slice(1,3)){assert.ok(gold.includes('<b>'+asset+'*</b>'));assert.ok(gold.includes(a.ns.ASSET_COMMENTS[asset]));}
   assert.doesNotMatch(gold,/بلک راک|خریدهای تاریخی:/);
-  const cash=await a.ns.valuationReply(q,['دلار'],'دلار نقدی');
+  const cash=await a.ns.valuationReply(q,['دلار'],'دلار نقدی',null,privateNotes);
   assert.ok(cash.includes('مقدار: ۳٬۰۳۰ دلار • گروه: فیات'));
   assert.ok(cash.includes('ارزش کل دارایی‌های این گزارش: <b>۳۰۳،۰۰۰،۰۰۰ تومان</b>'));
   assert.ok(cash.includes(a.ns.ASSET_COMMENTS['دلار']));assert.doesNotMatch(cash,/آبشده|بلک راک/);
-  const crypto=await a.ns.valuationReply(q,['BTC','ETH'],'رمزارز');
+  const crypto=await a.ns.valuationReply(q,['BTC','ETH'],'رمزارز',null,privateNotes);
   assert.doesNotMatch(crypto,/یادداشت دارایی‌ها|خریدهای تاریخی|BTC\*|ETH\*/);
-  const missing=await a.ns.valuationReply({...q,'آبشده (طلب)':undefined},['آبشده (طلب)'],'طلا');
+  const missing=await a.ns.valuationReply({...q,'آبشده (طلب)':undefined},['آبشده (طلب)'],'طلا',null,privateNotes);
   assert.match(missing,/آبشده \(طلب\)\*<\/b>\nارزش‌گذاری انجام نشد: مقدار دارایی موجود یا معتبر نیست/);assert.doesNotMatch(missing,/ارزش کل دارایی‌های این گزارش:/);
   assert.equal(JSON.stringify(q),before);
 });
 
 test('detailed text keeps qualifying asset rows, exact valuation, bounded chunks and footnotes at the end',async()=>{
   const a=await app(),q=quantities(a);
-  const output=await a.ns.latestAllocationReport(q,100000,'text',a.payload);
+  const output=await a.ns.latestAllocationReport(q,100000,'text',a.payload,privateNotes);
   const data=await a.ns.prepareAllocation(q,100000);
   const text=output.messages.join('\n');
   const rows=[...text.matchAll(/^[۰-۹]+\. <b>([^<]+)<\/b>$/gm)];
@@ -65,7 +66,7 @@ test('detailed text keeps qualifying asset rows, exact valuation, bounded chunks
 
 test('pictured footnotes use readable Persian EcoCoach text and remain inside an expanded footer and image',async()=>{
   const a=await app(),q=quantities(a),data=await a.ns.prepareAllocation(q,100000);
-  const svg=a.ns.buildPortfolioSvg(q,data.vals,data.total,data.prices,data.usdIrr);
+  const svg=a.ns.buildPortfolioSvg(q,data.vals,data.total,data.prices,data.usdIrr,privateNotes);
   const footer=svg.slice(svg.indexOf('<rect data-section="footnotes"'));
   const rect=footer.match(/y="(\d+)" width="1720" height="(\d+)"/);
   const texts=[...footer.matchAll(/<text x="([\d.]+)" y="([\d.]+)"[^>]*>([^<]+)<\/text>/g)];
@@ -99,7 +100,7 @@ test('chart footnotes are delivered below the image within the Telegram caption 
   const caption=photo.options.body.get('caption');
   assert.ok(caption.startsWith('نمودار ترکیب دارایی'));
   assert.ok(caption.length<=1024);assert.doesNotMatch(caption,/<b>|<\/b>/);
-  assert.equal(caption.slice(caption.indexOf('یادداشت دارایی‌ها')),a.ns.assetFootnotes(commented,{html:false}));
+  assert.equal(caption.slice(caption.indexOf('یادداشت دارایی‌ها')),a.ns.assetFootnotes(commented,{html:false,...privateNotes}));
   const b=await app();b.store.set('portfolio/latest.json',b.payload);
   await b.request('POST',{},message('/assets',2),header);
   assert.equal(b.sends.some(send=>JSON.parse(send.options.body).text?.includes('طلب از مامان')),false);

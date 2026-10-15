@@ -35,6 +35,10 @@ Audit the source against the handoff; identify the **original external sync send
 `isBotAdmin` alone permits administrative actions and diagnostics. Keep these
 capabilities separate. Guests remain limited to a redacted percentage chart;
 financial advisors must never receive access-control or operational privileges.
+Historical asset comments are owner/admin-only. Advisors may see only the short
+BlackRock description; guests continue to receive no notes. Derive note access
+from the server-side role and recheck admin permission before delivering any
+report prepared with private comments, including each text chunk and image.
 Round monetary amounts only when rendering; preserve exact arithmetic and
 quantities. Current role and formatting details are in docs/ADMIN_DASHBOARD.md
 and docs/BOT_MENU.md.

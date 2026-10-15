@@ -41,6 +41,9 @@
 > across text, images and chart captions. Original comment provenance remains
 > the existing handoff transcription; the first Excel attachment is not in the
 > checkout. All valuation, freshness, cutoff and access controls remain in place.
+> Historical comments are owner/admin-only; advisors see only BlackRock's
+> description, and guests still see no notes. Recheck admin permission before
+> delivering private-note reports, including role changes during preparation.
 > See [report notes](LATEST_ALLOCATION.md#report-note-simplification-owner-request-2026-10-15).
 
 **As of:** 2026-10-10 (Tehran time)  

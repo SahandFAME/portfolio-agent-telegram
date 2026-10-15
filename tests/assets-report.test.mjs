@@ -32,7 +32,7 @@ test('assets report groups all 29 holdings exactly once using allocation categor
   assert.deepEqual(names(group('دلار')),['دلار']);
   assert.ok(text.includes('Snapshot: '+a.ns.boldPortfolioTime(a.payload.updated_at)));
   for(const [asset,quantity] of Object.entries({...a.assets,...a.ns.MANUAL})){
-    assert.ok(text.includes(a.ns.assetLabel(asset)+': '+Number(quantity).toLocaleString('en-US',{maximumFractionDigits:8})),asset);
+    assert.ok(text.includes(a.ns.assetLabel(asset,{includePrivateNotes:true})+': '+Number(quantity).toLocaleString('en-US',{maximumFractionDigits:8})),asset);
   }
   assert.equal(JSON.stringify(a.store.get('portfolio/latest.json')),before);
   assert.ok(a.marketCalls.length>0);assert.equal(a.dispatches.length,0);

@@ -11,7 +11,7 @@ const source = await fs.readFile(new URL('../../api/telegram.js', import.meta.ur
 // Evaluate the actual unmodified handler, injecting only external dependencies.
 // Named exports below exist only inside the test VM, not in application code.
 export async function app({readError=false, dispatchStatus=204, env={}, telegramReply=null,beforeWrite=null,beforeMarketFetch=null,ecoCoachHtml=null,ecoCoachError=false,ecoCoachStatus=200,compressAccessReads=false,forceWeakEtag=false,cryptoPriceUsd=2}={}) {
-  const store = new Map(), writes = [], sends = [], background = [], dispatches=[], marketCalls=[];
+  const store = new Map(), writes = [], sends = [], background = [], dispatches=[], marketCalls=[], renderedSvgs=[];
   const tokenEnv = {PORTFOLIO_SYNC_SECRET:'fixture-primary',PORTFOLIO_SYNC_SECRET_AGENT:'fixture-secondary',
     GITHUB_ACTIONS_TOKEN:'fixture-actions',TELEGRAM_WEBHOOK_SECRET:'fixture-webhook',TELEGRAM_BOT_TOKEN:'fixture-bot',TELEGRAM_ADMIN_USER_IDS:'1',...env};
   const quotes = async url => {
@@ -69,7 +69,9 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
       }
     },
     '@vercel/functions':{waitUntil:promise=>background.push(promise)},
-    sharp:{default:sharp},'@resvg/resvg-js':{Resvg},path:{default:path}
+    sharp:{default:sharp},'@resvg/resvg-js':{Resvg:class extends Resvg {
+      constructor(svg,options){super(svg,options);renderedSvgs.push(svg);}
+    }},path:{default:path}
   };
   const module = new vm.SourceTextModule(source + '\nexport {filteredReportValues,filteredAssetsReply,MIN_REPORT_VALUE_RIAL,visibleReportAssets,monetaryNumber,formatTomanAmount,ASSETS,MANUAL,ASSET_COMMENTS,assetLabel,assetFootnotes,assetsReply,valuationReply,wrapReportText,parseEcoCoachPrice,ecoCoachPrice,parseUserPrice,valueRial,quantitySnapshotStatus,getPrices,buildPortfolioSvg,allocationImageReply,sendTelegram,sendTelegramPhoto,portfolioTime,boldPortfolioTime,allocationReply,latestAllocationReport,prepareAllocation,allocationGroups,renderAllocationSvg,buildAllocationPieSvg};', {context});
   await module.link(async specifier => {
@@ -90,7 +92,7 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
     await Promise.all(background.splice(0));
     return res;
   }
-  return {ns,store,writes,sends,request,payload,assets,dispatches,marketCalls};
+  return {ns,store,writes,sends,request,payload,assets,dispatches,marketCalls,renderedSvgs};
 }
 
 // Simulate the explicit format choice now required after opening the submenu.
