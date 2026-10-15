@@ -112,6 +112,13 @@ also removed. Only relevant visible assets receive an asterisk and their retaine
 comment. A pictured report with no retained comments has no footnote panel;
 otherwise its height follows the wrapped comments. Error messages, price-input
 prompts, timestamps and source fields remain functional report information.
+Historical comments and their asterisk markers are now visible only to owners
+and delegated admins. Advisors see only the short BlackRock description, in all
+report formats, captions and error replies. Renderers default to this restricted
+policy; server handlers grant private notes from the current admin role. Pending
+OneDrive completions use the role at completion, not a saved role. Before each
+text chunk or image is delivered, reports prepared with private notes require
+current admin permission; demotion to advisor stops those prepared reports.
 Guest charts continue to omit all comments and totals. The 50,000-toman cutoff,
 valuation arithmetic, read-only workbook handling and access controls are unchanged.
 

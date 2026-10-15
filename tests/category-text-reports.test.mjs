@@ -24,7 +24,7 @@ for(const [command,names,title] of [['/crypto',crypto,'رمزارز'],['/gold_an
     assert.equal(rows.length,names.length);
     const {prices}=await a.ns.getPrices({includeEcoCoach:false});let total=0;
     for(const [index,asset] of names.entries()){
-      assert.equal(rows[index][1],number(index+1));assert.equal(rows[index][2],a.ns.assetLabel(asset));
+      assert.equal(rows[index][1],number(index+1));assert.equal(rows[index][2],a.ns.assetLabel(asset,{includePrivateNotes:true}));
       const value=a.ns.valueRial(asset,quantities[asset],prices[asset],prices['دلار'].priceRial);total+=value;
       const unit=crypto.includes(asset)?asset:asset==='دلار'?'دلار':gold.includes(asset)&&asset.startsWith('آبشده')?'گرم':null;
       assert.ok(text.includes('مقدار: '+number(quantities[asset])+(unit?' '+unit:'')));
