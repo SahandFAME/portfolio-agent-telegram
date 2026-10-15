@@ -13,7 +13,6 @@ const ACCESS_READ_OPTIONS={access:"private",useCache:false,headers:{"Accept-Enco
 const BLACKROCK_PENDING_PREFIX = "portfolio/pending-blackrock/";
 // Owner-authorized report cutoff, compared against exact rial valuations.
 const MIN_REPORT_VALUE_RIAL=50000*10;
-const REPORT_VISIBILITY_NOTE="دارایی‌های با ارزش کمتر از ۵۰،۰۰۰ تومان از ردیف‌ها، جمع کل و درصدها حذف شده‌اند.";
 function visibleReportAssets(vals){return ASSETS.filter(asset=>Number.isFinite(vals[asset])&&vals[asset]>=MIN_REPORT_VALUE_RIAL);}
 function filteredReportValues(vals){
   const included=Object.fromEntries(visibleReportAssets(vals).map(asset=>[asset,vals[asset]]));
@@ -26,9 +25,10 @@ const ASSETS = [
   "سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","دلار"
 ];
 const MANUAL = {"سکه تمام":3,"ربع سکه غیره":3,"ربع سکه بانکی":1,"آبشده (طلب)":1.37,"آبشده (شمش زربد)":20,"دلار":3030};
-// Historical comments from CODEX_HANDOFF.md; never use these figures as quotes.
+// Retained historical asset comments transcribed in CODEX_HANDOFF.md, plus the
+// owner's requested brief fund description. Never use comment figures as quotes.
 const ASSET_COMMENTS={
-  "بلک راک":"صندوق خصوصی اکوکوچ است؛ قیمت واحد ابتدا در سایت صندوق بررسی می‌شود؛ در صورت نبود قیمت معتبر، مدیر آن را وارد می‌کند.",
+  "بلک راک":"صندوق خصوصی اکوکوچ",
   "آبشده (طلب)":"طلب از مامان به ازای ما به تفاوت خرید شمش زربد (9200 تومان در گرم طلا 6718)",
   "آبشده (شمش زربد)":"شمش زربد (در گرم 6718)؛ 1404/01/26",
   "دلار":"خریدهای تاریخی: 700 دلار در 83000 (04/02/20)؛ 2300 دلار در 108800 (04/08/04)"
@@ -42,8 +42,7 @@ function assetFootnotes(names,{html=true}={}){
   const entries=assetCommentEntries(names);
   if(!entries.length)return "";
   return (html?"<b>یادداشت دارایی‌ها (*)</b>":"یادداشت دارایی‌ها (*)")+"\n"+
-    entries.map(({label,comment})=>html?"<b>"+escXml(label)+"</b>: "+escXml(comment):label+": "+comment).join("\n")+
-    (entries.some(({asset})=>asset!=="بلک راک")?"\nاعداد یادداشت‌های خرید تاریخی هستند و در ارزش‌گذاری روز استفاده نمی‌شوند.":"");
+    entries.map(({label,comment})=>html?"<b>"+escXml(label)+"</b>: "+escXml(comment):label+": "+comment).join("\n");
 }
 function withAssetFootnotes(text,names){const notes=assetFootnotes(names);return text+(notes?"\n\n"+notes:"");}
 const PORTFOLIO_TIME_FORMAT=new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
@@ -1086,7 +1085,7 @@ async function valuationReply(q,names,title,snapshot=null){
     "قیمت‌های بازار: "+boldPortfolioTime(new Date())+"\n"+
     (incomplete||!Number.isFinite(total)?"<b>گزارش ناقص است؛ جمع کل ارائه نمی‌شود.</b>":
       "ارزش کل دارایی‌های این گزارش: <b>"+formatTomanAmount(total/10)+" تومان</b>");
-  return withAssetFootnotes([header,REPORT_VISIBILITY_NOTE,...(blocks.length?blocks:["هیچ دارایی با ارزش حداقل ۵۰،۰۰۰ تومان در این گزارش وجود ندارد."])].join("\n\n"),shown);
+  return withAssetFootnotes([header,...(blocks.length?blocks:["هیچ دارایی با ارزش حداقل ۵۰،۰۰۰ تومان در این گزارش وجود ندارد."])].join("\n\n"),shown);
 }
 function reportNumber(value){return Number(value).toLocaleString("fa-IR",{maximumFractionDigits:8});}
 function detailedAssetTextBlock(q,asset,index,quote,value){
@@ -1181,11 +1180,10 @@ async function allocationReply(q,blackRockPriceRial=null){
   if(!total)return "هیچ دارایی با ارزش حداقل ۵۰،۰۰۰ تومان در گزارش وجود ندارد.";
   const table=portfolioTable(q,selected.vals,total,reportPrices,usdIrr);
   const sources=[...new Set(Object.keys(vals).map(a=>reportPrices[a]?.source).filter(Boolean))].join(", ");
-  const lines=["<b>Portfolio valuation — live prices</b>","","<b>Total:</b> "+formatToman(total)+" | <b>USD:</b> $"+format(valueUsd(total,usdIrr)),"","<i>Unit prices and sources are shown below.</i>","",table];
+  const lines=["<b>Portfolio valuation — live prices</b>","","<b>Total:</b> "+formatToman(total)+" | <b>USD:</b> $"+format(valueUsd(total,usdIrr)),"",table];
   if(missing.length)lines.push("\n<b>Not valued:</b> "+missing.map(assetLabel).join(", "));
   lines.push("\n<b>Price sources:</b> "+sources);
   lines.push("<b>Retrieved:</b> "+boldPortfolioTime(new Date()));
-  lines.push(REPORT_VISIBILITY_NOTE);
   return withAssetFootnotes(lines.join("\n"),[...visibleReportAssets(vals),...missing]);
 }
 
@@ -1227,23 +1225,19 @@ function allocationGroups(vals,total){
 async function filteredAssetsReply(quantities,snapshot){
   // Without verified current quantities, retain the raw quantity list and do
   // not decide visibility using stale valuations or historical purchase notes.
-  if(quantitySnapshotStatus(snapshot).stale)return assetsReply(quantities,snapshot)+
-    "\n\nبرای اعمال حداقل ارزش نمایش، ابتدا آخرین ترکیب دارایی را دریافت کنید.";
+  if(quantitySnapshotStatus(snapshot).stale)return assetsReply(quantities,snapshot);
   const {prices,errors}=await getPrices({includeEcoCoach:Number(quantities["بلک راک"])>0});
   const usdIrr=prices["دلار"]?.priceRial;
-  let unknown=false;
   const shown=ASSETS.filter(asset=>{
     const qty=Number(quantities[asset]);
-    if(quantities[asset]===undefined||!Number.isFinite(qty)||qty<0){unknown=true;return true;}
+    if(quantities[asset]===undefined||!Number.isFinite(qty)||qty<0)return true;
     if(qty===0)return false;
-    if(errors[asset]||!prices[asset]||(cryptoAsset(asset)&&(!Number.isFinite(usdIrr)||usdIrr<=0))){unknown=true;return true;}
+    if(errors[asset]||!prices[asset]||(cryptoAsset(asset)&&(!Number.isFinite(usdIrr)||usdIrr<=0)))return true;
     const value=valueRial(asset,qty,prices[asset],usdIrr);
-    if(!Number.isFinite(value)||value<0){unknown=true;return true;}
+    if(!Number.isFinite(value)||value<0)return true;
     return value>=MIN_REPORT_VALUE_RIAL;
   });
-  return assetsReply(quantities,snapshot,{shown})+
-    "\n\nدارایی‌های با ارزش کمتر از ۵۰،۰۰۰ تومان در فهرست نمایش داده نمی‌شوند."+
-    (unknown?" دارایی‌های بدون ارزش‌گذاری معتبر در فهرست باقی می‌مانند.":"");
+  return assetsReply(quantities,snapshot,{shown});
 }
 function assetsReply(quantities,snapshot,{shown=ASSETS}={}){
   const categories=[
@@ -1329,15 +1323,9 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
   // The table is deliberately placed BELOW the dashboard panels. This prevents
   // the 29-row table from ever covering the chart, cards, or summary.
   const noteY=790+48+rows.length*37+54;
-  const noteLines=[
-    REPORT_VISIBILITY_NOTE,
-    "• قیمت واحد رمزارزها به دلار نمایش داده می‌شود.",
-    "• ارزش دلاری سایر دارایی‌ها از تقسیم ارزش تومانی بر نرخ دلار آزاد به دست می‌آید.",
-    "• ارزش دلاری رمزارزها حاصل ضرب مقدار در قیمت دلاری هر واحد است.",
-    ...assetCommentEntries(rows.map(row=>row.asset)).flatMap(({label,comment})=>wrapReportText(label+": "+comment)),
-    "اعداد یادداشت‌های خرید تاریخی هستند و در ارزش‌گذاری روز استفاده نمی‌شوند."
-  ];
-  const noteH=80+noteLines.length*28;
+  const noteLines=assetCommentEntries(rows.map(row=>row.asset))
+    .flatMap(({label,comment})=>wrapReportText(label+": "+comment));
+  const noteH=noteLines.length?80+noteLines.length*28:0;
   const W=1800,H=noteY+noteH+40;
   const tableX=40,tableW=1720,rowH=37,headerY=790,headerH=48;
   const cols=[
@@ -1447,9 +1435,11 @@ function buildPortfolioSvg(q,vals,total,prices,usdIrr){
     }
   });
 
-  svg+='<rect data-section="footnotes" x="40" y="'+noteY+'" width="1720" height="'+noteH+'" rx="16" fill="#edf4f8" stroke="#d7e2eb"/>';
-  svg+=svgText(1730,noteY+38,"توضیحات",20,{anchor:"end",weight:700});
-  noteLines.forEach((line,index)=>{svg+=svgText(1730,noteY+70+index*28,line,16,{anchor:"end"});});
+  if(noteLines.length){
+    svg+='<rect data-section="footnotes" x="40" y="'+noteY+'" width="1720" height="'+noteH+'" rx="16" fill="#edf4f8" stroke="#d7e2eb"/>';
+    svg+=svgText(1730,noteY+38,"یادداشت دارایی‌ها (*)",20,{anchor:"end",weight:700});
+    noteLines.forEach((line,index)=>{svg+=svgText(1730,noteY+70+index*28,line,16,{anchor:"end"});});
+  }
   svg+='</svg>';
   return svg;
 }
@@ -1502,7 +1492,7 @@ function allocationTextReport(q,report,snapshot){
   const header="<b>گزارش تفصیلی آخرین ترکیب دارایی</b>\n"+
     (snapshot?"همگام‌سازی مقادیر: "+boldPortfolioTime(snapshot.updated_at)+"\n":"")+
     "قیمت‌های بازار: "+boldPortfolioTime(report.priceTime)+"\n"+
-    "ارزش کل گزارش: <b>"+formatTomanAmount(report.total/10)+" تومان</b>\n"+REPORT_VISIBILITY_NOTE;
+    "ارزش کل گزارش: <b>"+formatTomanAmount(report.total/10)+" تومان</b>";
   const messages=[];let chunk=header;
   const shown=visibleReportAssets(report.vals);
   shown.forEach((asset,index)=>{
@@ -1512,8 +1502,10 @@ function allocationTextReport(q,report,snapshot){
   });
   if(!shown.length)chunk+="\n\nهیچ دارایی با ارزش حداقل ۵۰،۰۰۰ تومان وجود ندارد.";
   const notes=assetFootnotes(shown);
-  if((chunk+"\n\n"+notes).length>3500){messages.push(chunk);chunk=notes;}
-  else chunk+="\n\n"+notes;
+  if(notes){
+    if((chunk+"\n\n"+notes).length>3500){messages.push(chunk);chunk=notes;}
+    else chunk+="\n\n"+notes;
+  }
   messages.push(chunk);
   const percentages="<b>درصد گروه‌های دارایی</b>\n\n"+allocationGroups(report.vals,report.total).map(group=>
     "<b>"+group.label+"</b>: "+group.percentage.toLocaleString("fa-IR",{minimumFractionDigits:2,maximumFractionDigits:2})+"٪"
@@ -1653,7 +1645,6 @@ function buildAllocationPieSvg(report,snapshot=null,{guest=false}={}){
     svg+='<rect x="36" y="1038" width="1528" height="91" rx="28" fill="'+theme.card+'"/>';
     svg+=svgText(1510,1075,"ارزش کل گزارش",21,{anchor:"end",weight:700,fill:theme.muted});
     svg+=svgText(1510,1110,moneyFa(report.total/10),29,{anchor:"end",weight:700,fill:theme.ink});
-    svg+=svgText(78,1087,"درصد گروه‌ها بر اساس ارزش تومانی • دو رقم اعشار",20,{fill:theme.muted});
   }
   return svg+'</svg>';
 }

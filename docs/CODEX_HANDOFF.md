@@ -35,6 +35,14 @@
 > lists retain unpriced/stale holdings pending a trustworthy valuation. See
 > [report cutoff](BOT_MENU.md#minimum-report-valuation-owner-confirmed-2026-10-14).
 
+> **2026-10-15 report notes:** retain the three historical asset-comment
+> records for receivable gold, Zarbod and cash dollars, and describe BlackRock
+> only as `صندوق خصوصی اکوکوچ`. Remove added calculation/filtering footnotes
+> across text, images and chart captions. Original comment provenance remains
+> the existing handoff transcription; the first Excel attachment is not in the
+> checkout. All valuation, freshness, cutoff and access controls remain in place.
+> See [report notes](LATEST_ALLOCATION.md#report-note-simplification-owner-request-2026-10-15).
+
 **As of:** 2026-10-10 (Tehran time)  
 **Primary repository:** https://github.com/SahandFAME/portfolio-agent-telegram  
 **Branch:** `main`  
