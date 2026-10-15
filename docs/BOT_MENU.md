@@ -172,7 +172,8 @@ aggregates, group values and allocation percentages. Exactly 50,000 toman is
 included. Compare quantity × live unit price before rounding; this is an
 asset-level threshold, not a threshold on the price of one unit or on pooled
 group value. Row numbering and displayed counts follow the retained assets.
-Totals are explicitly labelled as report totals. The report explains the cutoff.
+Totals are explicitly labelled as report totals. The cutoff remains applied
+without an explanatory report note (owner request, 2026-10-15).
 Guest charts use the same selected values and retain their no-total/no-notes
 policy. An empty selection yields an informative response, without a chart or
 allocation percentages.
@@ -184,7 +185,7 @@ unchanged; a holding can reappear when its value reaches the threshold.
 
 The quantities-only assets list retrieves current quotes to decide visibility
 when its snapshot passes the existing freshness guard. Unknown valuations stay
-listed and are labelled as such in the report's explanation. Stale/missing
-snapshots retain the raw quantity list and ask for a fresh latest allocation
-before applying the cutoff. No OneDrive job or quantity write is triggered by
+listed rather than being assumed below the threshold. Stale/missing
+snapshots retain the raw quantity list and its snapshot timestamp without
+applying the cutoff. No filtering instructions are appended to these reports. No OneDrive job or quantity write is triggered by
 opening the asset list. Empty asset groups are omitted from that list.

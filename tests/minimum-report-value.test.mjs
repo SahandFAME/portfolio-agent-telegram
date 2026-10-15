@@ -31,9 +31,10 @@ test('text, pictured, category and pie reports remove small assets from rows, to
   assert.equal(groups.find(x=>x.category==='سهام و صندوق').value,0);
   const svg=a.ns.buildPortfolioSvg(q,report.vals,report.total,report.prices,report.usdIrr);
   assert.ok(svg.includes('>ETH</text>'));assert.ok(svg.includes('>ADA</text>'));
-  assert.doesNotMatch(svg,/>BTC<\/text>|بلک راک|شمش زربد|صندوق خصوصی/);
+  assert.doesNotMatch(svg,/>BTC<\/text>|بلک راک|شمش زربد|صندوق خصوصی|data-section="footnotes"|یادداشت دارایی‌ها|توضیحات/);
   const pie=a.ns.buildAllocationPieSvg(report,a.payload);
   assert.ok(pie.includes('data-category="رمز ارز" data-percentage="100"'));
+  assert.doesNotMatch(pie,/درصد گروه‌ها بر اساس|دو رقم اعشار/);
   const chart=await a.ns.latestAllocationReport(q,100000,'chart',a.payload);
   assert.equal(chart.total,report.total);assert.equal(chart.captionFootnotes,'');
   const category=await a.ns.valuationReply(q,['BTC','ETH','ADA'],'رمزارز');
@@ -59,7 +60,7 @@ test('unknown prices/quantities cannot be hidden to bypass complete valuation; u
   assert.equal(report.total,undefined);assert.equal(report.png,undefined);
   const assets=await a.ns.filteredAssetsReply(q,a.payload);
   assert.match(assets,/BTC: همگام‌سازی نشده/);assert.match(assets,/بلک راک\*: 1/);
-  assert.match(assets,/بدون ارزش‌گذاری معتبر/);
+  assert.doesNotMatch(assets,/در فهرست باقی می‌مانند|در فهرست نمایش داده نمی‌شوند/);
   const b=await app({beforeMarketFetch:url=>{if(String(url).includes('coingecko'))throw new Error('fixture missing');}});
   const failed=await b.ns.latestAllocationReport(quantities(b),100000,'chart',b.payload);
   assert.equal(failed.png,undefined);assert.equal(failed.total,undefined);assert.match(failed.text,/قیمت ناموجود/);
@@ -78,6 +79,7 @@ test('several small assets in one group do not survive by pooling their values; 
 test('stale quantity lists do not invent current valuations or rewrite stored holdings to enforce visibility',async()=>{
   const a=await app(),q=quantities(a);q.BTC=.001;
   const text=await a.ns.filteredAssetsReply(q,{...a.payload,updated_at:'2020-01-01T00:00:00Z'});
-  assert.match(text,/BTC: 0\.001/);assert.match(text,/ابتدا آخرین ترکیب دارایی/);
+  assert.match(text,/BTC: 0\.001/);assert.match(text,/Snapshot: <b>/);
+  assert.doesNotMatch(text,/برای اعمال حداقل ارزش نمایش/);
   assert.equal(a.marketCalls.length,0);assert.equal(a.writes.length,0);
 });

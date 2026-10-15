@@ -96,6 +96,25 @@ portfolio's notes in its plain-text photo caption. Image height grows to fit
 the footnotes, while the chart remains 1600×1160. Prices, stored quantities,
 on-demand sync, user access checks and report precision are unchanged.
 
+### Report note simplification (owner request, 2026-10-15)
+
+Keep only the existing receivable-gold, Zarbod and cash-dollar acquisition
+comments transcribed in the handoff, plus the short BlackRock description
+`صندوق خصوصی اکوکوچ`. These are the existing historical comment records;
+the original Excel attachment is not in this checkout and was not independently
+re-read for this presentation change. No new comment text is inferred from
+Trading Journal prices, transactions or quantity tables.
+
+Text reports, quantity lists, chart captions and pictured-table footers no longer
+append calculation explanations, threshold explanations, purchase-note disclaimers
+or pricing instructions to these comments. The chart's decimal-precision note is
+also removed. Only relevant visible assets receive an asterisk and their retained
+comment. A pictured report with no retained comments has no footnote panel;
+otherwise its height follows the wrapped comments. Error messages, price-input
+prompts, timestamps and source fields remain functional report information.
+Guest charts continue to omit all comments and totals. The 50,000-toman cutoff,
+valuation arithmetic, read-only workbook handling and access controls are unchanged.
+
 The six manual holdings stay separate and unchanged. The workbook is never
 saved, edited or uploaded. No credentials, quantities, prices or chat IDs are
 printed by the sync worker. Workbook total validation is fail-closed.

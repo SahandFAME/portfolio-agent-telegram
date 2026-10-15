@@ -123,7 +123,7 @@ test('only verified callback resumes EcoCoach prompt; price input refreshes quan
   const a=await app();await startLatest(a);const id=dispatchedId(a);
   const result=await complete(a,id);assert.equal(result.code,200);
   assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'latest_blackrock_price');
-  assert.equal(JSON.parse(a.sends.at(-1).options.body).text,'برای تهیه گزارش، قیمت فعلی هر واحد صندوق بلک راک* (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: 15 واحد\n\n<b>یادداشت دارایی‌ها (*)</b>\n<b>بلک راک*</b>: صندوق خصوصی اکوکوچ است؛ قیمت واحد ابتدا در سایت صندوق بررسی می‌شود؛ در صورت نبود قیمت معتبر، مدیر آن را وارد می‌کند.');
+  assert.equal(JSON.parse(a.sends.at(-1).options.body).text,'برای تهیه گزارش، قیمت فعلی هر واحد صندوق بلک راک* (EcoCoach) را به تومان ارسال کنید.\n\nتعداد: 15 واحد\n\n<b>یادداشت دارایی‌ها (*)</b>\n<b>بلک راک*</b>: صندوق خصوصی اکوکوچ');
   const calls=a.marketCalls.length;
   await a.request('POST',{},message('۸۵۰٬۰۰۰ تومان'),header);
   assert.equal(a.dispatches.length,2);assert.equal(a.marketCalls.length,calls);
