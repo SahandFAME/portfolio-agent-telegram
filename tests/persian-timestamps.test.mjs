@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {app} from './helpers/app-fixture.mjs';
 
+const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
+
 const headers={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const messages=a=>a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body));
 async function command(a,text){
@@ -58,7 +60,7 @@ test('gold, crypto and dollar price retrieval timestamps are bold Persian Tehran
 
 test('admin status and audit enable HTML for bold times while escaping audit identifiers',async()=>{
   const a=await app();a.store.set('portfolio/latest.json',{...a.payload,updated_at:'2026-10-11T03:00:10Z'});
-  a.store.set('portfolio/access-control.json',{approved:['2'],pending:{},delegatedAdmins:[],users:{},audit:[
+  a.store.set('portfolio/access-control.json',{accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2'],pending:{},delegatedAdmins:[],users:{},audit:[
     {at:'2026-03-20T20:30:00Z',action:'approve',target_id:'<b>2</b>',actor_id:'1&2'}
   ]});
   const status=await click(a,'admin:status');assert.equal(status.parse_mode,'HTML');assert.match(status.text,boldPattern);

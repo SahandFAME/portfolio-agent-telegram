@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {app,startLatest} from './helpers/app-fixture.mjs';
 
+const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
+
 const KEY='portfolio/access-control.json';
 const headers={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const auth={'x-portfolio-sync-secret':'fixture-secondary'};
@@ -11,7 +13,7 @@ const request=(a,text,id)=>a.request('POST',{}, {message:{chat:{id,type:'private
 const requestId=a=>JSON.parse(a.dispatches.at(-1).options.body).inputs.request_id;
 async function fixture(options={}){
   const a=await app(options);
-  a.store.set(KEY,{approved:['2','3','4'],delegatedAdmins:['3'],financialAdvisors:['2'],pending:{},users:{},audit:[]});
+  a.store.set(KEY,{accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2','3','4'],delegatedAdmins:['3'],financialAdvisors:['2'],pending:{},users:{},audit:[]});
   for(const asset of Object.keys(a.assets))a.assets[asset]=asset==='بلک راک'?15:1;
   a.store.set('portfolio/latest.json',a.payload);
   return a;

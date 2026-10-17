@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {app} from './helpers/app-fixture.mjs';
 
+const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
+
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const method=call=>call.url.split('/').at(-1);
 const body=call=>JSON.parse(call.options.body);
@@ -16,7 +18,7 @@ const historicalOptions={env:{TELEGRAM_BOT_TOKEN:'99:fixture-bot'},
   telegramReply:(call,count)=>method(call)==='sendMessage'?{ok:true,result:{message_id:200+count}}:null};
 async function fixture(options){
   const a=await app(options);a.store.set('portfolio/access-control.json',{
-    approved:['2','3'],delegatedAdmins:['3'],pending:{},users:{},audit:[]});return a;
+    accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2','3'],delegatedAdmins:['3'],pending:{},users:{},audit:[]});return a;
 }
 
 test('opening and navigating the panel leaves only the current screen tracked',async()=>{

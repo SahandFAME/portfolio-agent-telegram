@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {app} from './helpers/app-fixture.mjs';
 
+const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
+
 // Synthetic explicit quote markup. The live public fund page has no quote.
 function table({price='850,000',currency='تومان',stamp=new Date(Date.now()-60000).toISOString(),caption='صندوق شاخصی بلک راک',label='قیمت هر واحد'}={}){
   return `<table><caption>${caption}</caption><tr><th>${label}</th><td>${price} ${currency}</td></tr><tr><th>تاریخ به‌روزرسانی قیمت</th><td><time datetime="${stamp}">${stamp}</time></td></tr></table>`;
@@ -70,7 +72,7 @@ test('site failures preserve the manual prompt without partial totals and catego
 
 test('guest charts use an available site price with one fresh sync and no price prompts, total or notes',async()=>{
   const a=await app({ecoCoachHtml:page(table())});
-  a.store.set('portfolio/access-control.json',{approved:['2'],pending:{},delegatedAdmins:[],users:{},audit:[]});
+  a.store.set('portfolio/access-control.json',{accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2'],pending:{},delegatedAdmins:[],users:{},audit:[]});
   await a.request('POST',{}, {message:{chat:{id:2,type:'private'},from:{id:2},text:'/allocation_chart'}},{'x-telegram-bot-api-secret-token':'fixture-webhook'});
   const id=JSON.parse(a.dispatches.at(-1).options.body).inputs.request_id;
   const snapshot={...a.payload,assets:{...a.assets,'بلک راک':15},updated_at:new Date().toISOString()};a.store.set('portfolio/latest.json',snapshot);

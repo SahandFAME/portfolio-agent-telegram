@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {app} from './helpers/app-fixture.mjs';
 
+const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
+
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const method=call=>call.url.split('/').at(-1);
 const body=call=>JSON.parse(call.options.body);
@@ -13,7 +15,7 @@ const anchor=a=>a.store.get('portfolio/main-menu/1.json').message_id;
 const pendingPanel=a=>a.store.get('portfolio/temporary-replies/1.json').messages[0].message_id;
 async function fixture(options){
   const a=await app(options);a.store.set('portfolio/access-control.json',{
-    approved:['2','3'],delegatedAdmins:['3'],pending:{},users:{},audit:[]});return a;
+    accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2','3'],delegatedAdmins:['3'],pending:{},users:{},audit:[]});return a;
 }
 // Simulate the client behavior reported by the owner: deleting the message
 // that supplied its reply keyboard clears that keyboard.

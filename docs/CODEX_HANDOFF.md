@@ -46,6 +46,15 @@
 > delivering private-note reports, including role changes during preparation.
 > See [report notes](LATEST_ALLOCATION.md#report-note-simplification-owner-request-2026-10-15).
 
+**2026-10-17 access update:** owners/admins remain unlimited; guests and
+financial advisors receive seven-day grants, silent expiry and silent admin
+extensions of 1/3/7 days. The admin **پایش زمان دسترسی** screen shows remaining
+time and expired status. Non-admin command activity is sent privately to current
+admins, without forwarding raw user input or changing admin menus. Legacy dates
+come from saved approval history or a one-time activation anchor. Apply the
+protected expiry configuration and verify aggregate readback after deployment.
+Implementation and operational semantics: [admin dashboard](ADMIN_DASHBOARD.md#weekly-access-monitoring-and-command-activity-2026-10-17).
+
 **As of:** 2026-10-10 (Tehran time)  
 **Primary repository:** https://github.com/SahandFAME/portfolio-agent-telegram  
 **Branch:** `main`  

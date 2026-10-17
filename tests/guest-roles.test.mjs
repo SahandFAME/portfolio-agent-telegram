@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import {app,startLatest} from './helpers/app-fixture.mjs';
 
+const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
+
 const KEY='portfolio/access-control.json',header={'x-telegram-bot-api-secret-token':'fixture-webhook'},auth={'x-portfolio-sync-secret':'fixture-secondary'};
-const state=()=>({approved:['2','3','4'],delegatedAdmins:['3','4'],pending:{'5':{id:'5',first_name:'Requested User'}},users:{},audit:[]});
+const state=()=>({accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2','3','4'],delegatedAdmins:['3','4'],pending:{'5':{id:'5',first_name:'Requested User'}},users:{},audit:[]});
 const msg=(text,id=2)=>({message:{chat:{id,type:'private'},from:{id},text}});
 const cb=(data,id=3,chat=id)=>({callback_query:{id:'fixture-callback',from:{id},data,message:{chat:{id:chat,type:'private'}}}});
 const messages=a=>a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body));
