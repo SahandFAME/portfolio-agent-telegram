@@ -165,3 +165,68 @@ complete prices, and current report permissions before each text/image send.
 Demoting an advisor to guest or revoking access blocks detailed report delivery,
 including during a pending request. Guests retain chart-only access with no
 total or notes. Authenticated operational health discloses advisor counts only.
+
+## Weekly access, monitoring and command activity (2026-10-17)
+
+Owners and approved delegated admins have no time limit. Guest and financial
+advisor access lasts exactly seven 24-hour days from approval, compared against
+server time before command execution, menus, callbacks, workflow completion and
+each report chunk/image delivery. At the deadline access is inactive even when
+no scheduled job has run. Keep expired grants in private state for monitoring
+and renewal; retained membership alone must never authorize access. There is no
+activation broadcast, countdown, expiry warning or expiry notification to users.
+Expired report attempts and stale callbacks are silent. An explicit `/start`
+can submit a normal approval request again, without an expiry notice.
+
+**پنل مدیریت → پایش زمان دسترسی** shows each registered user's role, remaining
+days/hours/minutes, bold Persian-calendar expiry time in Tehran, and expired
+status. Owners/admins show no limit. Non-admin rows offer **1 day**, **3 days**
+and **1 week** extensions. Add time to an active deadline; renew an expired
+user from the current time. Extensions preserve guest/advisor roles and do not
+message the user. Only current admins can extend access; unknown/manually
+revoked users and owners/admins cannot be extended. Strong identity ETags reject
+concurrent writes, and recent extension callback retries are deduplicated in the
+management audit. Pagination and previous-panel cleanup remain in effect.
+
+Promotion makes the admin role unlimited. Demotion from admin to guest/advisor
+starts a fresh week; switching guest/advisor roles preserves the existing
+deadline. Approval and explicit role-change messages retain their normal text,
+without adding any time-limit notice. Manual revocation remains an explicit
+admin action with its existing message; automatic expiry sends none.
+
+Private state adds `accessTerms[uid]` (`approved_at`, `expires_at`, `source`) and
+`accessPolicy` (`version`, `activated_at`). Explicit invalid terms fail closed.
+For legacy grants, recover the newest recorded approval from user metadata or
+the bounded audit history. With no recoverable date, use the persisted policy
+activation time for a single seven-day period; never reset that fallback on
+reads, requests, redeploys or restarts. Owners/admins are exempt.
+
+The authenticated `POST /api/telegram?configure=access-expiry` previews migration
+by default. JSON `{"apply":true}` persists missing terms and activation time
+with a conditional write, with no Telegram sends. Repeated application preserves
+existing deadlines. `GET ?data=access-health` reports aggregate active/expired,
+persisted-term and fallback counts, never identities or private comments. Before
+activation, legacy grants without recoverable dates fail closed; activate and
+verify immediately after deploying this feature. No workbook or snapshot write
+is involved. Do not create fake approval history for unknown dates.
+
+Each real, authenticated private-chat Telegram command from a non-admin sends
+an activity message to current owners/admins. Persian menu buttons use canonical
+command names; valid report-format selections identify image/text/menu choice.
+Alerts show escaped user name/username, user ID, requested command, current role
+or inactive status, and a bold Persian Tehran timestamp. Commands are requests,
+not proof that a report succeeded. Expired/unapproved command attempts are also
+included. Never forward free text, EcoCoach prices, command arguments, holdings
+or credentials. Owners/admins' own commands create no activity alert. Group,
+mismatched-identity and unauthenticated traffic cannot generate alerts.
+
+Alerts run as background work and do not change admin keyboards or delete the
+current dashboard. Each recipient is rechecked before delivery. Private
+`portfolio/command-activity/{update_id}/{admin_id}.json` receipts use conditional
+writes and 30-second send leases to suppress duplicate successful deliveries.
+Each send gets up to two bounded attempts; failed receipts can retry on replay.
+Alert delivery is best effort when Telegram/storage is unavailable and must not
+prevent the user's report. An interrupted send whose acknowledgment was lost
+can be retried after its lease; Telegram offers no send-message idempotency key.
+Tests use genuine update IDs for activity while older focused fixtures can omit
+them; only a real update ID creates an activity receipt.

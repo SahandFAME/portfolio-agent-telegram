@@ -48,3 +48,12 @@ The owner's report cutoff (2026-10-14) excludes exact asset valuations below
 50,000 toman from rows, notes, report totals and allocation percentages. Validate
 complete data before applying the cutoff; retain the underlying 29 holdings.
 Unknown valuation is not proof of a value below the cutoff. See docs/BOT_MENU.md.
+
+Non-admin guest/advisor grants expire exactly seven days after approval (plus
+explicit admin extensions). Use `hasBotAccess`, never raw `approved` membership,
+for authorization; check expiry again before every report delivery, including
+guest charts. Owner/admin exemptions remain unlimited. Expiry, activation and
+extensions send no time-limit notice to the affected user. Legacy dates must be
+persisted once; never grant a sliding week on reads. Command activity goes only
+to currently authorized admins, without raw input/prices or report notes, and
+must not remove an admin's dashboard. See docs/ADMIN_DASHBOARD.md.

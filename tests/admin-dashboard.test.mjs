@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {app,startLatest} from './helpers/app-fixture.mjs';
 
+const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
+
 const KEY='portfolio/access-control.json';
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const message=(text,id=1,type='private')=>({message:{chat:{id,type},from:{id},text}});
@@ -10,7 +12,7 @@ const method=call=>call.url.split('/').at(-1);
 const bodies=a=>a.sends.filter(x=>method(x)==='sendMessage').map(x=>JSON.parse(x.options.body));
 const callbacks=a=>a.sends.filter(x=>method(x)==='answerCallbackQuery').map(x=>JSON.parse(x.options.body));
 const changes=a=>a.writes.filter(x=>x.key===KEY);
-const state=()=>({approved:['2','3'],pending:{'5':{id:'5',first_name:'Requested User',username:'fixture_user'}},
+const state=()=>({accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2','3'],pending:{'5':{id:'5',first_name:'Requested User',username:'fixture_user'}},
   delegatedAdmins:['3'],users:{'2':{first_name:'Approved User'},'3':{first_name:'Chosen Admin'}},audit:[]});
 async function fixture(options){const a=await app(options);a.store.set(KEY,state());return a;}
 async function click(a,data,id=1){return a.request('POST',{},callback(data,id),header);}
@@ -35,7 +37,7 @@ test('owner dashboard provides access requests, users, roles, system status and 
   const dashboard=bodies(a).at(-1);
   assert.match(dashboard.text,/مالک/);
   assert.deepEqual(dashboard.reply_markup.inline_keyboard.flat().map(x=>x.callback_data),
-    ['admin:users:0','admin:pending:0','admin:status','admin:audit','admin:admins:0','admin:main_menu']);
+    ['admin:users:0','admin:pending:0','admin:status','admin:audit','admin:admins:0','admin:expiry:0','admin:main_menu']);
 });
 
 test('chosen admin dashboard includes authorized role management',async()=>{
@@ -158,7 +160,7 @@ test('revoked users cannot receive completion of a previously queued allocation'
 });
 
 test('revocation while market prices are loading blocks the image at delivery',async()=>{
-  const a=await fixture({beforeMarketFetch:(url,store)=>store.set(KEY,{...state(),approved:['2'],delegatedAdmins:[]})});
+  const a=await fixture({beforeMarketFetch:(url,store)=>store.set(KEY,{...state(),accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2'],delegatedAdmins:[]})});
   await startLatest(a,{id:3});
   const id=JSON.parse(a.dispatches.at(-1).options.body).inputs.request_id;
   const key='portfolio/latest-allocation/requests/'+id+'.json';
@@ -292,7 +294,7 @@ test('a storage server ignoring identity cannot turn a weak ETag into an uncondi
 
 test('identity reads preserve conflict rejection for large Persian records',async()=>{
   const a=await fixture({compressAccessReads:true,beforeWrite:(key,value,options,store)=>{
-    if(key===KEY)store.set(KEY,{...store.get(KEY),approved:['3']});
+    if(key===KEY)store.set(KEY,{...store.get(KEY),accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['3']});
   }});
   a.store.get(KEY).users['2'].first_name='نام فارسی '.repeat(150);
   await click(a,'admin:grant:2');

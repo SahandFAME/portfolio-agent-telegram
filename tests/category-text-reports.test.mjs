@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {app} from './helpers/app-fixture.mjs';
 
+const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
+
 const headers={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const gold=['طلا','عیار','گوهر','آلتون','امرالد','زرفام','سکه تمام','ربع سکه غیره','ربع سکه بانکی','آبشده (طلب)','آبشده (شمش زربد)','شمش نقره 999'];
 const crypto=['BTC','ETH','Tether','Link','ADA','SOL','ONDO'];
@@ -103,7 +105,7 @@ test('demotion after the first category chunk prevents further detailed report d
       a.store.get('portfolio/access-control.json').delegatedAdmins=[];
     }
   }});
-  a.store.set('portfolio/access-control.json',{approved:['3'],delegatedAdmins:['3'],pending:{},users:{},audit:[]});
+  a.store.set('portfolio/access-control.json',{accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['3'],delegatedAdmins:['3'],pending:{},users:{},audit:[]});
   const snapshot={...a.payload,assets:{...a.assets}};
   for(const asset of gold)if(asset in snapshot.assets)snapshot.assets[asset]=1e90;
   a.store.set('portfolio/latest.json',snapshot);await request(a,'/gold',3);

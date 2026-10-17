@@ -10,7 +10,7 @@ import { BlobPreconditionFailedError } from '@vercel/blob';
 const source = await fs.readFile(new URL('../../api/telegram.js', import.meta.url), 'utf8');
 // Evaluate the actual unmodified handler, injecting only external dependencies.
 // Named exports below exist only inside the test VM, not in application code.
-export async function app({readError=false, dispatchStatus=204, env={}, telegramReply=null,beforeWrite=null,beforeMarketFetch=null,ecoCoachHtml=null,ecoCoachError=false,ecoCoachStatus=200,compressAccessReads=false,forceWeakEtag=false,cryptoPriceUsd=2}={}) {
+export async function app({readError=false, dispatchStatus=204, env={}, telegramReply=null,beforeWrite=null,beforeMarketFetch=null,ecoCoachHtml=null,ecoCoachError=false,ecoCoachStatus=200,compressAccessReads=false,forceWeakEtag=false,cryptoPriceUsd=2,now=null}={}) {
   const store = new Map(), writes = [], sends = [], background = [], dispatches=[], marketCalls=[], renderedSvgs=[];
   const tokenEnv = {PORTFOLIO_SYNC_SECRET:'fixture-primary',PORTFOLIO_SYNC_SECRET_AGENT:'fixture-secondary',
     GITHUB_ACTIONS_TOKEN:'fixture-actions',TELEGRAM_WEBHOOK_SECRET:'fixture-webhook',TELEGRAM_BOT_TOKEN:'fixture-bot',TELEGRAM_ADMIN_USER_IDS:'1',...env};
@@ -37,7 +37,10 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
     }
     return {ok:true,text:async()=>text};
   };
-  const context = vm.createContext({console:{info(){},warn(){},error(){}},Buffer,Date,Number,
+  const context = vm.createContext({console:{info(){},warn(){},error(){}},Buffer,Date:now?class extends Date {
+      constructor(...args){super(...(args.length?args:[now()]));}
+      static now(){return now();}
+    }:Date,Number,
     URL,FormData,Blob,TextEncoder,ReadableStream,process:{env:tokenEnv,cwd:()=>process.cwd()},
     crypto:globalThis.crypto,AbortSignal,
     fetch:async(url,options)=>{
@@ -73,7 +76,7 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
       constructor(svg,options){super(svg,options);renderedSvgs.push(svg);}
     }},path:{default:path}
   };
-  const module = new vm.SourceTextModule(source + '\nexport {filteredReportValues,filteredAssetsReply,MIN_REPORT_VALUE_RIAL,visibleReportAssets,monetaryNumber,formatTomanAmount,ASSETS,MANUAL,ASSET_COMMENTS,assetLabel,assetFootnotes,assetsReply,valuationReply,wrapReportText,parseEcoCoachPrice,ecoCoachPrice,parseUserPrice,valueRial,quantitySnapshotStatus,getPrices,buildPortfolioSvg,allocationImageReply,sendTelegram,sendTelegramPhoto,portfolioTime,boldPortfolioTime,allocationReply,latestAllocationReport,prepareAllocation,allocationGroups,renderAllocationSvg,buildAllocationPieSvg};', {context});
+  const module = new vm.SourceTextModule(source + '\nexport {accessTerm,hasBotAccess,canReadReports,loadAccessState,ACCESS_DAY_MS,ACCESS_WEEK_MS,filteredReportValues,filteredAssetsReply,MIN_REPORT_VALUE_RIAL,visibleReportAssets,monetaryNumber,formatTomanAmount,ASSETS,MANUAL,ASSET_COMMENTS,assetLabel,assetFootnotes,assetsReply,valuationReply,wrapReportText,parseEcoCoachPrice,ecoCoachPrice,parseUserPrice,valueRial,quantitySnapshotStatus,getPrices,buildPortfolioSvg,allocationImageReply,sendTelegram,sendTelegramPhoto,portfolioTime,boldPortfolioTime,allocationReply,latestAllocationReport,prepareAllocation,allocationGroups,renderAllocationSvg,buildAllocationPieSvg};', {context});
   await module.link(async specifier => {
     const exports = dependencies[specifier];
     assert.ok(exports, `unexpected dependency ${specifier}`);
@@ -89,7 +92,7 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
   async function request(method, query={}, body={}, headers={}) {
     const res = {status(code){this.code=code;return this;},json(data){this.data=data;},send(data){this.data=data;}};
     await ns.default({method,query,body,headers},res);
-    await Promise.all(background.splice(0));
+    while(background.length)await Promise.all(background.splice(0));
     return res;
   }
   return {ns,store,writes,sends,request,payload,assets,dispatches,marketCalls,renderedSvgs};

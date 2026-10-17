@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import {app} from './helpers/app-fixture.mjs';
 
+const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
+
 const headers={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const auth={'x-portfolio-sync-secret':'fixture-secondary'};
 const messages=a=>a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body));
@@ -66,7 +68,7 @@ test('chart failures, expired callbacks and changed snapshots cannot render cach
 
 test('unapproved or revoked users cannot dispatch or receive an allocation chart',async()=>{
   const a=await app();await a.request('POST',{},message('/allocation_chart',2),headers);assert.equal(a.dispatches.length,0);
-  const b=await app();b.store.set('portfolio/access-control.json',{approved:['2'],pending:{},delegatedAdmins:[],users:{},audit:[]});
+  const b=await app();b.store.set('portfolio/access-control.json',{accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2'],pending:{},delegatedAdmins:[],users:{},audit:[]});
   await b.request('POST',{},message('/allocation_chart',2),headers);
   b.store.get('portfolio/latest-allocation/requests/'+jobId(b)+'.json').blackRockPriceRial=100000;
   b.store.get('portfolio/access-control.json').approved=[];await complete(b);

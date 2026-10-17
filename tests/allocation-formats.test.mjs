@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {app,startLatest} from './helpers/app-fixture.mjs';
 
+const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
+
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const auth={'x-portfolio-sync-secret':'fixture-secondary'};
 const messages=a=>a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body));
@@ -81,7 +83,7 @@ test('unapproved, revoked, cross-chat and group callbacks cannot choose formats'
   const a=await app();await a.request('POST',{},message('/latest_allocation'),header);const data=chooseData(a);
   for(const forged of [callback(data,2),callback(data,1,2),callback(data,1,1,'group')])await a.request('POST',{},forged,header);
   assert.equal(a.dispatches.length,0);
-  const b=await app();b.store.set('portfolio/access-control.json',{approved:['2'],pending:{},delegatedAdmins:['2'],users:{},audit:[]});
+  const b=await app();b.store.set('portfolio/access-control.json',{accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2'],pending:{},delegatedAdmins:['2'],users:{},audit:[]});
   await b.request('POST',{},message('/latest_allocation',2),header);const choice=chooseData(b);
   b.store.get('portfolio/access-control.json').approved=[];await b.request('POST',{},callback(choice,2),header);
   assert.equal(b.dispatches.length,0);
@@ -140,7 +142,7 @@ test('access revocation or supersession during a text report stops remaining chu
         else a.store.set('portfolio/latest-allocation/active/2.json',{request_id:'newer-job'});
       }return null;
     }});
-    a.store.set('portfolio/access-control.json',{approved:['2'],pending:{},delegatedAdmins:['2'],users:{},audit:[]});
+    a.store.set('portfolio/access-control.json',{accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2'],pending:{},delegatedAdmins:['2'],users:{},audit:[]});
     await startLatest(a,{id:2,format:'text'});a.store.get(key(selected(a))).blackRockPriceRial=100000;
     await complete(a);
     assert.ok(messages(a).some(x=>x.text.startsWith('<b>گزارش تفصیلی')));

@@ -85,6 +85,7 @@ export default async function handler(req,res){
   }
   if(req.method==="POST" && req.query?.sync==="portfolio") return sync(req,res);
   if(req.method==="POST" && req.query?.complete==="latest-allocation") return completeLatestAllocation(req,res);
+  if(req.method==="POST" && req.query?.configure==="access-expiry") return configureAccessExpiry(req,res);
   if(req.method==="POST" && req.query?.verify==="access-storage"){
     if(!syncAuth(req))return res.status(401).json({ok:false});
     const result=await verifyAccessStorage();return res.status(result.ok?200:503).json(result);
@@ -150,10 +151,11 @@ async function readAccessHealth(req,res){
   try{
     const state=await loadAccessState({strict:true});
     return res.status(200).json({ok:true,owner_count:adminUserIds().length,
-      approved_count:state.approved.length,pending_count:Object.keys(state.pending).length,
+      approved_count:state.approved.filter(id=>hasBotAccess(id,state)).length,pending_count:Object.keys(state.pending).length,
       delegated_admin_count:state.delegatedAdmins.length,audit_count:state.audit.length,
-      guest_count:state.approved.filter(id=>!canReadReports(id,state)).length,guest_chart_only:true,
-      financial_advisor_count:state.financialAdvisors.length,advisor_reports_only:true,
+      guest_count:state.approved.filter(id=>hasBotAccess(id,state)&&!canReadReports(id,state)).length,guest_chart_only:true,
+      financial_advisor_count:state.financialAdvisors.filter(id=>hasBotAccess(id,state)).length,advisor_reports_only:true,
+      access_expiry_configured:!!state.accessPolicy,access_duration_days:7,command_notifications_enabled:true,...accessExpirySummary(state),
       conditional_updates_ready:!state._exists||!!state._etag});
   }catch(_){return res.status(503).json({ok:false,error:"Access storage unavailable"});}
 }
@@ -226,7 +228,7 @@ async function telegram(req,res){
   if(!secret)return res.status(503).json({ok:false});
   if(secret&&req.headers["x-telegram-bot-api-secret-token"]!==secret)return res.status(401).json({ok:false});
   const callback=req.body?.callback_query;
-  if(callback){waitUntil(String(callback.data||"").startsWith("allocation:")?handleAllocationCallback(callback):handleAccessCallback(callback));return res.status(200).json({ok:true});}
+  if(callback){waitUntil(String(callback.data||"").startsWith("allocation:")?handleAllocationCallback(callback,req.body.update_id):handleAccessCallback(callback));return res.status(200).json({ok:true});}
   const message=req.body?.message;
   if(!message?.chat?.id)return res.status(200).json({ok:true});
   const userId=message.from?.id;
@@ -234,16 +236,16 @@ async function telegram(req,res){
   const text=(message.text||"").trim();
   const command=MENU_COMMANDS.get(text)||text;
   const uid=String(userId);
-  const adminIds=adminUserIds();
   const state=await loadAccessState();
-  const approved=new Set([...(state.approved||[]).map(String),...adminIds]);
   const isAdmin=isBotAdmin(uid,state);
   const noteOptions={includePrivateNotes:isAdmin};
+  waitUntil(notifyCommandActivity(req.body,message,command,state));
+  if(isExpiredMember(uid,state)&&!/^\/(start|request)(?:@\w+)?$/.test(command))return res.status(200).json({ok:true});
   if(/^\/admin(?:@\w+)?$/.test(command)||(isAdmin&&(/^\/users(?:@\w+)?$/.test(command)||/^\/revoke(?:@\w+)?\s+\d+$/.test(command)||/^\/approve(?:@\w+)?\s+\d+$/.test(command)))){
     waitUntil(handleAdminAccessCommand(message.chat.id,command,uid));
     return res.status(200).json({ok:true});
   }
-  if(!approved.has(uid)){
+  if(!hasBotAccess(uid,state)){
     if(/^\/(start|request|help)(?:@\w+)?$/.test(command)){
       let result;
       try{result=await requestAccess(uid,message.from);}
@@ -352,12 +354,12 @@ async function showAllocationMenu(chatId){
       [{text:"بازگشت به منوی اصلی",callback_data:data("menu")}]]}
   })},{temporary:true});
 }
-async function handleAllocationCallback(callback){
+async function handleAllocationCallback(callback,updateId){
   const uid=String(callback.from?.id||""),chat=callback.message?.chat;
   if(chat?.type!=="private"||String(chat.id)!==uid){await answerCallback(callback.id,"دسترسی غیرمجاز.");return;}
   try{
     const state=await loadAccessState({strict:true});
-    if(!isOwner(uid)&&!state.approved.includes(uid)){await answerCallback(callback.id,"دسترسی ندارید.");return;}
+    if(!hasBotAccess(uid,state)){await answerCallback(callback.id,isExpiredMember(uid,state)?"":"دسترسی ندارید.");return;}
     const match=String(callback.data||"").match(/^allocation:pick:([0-9a-f-]{36}):(image|text|menu)$/);
     if(match?.[2]!=="menu"&&!canReadReports(uid,state)){await answerCallback(callback.id,"فقط نمودار درصدی برای مهمان قابل دسترسی است.");return;}
     const selection=await readPrivateJson(ALLOCATION_SELECTION_PREFIX+chat.id+".json");
@@ -365,6 +367,7 @@ async function handleAllocationCallback(callback){
     if(!match||selection?.selection_id!==match[1]||selection.used||!Number.isFinite(age)||age<0||age>ALLOCATION_DEADLINE_MS){
       await answerCallback(callback.id,"این منو منقضی شده است؛ آخرین ترکیب دارایی را دوباره انتخاب کنید.");return;
     }
+    waitUntil(notifyCommandActivity({update_id:updateId,callback_query:callback},null,"/latest_allocation "+match[2],state));
     await writePrivateJson(ALLOCATION_SELECTION_PREFIX+chat.id+".json",{...selection,used:true});
     await answerCallback(callback.id,"");
     await trackPreviousAdminPanel(chat.id,callbackPanelToReplace(callback));
@@ -388,7 +391,7 @@ async function writePrivateJson(key,value){
 }
 async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null,reportFormat="image"){
   const state=await loadAccessState({strict:true}),uid=String(userId);
-  if(String(chatId)!==uid||(!isOwner(uid)&&!state.approved.includes(uid)))return "دسترسی ندارید.";
+  if(String(chatId)!==uid||!hasBotAccess(uid,state))return isExpiredMember(uid,state)?"":"دسترسی ندارید.";
   if(!canReadReports(uid,state)&&(reportFormat!=="chart"||blackRockPriceRial!==null))return guestHelp();
   const token=process.env.GITHUB_ACTIONS_TOKEN;
   if(!token)return "دریافت تازه از OneDrive هنوز پیکربندی نشده است. گزارش قبلی به‌عنوان گزارش تازه نمایش داده نمی‌شود.";
@@ -433,7 +436,7 @@ async function completeLatestAllocation(req,res){
   waitUntil((async()=>{
     try{
       const state=await loadAccessState();
-      if(!new Set([...(state.approved||[]).map(String),...adminUserIds()]).has(record.user_id))return;
+      if(!hasBotAccess(record.user_id,state))return;
       const guest=!canReadReports(record.user_id,state);
       const includePrivateNotes=isBotAdmin(record.user_id,state);
       const audience=includePrivateNotes?"admin":"report";
@@ -498,12 +501,44 @@ function isBotAdmin(uid,state){
   uid=String(uid);
   return isOwner(uid)||((state.approved||[]).includes(uid)&&(state.delegatedAdmins||[]).includes(uid));
 }
+const ACCESS_DAY_MS=24*60*60*1000;
+const ACCESS_WEEK_MS=7*ACCESS_DAY_MS;
+const APPROVAL_ACTIONS=new Set(["approve","approve_guest","approve_admin","approve_advisor"]);
+function accessTerm(uid,state){
+  uid=String(uid);
+  if(Object.hasOwn(state.accessTerms||{},uid)){
+    const term=state.accessTerms[uid];
+    if(typeof term?.approved_at!=="string"||typeof term?.expires_at!=="string")return null;
+    const approved=Date.parse(term?.approved_at),expires=Date.parse(term?.expires_at);
+    return Number.isFinite(approved)&&Number.isFinite(expires)&&expires>approved&&approved<=Date.now()?term:null;
+  }
+  // Recover approval history without pretending the original attachment or a
+  // bounded audit log supplies a date that was never recorded.
+  const dates=[state.users?.[uid]?.approvedAt,...(state.audit||[])
+    .filter(event=>String(event.target_id)===uid&&APPROVAL_ACTIONS.has(event.action)).map(event=>event.at)]
+    .map(value=>Date.parse(value)).filter(value=>Number.isFinite(value)&&value<=Date.now());
+  const approved=dates.length?Math.max(...dates):Date.parse(state.accessPolicy?.activated_at);
+  if(!Number.isFinite(approved)||approved>Date.now())return null;
+  return {approved_at:new Date(approved).toISOString(),expires_at:new Date(approved+ACCESS_WEEK_MS).toISOString(),
+    source:dates.length?"approval_history":"policy_activation"};
+}
+function hasBotAccess(uid,state){
+  uid=String(uid);
+  if(isBotAdmin(uid,state))return true;
+  if(!(state.approved||[]).includes(uid))return false;
+  const term=accessTerm(uid,state);
+  return !!term&&Date.parse(term.expires_at)>Date.now();
+}
+function isExpiredMember(uid,state){
+  uid=String(uid);
+  return !isBotAdmin(uid,state)&&(state.approved||[]).includes(uid)&&!hasBotAccess(uid,state);
+}
 function canReadReports(uid,state){
   uid=String(uid);
-  return isBotAdmin(uid,state)||((state.approved||[]).includes(uid)&&(state.financialAdvisors||[]).includes(uid));
+  return isBotAdmin(uid,state)||(hasBotAccess(uid,state)&&(state.financialAdvisors||[]).includes(uid));
 }
-function roleLabel(uid,state){return isOwner(uid)?"مالک":isBotAdmin(uid,state)?"مدیر":canReadReports(uid,state)?"مشاور مالی":"مهمان";}
-function emptyAccessState(){return {approved:[],pending:{},delegatedAdmins:[],financialAdvisors:[],users:{},audit:[]};}
+function roleLabel(uid,state){return isOwner(uid)?"مالک":isBotAdmin(uid,state)?"مدیر":(state.financialAdvisors||[]).includes(String(uid))?"مشاور مالی":"مهمان";}
+function emptyAccessState(){return {approved:[],pending:{},delegatedAdmins:[],financialAdvisors:[],users:{},audit:[],accessTerms:{},accessPolicy:null};}
 async function loadAccessState({strict=false}={}){
   try{
     const r=await get(ACCESS_STATE,ACCESS_READ_OPTIONS);
@@ -512,11 +547,16 @@ async function loadAccessState({strict=false}={}){
     while(true){const x=await reader.read();if(x.done)break;chunks.push(Buffer.from(x.value));}
     const raw=JSON.parse(Buffer.concat(chunks).toString("utf8"));
     if(!raw||!Array.isArray(raw.approved)||!raw.pending||typeof raw.pending!=="object"||Array.isArray(raw.pending))throw new Error("invalid_access_state");
+    for(const field of ["accessTerms","accessPolicy"]){
+      if(raw[field]!==undefined&&raw[field]!==null&&(typeof raw[field]!=="object"||Array.isArray(raw[field])))throw new Error("invalid_access_state");
+    }
     const approved=[...new Set(raw.approved.map(String).filter(x=>/^[1-9]\d*$/.test(x)&&Number.isSafeInteger(Number(x))))];
     const state={approved,pending:raw.pending,
       delegatedAdmins:[...new Set((Array.isArray(raw.delegatedAdmins)?raw.delegatedAdmins:[]).map(String))].filter(x=>approved.includes(x)&&!isOwner(x)),
       users:raw.users&&typeof raw.users==="object"&&!Array.isArray(raw.users)?raw.users:{},
-      audit:Array.isArray(raw.audit)?raw.audit.slice(-100):[]};
+      audit:Array.isArray(raw.audit)?raw.audit.slice(-100):[],
+      accessTerms:raw.accessTerms&&typeof raw.accessTerms==="object"&&!Array.isArray(raw.accessTerms)?raw.accessTerms:{},
+      accessPolicy:raw.accessPolicy&&typeof raw.accessPolicy==="object"&&!Array.isArray(raw.accessPolicy)?raw.accessPolicy:null};
     state.financialAdvisors=[...new Set((Array.isArray(raw.financialAdvisors)?raw.financialAdvisors:[]).map(String))]
       .filter(id=>approved.includes(id)&&!isOwner(id)&&!state.delegatedAdmins.includes(id));
     Object.defineProperties(state,{_etag:{value:r.blob?.etag},_exists:{value:true}});
@@ -531,11 +571,88 @@ async function saveAccessState(state){
   await put(ACCESS_STATE,JSON.stringify(state,null,2),{access:"private",addRandomSuffix:false,
     ...(state._etag?{ifMatch:state._etag}:{allowOverwrite:false}),contentType:"application/json"});
 }
+function accessExpirySummary(state){
+  const ids=state.approved.filter(id=>!isBotAdmin(id,state));
+  return {tracked_non_admin_count:ids.length,active_non_admin_count:ids.filter(id=>hasBotAccess(id,state)).length,
+    expired_non_admin_count:ids.filter(id=>!hasBotAccess(id,state)).length,
+    persisted_expiry_count:ids.filter(id=>Object.hasOwn(state.accessTerms||{},id)&&accessTerm(id,state)!==null).length,
+    activation_date_fallback_count:ids.filter(id=>accessTerm(id,state)?.source==="policy_activation").length};
+}
+async function configureAccessExpiry(req,res){
+  if(!syncAuth(req))return res.status(401).json({ok:false});
+  try{
+    const state=await loadAccessState({strict:true});
+    if(state.accessPolicy&&!Number.isFinite(Date.parse(state.accessPolicy.activated_at)))throw new Error("invalid_policy");
+    let changed=false;
+    if(!state.accessPolicy){state.accessPolicy={version:1,activated_at:new Date().toISOString()};changed=true;}
+    for(const uid of state.approved.filter(id=>!isBotAdmin(id,state))){
+      if(!Object.hasOwn(state.accessTerms,uid)){
+        const term=accessTerm(uid,state);
+        if(!term)throw new Error("invalid_term");
+        state.accessTerms[uid]=term;changed=true;
+      }
+    }
+    const apply=req.body?.apply===true;
+    if(apply&&changed)await saveAccessState(state);
+    // Never broadcast activation, expiry or renewal to affected users.
+    return res.status(200).json({ok:true,applied:apply,changed:apply&&changed,
+      activated_at:state.accessPolicy.activated_at,...accessExpirySummary(state)});
+  }catch(error){return res.status(error instanceof BlobPreconditionFailedError?409:503).json({ok:false,error:"Access expiry configuration unavailable"});}
+}
+async function notifyCommandActivity(update,message,command,state){
+  const uid=String(message?.from?.id||update.callback_query?.from?.id||"");
+  // Real Telegram updates carry this stable ID. Never log arbitrary free text,
+  // price replies, command arguments or unauthenticated/group requests.
+  if(state._unavailable||isBotAdmin(uid,state)||!Number.isSafeInteger(update.update_id)||update.update_id<0)return;
+  const match=String(command).match(/^\/[a-z_]{1,64}(?:@[a-z0-9_]+)?(?=\s|$)/i);
+  if(!match)return;
+  const mode=update.callback_query?String(command).split(" ")[1]:null;
+  const label=match[0]+(["text","image","menu"].includes(mode)?" • "+({text:"گزارش متنی",image:"گزارش تصویری",menu:"بازگشت به منو"})[mode]:"");
+  const user=message?.from||update.callback_query?.from||state.users[uid]||{};
+  const name=[user.first_name,user.last_name].filter(Boolean).join(" ").slice(0,100)||"کاربر";
+  const text="<b>فعالیت کاربر</b>\n"+escXml(name)+(user.username?" (@"+escXml(String(user.username).slice(0,32))+")":"")+
+    "\nشناسه: "+escXml(uid)+"\nدستور درخواستی: <b>"+escXml(label)+"</b>\nوضعیت دسترسی: "+
+    (hasBotAccess(uid,state)?roleLabel(uid,state):"غیرفعال")+"\nزمان: "+boldPortfolioTime(new Date());
+  const recipients=[...new Set([...adminUserIds(),...state.delegatedAdmins])];
+  await Promise.allSettled(recipients.map(async recipient=>{
+    const key="portfolio/command-activity/"+update.update_id+"/"+recipient+".json";
+    const attempt=crypto.randomUUID();
+    try{
+      const previous=await get(key,ACCESS_READ_OPTIONS);
+      let record=null;
+      if(previous){
+        record=await streamJson(previous.stream);
+        if(record.status==="delivered"||record.status==="sending"&&record.lease_until>Date.now())return;
+        if(!previous.blob?.etag||previous.blob.etag.startsWith("W/"))return;
+      }
+      await put(key,JSON.stringify({attempt,status:"sending",lease_until:Date.now()+30000}),{
+        access:"private",addRandomSuffix:false,contentType:"application/json",
+        ...(previous?{ifMatch:previous.blob.etag}:{allowOverwrite:false})});
+      let delivered=false;
+      for(let retry=0;retry<2&&!delivered;retry++){
+        if(!isBotAdmin(recipient,await loadAccessState({strict:true})))break;
+        delivered=await deliverTelegram(recipient,"sendMessage",{method:"POST",signal:AbortSignal.timeout(6000),
+          headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:Number(recipient),text,parse_mode:"HTML"})},{trackReplies:false});
+      }
+      const latest=await get(key,ACCESS_READ_OPTIONS);
+      const current=latest?await streamJson(latest.stream):null;
+      if(current?.attempt===attempt&&latest.blob?.etag&&!latest.blob.etag.startsWith("W/")){
+        await put(key,JSON.stringify({attempt,status:delivered?"delivered":"failed"}),{
+          access:"private",addRandomSuffix:false,contentType:"application/json",ifMatch:latest.blob.etag});
+      }
+    }catch(_){console.warn("Command activity notification unavailable");}
+  }));
+}
+async function streamJson(stream){
+  const reader=stream.getReader(),chunks=[];
+  while(true){const part=await reader.read();if(part.done)break;chunks.push(Buffer.from(part.value));}
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
 async function requestAccess(uid,user){
   const state=await loadAccessState({strict:true});
   const adminIds=[...new Set([...adminUserIds(),...state.delegatedAdmins])];
   if(!adminIds.length)return "Access requests are not configured yet. Your Telegram user ID is "+uid+". Ask the bot owner to configure admin access.";
-  if((state.approved||[]).map(String).includes(uid)||adminIds.includes(uid))return "You are already authorised. Send /help to see available commands.";
+  if(hasBotAccess(uid,state))return "You are already authorised. Send /help to see available commands.";
   state.pending=state.pending||{};
   if(state.pending[uid])return "Your access request is already pending. The bot admin has been notified.";
   state.pending[uid]={id:uid,first_name:String(user.first_name||""),last_name:String(user.last_name||""),username:String(user.username||""),requestedAt:new Date().toISOString()};
@@ -554,6 +671,7 @@ async function handleAccessCallback(callback){
   let changed=false;
   try{
     const state=await loadAccessState({strict:true});
+    if(isExpiredMember(uid,state)){await answerCallback(callback.id,"");return;}
     if(!isBotAdmin(uid,state)){await answerCallback(callback.id,"دسترسی مدیریت ندارید.");return;}
     const data=String(callback.data||"");
     const previousPanel=callbackPanelToReplace(callback);
@@ -578,8 +696,13 @@ async function handleAccessCallback(callback){
       await sendTelegramWithKeyboard(chat.id,result.ok?"آزمون ذخیره‌سازی موفق بود: ثبت، بازخوانی و جلوگیری از بازنویسی هم‌زمان تأیید شد.":
         "آزمون ذخیره‌سازی موفق نبود. هیچ مجوز کاربری یا اطلاعات پرتفوی تغییر نکرد.",[adminBack()],{previousPanel});return;
     }
-    const page=data.match(/^admin:(home|users|pending|admins|status|audit)(?::(\d+))?$/);
+    const page=data.match(/^admin:(home|users|pending|admins|status|audit|expiry)(?::(\d+))?$/);
     if(page){await answerCallback(callback.id,"");await showAdminDashboard(chat.id,uid,page[1],Number(page[2]||0),previousPanel);return;}
+    const extension=data.match(/^admin:extend:([1-9]\d*):(1|3|7)$/);
+    if(extension){
+      await extendUserAccess(uid,extension[1],Number(extension[2]),state,String(callback.id||""));changed=true;
+      await answerCallback(callback.id,"مدت دسترسی تمدید شد.");await showAdminDashboard(chat.id,uid,"expiry",0,previousPanel);return;
+    }
     const action=data.match(/^admin:(approve_guest|approve_admin|approve_advisor|approve|reject|revoke|confirm_revoke|grant|demote|advisor|guest):([1-9]\d*)$/);
     if(!action){await answerCallback(callback.id,"گزینه نامعتبر.");return;}
     const [_,operation,target]=action;
@@ -634,13 +757,14 @@ function validateAccessChange(actor,target,action,state){
     if(!state.approved.includes(target)&&!state.pending[target])throw new Error("unknown_user");
     if(!isOwner(actor)&&state.delegatedAdmins.includes(target))throw new Error("owner_permission_required");
   }else if(action==="reject"){
-    if(!state.pending[target]||state.approved.includes(target))throw new Error("request_not_pending");
+    if(!state.pending[target]||hasBotAccess(target,state))throw new Error("request_not_pending");
   }else if(action==="approve_guest"||action==="approve_admin"||action==="approve_advisor"){
-    if(!state.pending[target]||state.approved.includes(target))throw new Error("request_not_pending");
+    if(!state.pending[target]||hasBotAccess(target,state))throw new Error("request_not_pending");
   }else throw new Error("unknown_action");
 }
 async function changeAccess(actor,target,action,state){
   validateAccessChange(actor,target,action,state);
+  const wasAdmin=isBotAdmin(target,state),at=new Date().toISOString();
   if(["grant","demote","advisor","guest","revoke"].includes(action))state.financialAdvisors=state.financialAdvisors.filter(id=>id!==target);
   if(action==="advisor"){
     state.delegatedAdmins=state.delegatedAdmins.filter(id=>id!==target);
@@ -651,6 +775,7 @@ async function changeAccess(actor,target,action,state){
   else if(action==="approve_guest"||action==="approve_admin"||action==="approve_advisor"){
     state.approved=[...new Set([...state.approved,target])];
     if(state.pending[target])state.users[target]=state.pending[target];
+    state.users[target]={...state.users[target],approvedAt:at};
     delete state.pending[target];
     if(action==="approve_advisor")state.financialAdvisors.push(target);
     if(action==="approve_admin")state.delegatedAdmins=[...new Set([...state.delegatedAdmins,target])];
@@ -658,10 +783,15 @@ async function changeAccess(actor,target,action,state){
     if(action==="revoke"){
       state.approved=state.approved.filter(x=>x!==target);
       state.delegatedAdmins=state.delegatedAdmins.filter(x=>x!==target);
+      delete state.accessTerms[target];
     }
     delete state.pending[target];
   }
-  state.audit.push({at:new Date().toISOString(),actor_id:actor,target_id:target,action});
+  if((APPROVAL_ACTIONS.has(action)||wasAdmin)&&!isBotAdmin(target,state)&&action!=="revoke"){
+    state.accessTerms[target]={approved_at:at,expires_at:new Date(Date.parse(at)+ACCESS_WEEK_MS).toISOString(),
+      source:wasAdmin?"admin_demotion":"approval"};
+  }
+  state.audit.push({at,actor_id:actor,target_id:target,action});
   state.audit=state.audit.slice(-100);
   await saveAccessState(state);
   if(["revoke","demote","guest","advisor"].includes(action)){
@@ -676,6 +806,17 @@ async function changeAccess(actor,target,action,state){
     demote:"نقش شما به مهمان تغییر کرد؛ فقط نمودار درصد ترکیب دارایی در دسترس است."};
   await sendTelegram(Number(target),notices[action],{menu:["grant","approve_guest","approve_admin","approve_advisor","demote","advisor","guest"].includes(action),
     removeMenu:action==="revoke"||action==="reject",audience:"guest"});
+}
+async function extendUserAccess(actor,target,days,state,requestId){
+  if(!isBotAdmin(actor,state)||!state.approved.includes(target)||isBotAdmin(target,state)||![1,3,7].includes(days))throw new Error("access_change_denied");
+  if(requestId&&state.audit.some(event=>event.request_id===requestId&&event.actor_id===actor))return;
+  const now=Date.now(),old=accessTerm(target,state);
+  const expires=Math.max(now,Date.parse(old?.expires_at)||0)+days*ACCESS_DAY_MS;
+  state.accessTerms[target]={approved_at:old?.approved_at||new Date(now).toISOString(),expires_at:new Date(expires).toISOString(),source:"admin_extension"};
+  state.audit.push({at:new Date(now).toISOString(),actor_id:actor,target_id:target,action:"extend_"+days,request_id:requestId});
+  state.audit=state.audit.slice(-100);
+  await saveAccessState(state);
+  // Renewal is visible in the admin panel only, with no message to the user.
 }
 async function showApprovalRoles(chatId,target,previousPanel=null){
   const state=await loadAccessState({strict:true});
@@ -707,10 +848,12 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
     const buttons=[[{text:"کاربران مجاز",callback_data:"admin:users:0"},{text:"درخواست‌های دسترسی",callback_data:"admin:pending:0"}],
       [{text:"وضعیت سامانه",callback_data:"admin:status"},{text:"رویدادهای مدیریت",callback_data:"admin:audit"}]];
     buttons.push([{text:"مدیریت نقش‌ها",callback_data:"admin:admins:0"}]);
+    buttons.push([{text:"پایش زمان دسترسی",callback_data:"admin:expiry:0"}]);
     await sendTelegramWithKeyboard(chatId,"پنل مدیریت • "+(owner?"مالک":"مدیر منتخب")+
-      "\n\nکاربران مجاز: "+new Set([...state.approved,...adminUserIds()]).size+
+      "\n\nکاربران مجاز: "+new Set([...state.approved.filter(id=>hasBotAccess(id,state)),...adminUserIds()]).size+
       "\nدرخواست‌های در انتظار: "+Object.keys(state.pending).length+
-      "\nمشاوران مالی: "+state.financialAdvisors.length+"\nمدیران منتخب: "+state.delegatedAdmins.length,buttons,{previousPanel});return;
+      "\nمشاوران مالی: "+state.financialAdvisors.filter(id=>hasBotAccess(id,state)).length+"\nمدیران منتخب: "+state.delegatedAdmins.length+
+      "\nدسترسی‌های منقضی: "+accessExpirySummary(state).expired_non_admin_count,buttons,{previousPanel});return;
   }
   if(section==="status"){
     const snapshot=await safeSnapshot(),status=quantitySnapshotStatus(snapshot);
@@ -730,7 +873,7 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
       [{text:"بررسی دوباره",callback_data:"admin:status"},{text:"آزمون ذخیره‌سازی",callback_data:"admin:storage_check"}],adminBack()],{previousPanel,html:true});return;
   }
   if(section==="audit"){
-    const labels={approve_advisor:"تأیید مشاور مالی",advisor:"تغییر به مشاور مالی",guest:"تغییر به مهمان",approve:"تأیید دسترسی",approve_guest:"تأیید مهمان",approve_admin:"تأیید مدیر",reject:"رد درخواست",revoke:"لغو دسترسی",grant:"ارتقا به مدیر",demote:"تغییر نقش به مهمان"};
+    const labels={extend_1:"تمدید یک‌روزه",extend_3:"تمدید سه‌روزه",extend_7:"تمدید یک‌هفته‌ای",approve_advisor:"تأیید مشاور مالی",advisor:"تغییر به مشاور مالی",guest:"تغییر به مهمان",approve:"تأیید دسترسی",approve_guest:"تأیید مهمان",approve_admin:"تأیید مدیر",reject:"رد درخواست",revoke:"لغو دسترسی",grant:"ارتقا به مدیر",demote:"تغییر نقش به مهمان"};
     const lines=state.audit.slice(-10).reverse().map(event=>
       boldPortfolioTime(event.at)+" • "+(labels[event.action]||"تغییر دسترسی")+
       "\nکاربر: "+escXml(event.target_id)+" • مدیر: "+escXml(event.actor_id));
@@ -741,11 +884,19 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
   page=Math.max(0,Math.min(Math.floor(page),Math.max(0,Math.ceil(ids.length/ADMIN_PAGE_SIZE)-1)));
   const selected=ids.slice(page*ADMIN_PAGE_SIZE,(page+1)*ADMIN_PAGE_SIZE);
   const names=await Promise.all(selected.map(id=>memberLabel(id,state)));
-  const title=section==="pending"?"درخواست‌های دسترسی":section==="admins"?"مدیریت نقش‌ها":"کاربران مجاز";
+  const title=section==="expiry"?"پایش زمان دسترسی":section==="pending"?"درخواست‌های دسترسی":section==="admins"?"مدیریت نقش‌ها":"کاربران مجاز";
   const lines=[],keyboard=[];
   selected.forEach((id,i)=>{
     const role=roleLabel(id,state);
-    lines.push((i+1)+". "+names[i]+(section==="pending"?"":" • "+role));
+    const label=(i+1)+". "+names[i]+(section==="pending"?"":" • "+role+(!hasBotAccess(id,state)?" • دسترسی غیرفعال":""));
+    if(section==="expiry"){
+      const term=accessTerm(id,state),remaining=Date.parse(term?.expires_at)-Date.now();
+      const status=isBotAdmin(id,state)?"بدون محدودیت زمانی":remaining>0?
+        "زمان باقی‌مانده: "+reportNumber(Math.floor(remaining/ACCESS_DAY_MS))+" روز و "+reportNumber(Math.floor(remaining/(60*60*1000))%24)+" ساعت و "+reportNumber(Math.floor(remaining/60000)%60)+" دقیقه":
+        term?"منقضی • دسترسی غیرفعال":"دسترسی غیرفعال • تاریخ تأیید ثبت نشده";
+      lines.push(escXml(label)+"\n"+status+(!isBotAdmin(id,state)&&term?"\nپایان دسترسی: "+boldPortfolioTime(term.expires_at):""));
+      if(!isBotAdmin(id,state))keyboard.push([1,3,7].map(days=>({text:"تمدید "+reportNumber(i+1)+" • "+(days===7?"یک هفته":reportNumber(days)+" روز"),callback_data:"admin:extend:"+id+":"+days})));
+    }else lines.push(label);
     if(section==="pending")keyboard.push(
       [{text:"تأیید مهمان "+(i+1),callback_data:"admin:approve_guest:"+id},{text:"تأیید مدیر "+(i+1),callback_data:"admin:approve_admin:"+id}],
       [{text:"تأیید مشاور مالی "+(i+1),callback_data:"admin:approve_advisor:"+id},{text:"رد "+(i+1),callback_data:"admin:reject:"+id}]);
@@ -756,7 +907,7 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
       if(role!=="مهمان")buttons.push({text:"تغییر به مهمان "+(i+1),callback_data:"admin:"+(role==="مدیر"?"demote":"guest")+":"+id});
       keyboard.push(buttons);
     }
-    else if(!isOwner(id)&&(owner||!state.delegatedAdmins.includes(id)))keyboard.push([{text:"لغو دسترسی "+(i+1),callback_data:"admin:revoke:"+id}]);
+    else if(section!=="expiry"&&!isOwner(id)&&(owner||!state.delegatedAdmins.includes(id)))keyboard.push([{text:"لغو دسترسی "+(i+1),callback_data:"admin:revoke:"+id}]);
   });
   const navigation=[];
   if(page>0)navigation.push({text:"صفحه قبل",callback_data:"admin:"+section+":"+(page-1)});
@@ -764,7 +915,7 @@ async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel
   if(navigation.length)keyboard.push(navigation);
   keyboard.push(adminBack());
   await sendTelegramWithKeyboard(chatId,title+"\nصفحه "+(page+1)+"\n\n"+(lines.join("\n\n")||"موردی وجود ندارد.")+
-    (section==="admins"?"\n\nمهمان فقط نمودار درصدی را می‌بیند؛ مشاور مالی فقط گزارش‌ها را می‌بیند. نقش مالک و نقش خودتان قابل تغییر نیست.":""),keyboard,{previousPanel});
+    (section==="admins"?"\n\nمهمان فقط نمودار درصدی را می‌بیند؛ مشاور مالی فقط گزارش‌ها را می‌بیند. نقش مالک و نقش خودتان قابل تغییر نیست.":""),keyboard,{previousPanel,html:section==="expiry"});
 }
 function callbackPanelToReplace(callback){
   const message=callback.message;
@@ -1696,7 +1847,7 @@ const MENU_COMMANDS=new Map([...BUTTON_MENU.flat().map(button=>[button.text,butt
   ["/allocation","/latest_allocation"],["/refresh","/latest_allocation"]]);
 async function portfolioKeyboard(chatId){
   const state=await loadAccessState();
-  if(!isOwner(String(chatId))&&!state.approved.includes(String(chatId)))return null;
+  if(!hasBotAccess(String(chatId),state))return null;
   const admin=isBotAdmin(String(chatId),state);
   const reports=canReadReports(String(chatId),state);
   const keyboard=reports?BUTTON_MENU.map(row=>row.filter(button=>admin||button.command!=="/status").map(button=>({text:button.text}))).filter(row=>row.length):[[{text:"نمودار ترکیب دارایی"}]];
@@ -1752,28 +1903,34 @@ async function replaceMainMenuAnchor(chatId,messageId){
       Date.now()-Date.parse(previous.created_at)<48*60*60*1000)await deleteTemporaryReply(chatId,previous.message_id);
   }catch(_){console.warn("Main menu message tracking unavailable");}
 }
-async function deliverTelegram(chatId,method,options,{temporary=false,menuAnchor=false}={}){
+async function deliverTelegram(chatId,method,options,{temporary=false,menuAnchor=false,trackReplies=true}={}){
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token)return false;
   try{
     const r=await fetch("https://api.telegram.org/bot"+token+"/"+method,options);
     const result=await r.json();
     if(!r.ok||!result.ok){console.warn("Telegram delivery failed",method,r.status);return false;}
-    await cleanupTemporaryReplies(chatId,result.result?.message_id,temporary);
-    if(menuAnchor)await replaceMainMenuAnchor(chatId,result.result?.message_id);
+    if(trackReplies){
+      await cleanupTemporaryReplies(chatId,result.result?.message_id,temporary);
+      if(menuAnchor)await replaceMainMenuAnchor(chatId,result.result?.message_id);
+    }
     return true;
   }catch(_){console.warn("Telegram delivery unavailable",method);return false;}
 }
 
 async function sendTelegram(chatId,text,{menu=false,temporary=false,removeMenu=false,menuAnchor=false,audience="report"}={}){
+  if(!String(text||"").trim())return false;
   const token=process.env.TELEGRAM_BOT_TOKEN;
   if(!token){console.error("TELEGRAM_BOT_TOKEN is not configured");return;}
 
   const send=async msg=>{
     const markup=menu?await portfolioKeyboard(chatId):removeMenu?{remove_keyboard:true}:null;
     if(menu&&!markup)return false;
-    if(menu&&audience!=="guest"){
-      try{const access=await loadAccessState({strict:true});if(!(audience==="admin"?isBotAdmin(String(chatId),access):canReadReports(String(chatId),access)))return false;}catch(_){return false;}
+    if(menu){
+      try{
+        const access=await loadAccessState({strict:true});
+        if(!hasBotAccess(String(chatId),access)||audience!=="guest"&&!(audience==="admin"?isBotAdmin(String(chatId),access):canReadReports(String(chatId),access)))return false;
+      }catch(_){return false;}
     }
     return deliverTelegram(chatId,"sendMessage",{
       method:"POST",
@@ -1826,12 +1983,10 @@ async function sendTelegramPhoto(chatId,png,caption,{guestSafe=false,audience="r
   const form=new FormData();
   const keyboard=await portfolioKeyboard(chatId);
   if(!keyboard)return false;
-  if(!guestSafe||audience==="admin"){
-    try{
-      const access=await loadAccessState({strict:true});
-      if(!(audience==="admin"?isBotAdmin(String(chatId),access):canReadReports(String(chatId),access)))return false;
-    }catch(_){return false;}
-  }
+  try{
+    const access=await loadAccessState({strict:true});
+    if(!hasBotAccess(String(chatId),access)||audience==="admin"&&!isBotAdmin(String(chatId),access)||!guestSafe&&audience!=="admin"&&!canReadReports(String(chatId),access))return false;
+  }catch(_){return false;}
   form.append("chat_id",String(chatId));
   form.append("photo",new Blob([png],{type:"image/png"}),"portfolio-report.png");
   form.append("reply_markup",JSON.stringify(keyboard));

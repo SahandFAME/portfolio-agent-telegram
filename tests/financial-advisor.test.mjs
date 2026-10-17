@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {app,startLatest} from './helpers/app-fixture.mjs';
 
+const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
+
 const KEY='portfolio/access-control.json',headers={'x-telegram-bot-api-secret-token':'fixture-webhook'},auth={'x-portfolio-sync-secret':'fixture-secondary'};
-const state=()=>({approved:['2','3','4'],delegatedAdmins:['3'],financialAdvisors:['2'],pending:{'5':{id:'5',first_name:'Fixture Applicant'}},users:{},audit:[]});
+const state=()=>({accessPolicy:{version:1,activated_at:ACCESS_POLICY_STARTED_AT},approved:['2','3','4'],delegatedAdmins:['3'],financialAdvisors:['2'],pending:{'5':{id:'5',first_name:'Fixture Applicant'}},users:{},audit:[]});
 const messages=a=>a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body));
 const request=(a,text,id=2)=>a.request('POST',{}, {message:{chat:{id,type:'private'},from:{id},text}},headers);
 const click=(a,data,id=3,chat=id,type='private')=>a.request('POST',{}, {callback_query:{id:'fixture',from:{id},data,message:{chat:{id:chat,type}}}},headers);
