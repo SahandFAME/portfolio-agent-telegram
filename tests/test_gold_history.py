@@ -100,6 +100,7 @@ class HistoryExcelTests(unittest.TestCase):
         data=history.export_excel({'weeks':[row('2026-10-16'),row('2026-10-23',False)]},{'Stock':'سهام','Dust':'رمزارز'})
         book=load_workbook(BytesIO(data),data_only=False)
         self.assertEqual(book.sheetnames,['ارزش هفتگی','دارایی‌ها','ترکیب دارایی','موارد نیازمند بررسی','خلاصه تحلیل'])
+        self.assertEqual(book.properties.identifier,'portfolio-agent:18k-gold-history:v1')
         self.assertEqual(book['ارزش هفتگی']['B2'].value,10);self.assertIsNone(book['ارزش هفتگی']['B3'].value)
         self.assertEqual(book['ارزش هفتگی']._charts[0].display_blanks,'gap');self.assertTrue(book['ارزش هفتگی']['I2'].font.bold)
         self.assertEqual(book['دارایی‌ها'].max_row,3);self.assertTrue(book['دارایی‌ها']['G2'].value.startswith("'="))

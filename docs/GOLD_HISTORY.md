@@ -119,3 +119,47 @@ coverage and request dated corrections/verified historical instrument prices
 when needed. Do not claim the requested year is fully reconstructed while gaps
 remain. Public workflow diagnostics are aggregate-only; detailed records belong
 in private Blob and the admin Excel file.
+
+## Owner-selected OneDrive destination (2026-10-25)
+
+The owner requested the generated workbook in **اسناد** in the same personal
+OneDrive account. Publish only **اسناد/Portfolio-18K-Gold-History.xlsx**. The
+historical data gaps remain; choosing a destination does not validate missing
+weeks. Private Blob remains the report source and admin download mechanism.
+
+`onedrive-history.yml` runs after a successful main-branch history export or
+Microsoft consent, and supports manual dispatch. Until separate upload consent
+exists its upload steps explicitly skip. No OneDrive upload is proven by a
+successful skipped job. Once configured, the uploader checks the exact drive,
+literal folder name, parent identifiers and report filename, then verifies a
+downloaded SHA-256 against the current private export. It refuses an unrelated
+workbook collision. Generated reports carry the document identifier
+`portfolio-agent:18k-gold-history:v1`. Existing report updates use `If-Match`;
+new uploads request conflict rejection. No write retries follow ambiguous upload
+failures. Re-running verifies a completed identical upload without rewriting it.
+Revision changes fail rather than claiming an obsolete report is current.
+
+The original `MS_GRAPH_REFRESH_TOKEN` remains dedicated to read-only source
+retrieval and explicitly requests `Files.Read` at refresh, including after a
+second consent for the same app. Separate delegated `Files.ReadWrite` consent
+saves **MS_GRAPH_EXPORT_REFRESH_TOKEN** through the existing secret-writer PAT.
+Microsoft's personal-account permission covers the account's files; code limits
+the exporter to the report in اسناد. It is not a Microsoft-enforced folder-only
+permission. App-folder permission cannot target an arbitrary existing folder.
+No anonymous share, Trading Journal write, source-cache change or replacement
+of the existing sync credential is authorized by this export.
+
+For sign-in, Codex generates a temporary RSA public/private key pair outside
+the checkout, dispatches `microsoft-consent.yml` with `purpose=report_export`
+and the base64-encoded **public** PEM in `signin_public_key`. The workflow
+publishes RSA-OAEP/SHA-256 encrypted short-code instructions in a check;
+Codex decrypts them locally and gives the owner Microsoft's official sign-in
+address and code. Neither the raw user code, OAuth device code nor tokens enter
+public export-consent logs/checks. Keep the private key local with mode 0600 and
+remove it after consent/expiry. The owner must complete Microsoft consent;
+source access alone cannot grant this write permission. Refresh-token rotation
+uses the separate secret and report-export concurrency group.
+
+Verification requires an actual configured upload and hash readback, not just
+unit tests, consent completion or workflow deployment. Existing private report
+generation continues when OneDrive upload is awaiting consent or fails.

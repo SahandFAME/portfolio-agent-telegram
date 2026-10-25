@@ -70,3 +70,11 @@ Unreconciled/ambiguous transactions remain gaps. Keep the Trading Journal read-o
 write only the separate private report workbook. Owners/admins/advisors may view
 the chart; Excel downloads and weekly price entry remain admin-only. Public
 workflow output must contain aggregate diagnostics only. See docs/GOLD_HISTORY.md.
+
+The owner-selected report destination is OneDrive اسناد, filename
+Portfolio-18K-Gold-History.xlsx. Only the separate report exporter may write it,
+using MS_GRAPH_EXPORT_REFRESH_TOKEN. Keep source refreshes explicitly Files.Read;
+never broaden the source workbook worker's credential or write Trading Journal.
+Require report/folder identity and downloaded hash checks. Microsoft consent is
+still required if the separate write token is absent; do not claim skipped uploads
+are verified. Keep sign-in codes private even though the repository is public.
