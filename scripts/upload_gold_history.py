@@ -70,7 +70,7 @@ def validate_report(data):
 
 def check_item(item,folder_id):
     parent=item.get('parentReference',{})
-    if not item.get('id') or item['id'].lower()==SOURCE_ITEM.lower() or item.get('name')!=FILENAME or not isinstance(item.get('file'),dict) or not item.get('eTag') or parent.get('id')!=folder_id or not same_drive(parent.get('driveId')):
+    if not item.get('id') or item['id'].lower() in (SOURCE_ITEM.lower(),'0'+SOURCE_ITEM.lower()) or item.get('name')!=FILENAME or not isinstance(item.get('file'),dict) or not item.get('eTag') or parent.get('id')!=folder_id or not same_drive(parent.get('driveId')):
         raise SyncError('report_destination_not_verified')
 
 

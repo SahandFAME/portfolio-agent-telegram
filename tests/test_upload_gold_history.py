@@ -77,8 +77,9 @@ class ReportUploadTests(unittest.TestCase):
             self.run_upload([{'id':upload.DRIVE},self.folder,self.item,self.metadata],workbook(marker='unrelated workbook'))
 
     def test_source_item_id_is_always_rejected_even_if_renamed(self):
-        with self.assertRaisesRegex(upload.SyncError,'report_destination_not_verified'):
-            self.run_upload([{'id':upload.DRIVE},self.folder,{**self.item,'id':upload.SOURCE_ITEM}])
+        for source in [upload.SOURCE_ITEM,'0'+upload.SOURCE_ITEM]:
+            with self.assertRaisesRegex(upload.SyncError,'report_destination_not_verified'):
+                self.run_upload([{'id':upload.DRIVE},self.folder,{**self.item,'id':source}])
 
     def test_hash_mismatch_is_not_reported_as_success(self):
         with self.assertRaisesRegex(upload.SyncError,'onedrive_report_readback_mismatch'):
