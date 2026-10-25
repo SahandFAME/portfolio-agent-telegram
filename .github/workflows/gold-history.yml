@@ -12,6 +12,7 @@ on:
         default: export
 permissions:
   contents: read
+  checks: write
 concurrency:
   group: ${{ inputs.action == 'export' && 'portfolio-gold-export' || 'microsoft-consent' }}
   cancel-in-progress: false
@@ -40,4 +41,22 @@ jobs:
           MS_GRAPH_REFRESH_TOKEN: ${{ secrets.MS_GRAPH_REFRESH_TOKEN }}
           GH_TOKEN: ${{ secrets.PORTFOLIO_SECRET_WRITER_TOKEN }}
           PORTFOLIO_SYNC_SECRET_AGENT: ${{ secrets.PORTFOLIO_SYNC_SECRET_AGENT }}
-        run: python scripts/gold_history.py
+        run: python scripts/gold_history.py > gold-history-result.json
+      - name: Publish aggregate history run outcome
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PYTHON'
+          import json,os,subprocess
+          from pathlib import Path
+          path=Path('gold-history-result.json')
+          result=json.loads(path.read_text()) if path.exists() and path.stat().st_size else {'ok':False,'error':'history_worker_not_completed'}
+          allowed={'ok','error','weeks','complete_weeks','observations','complete_observations','excel_stored','unmapped_trade_tables','unreconciled_assets'}
+          result={k:v for k,v in result.items() if k in allowed}
+          body={'name':'Portfolio gold history result','head_sha':os.environ['GITHUB_SHA'],'status':'completed',
+            'conclusion':'success' if result.get('ok') else 'failure',
+            'output':{'title':'History processing outcome (coverage is not a claim of complete valuation)','summary':json.dumps(result)}}
+          run=subprocess.run(['gh','api','--method','POST',f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs",'--input','-'],input=json.dumps(body),capture_output=True,text=True)
+          if run.returncode:raise SystemExit('Unable to publish aggregate history outcome')
+          PYTHON

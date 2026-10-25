@@ -83,11 +83,11 @@ test('only owners/admins/advisors can request a real rendered history image; gue
 });
 
 test('website-first weekly capture asks admins for missing EcoCoach price and an authenticated reply completes it',async()=>{
-  const now=Date.parse('2026-10-25T10:00:00Z'),a=await app({now:()=>now});
+  const now=Date.parse('2026-10-24T00:00:00Z'),a=await app({now:()=>now});
   const assets={...a.assets,'بلک راک':15};
-  const payload={assets,workbook_updated_at:'2026-10-24T12:00:00Z',source_checked_at:new Date(now).toISOString(),workbook_sha256:'b'.repeat(64),bootstrap:true,notify:true};
+  const payload={assets,workbook_updated_at:'2026-10-23T12:00:00Z',source_checked_at:new Date(now).toISOString(),workbook_sha256:'b'.repeat(64),bootstrap:false,notify:true};
   const result=await a.request('POST',{sync:'gold-observation'},payload,auth);assert.equal(result.code,200);
-  const history=a.store.get(KEY),week=history.weeks[0];assert.equal(week.status,'incomplete');assert.equal(week.mode,'baseline');assert.equal(week.total_rial,null);
+  const history=a.store.get(KEY),week=history.weeks[0];assert.equal(week.status,'incomplete');assert.equal(week.mode,'live');assert.equal(week.total_rial,null);
   const prompt=messages(a).find(x=>x.reply_markup?.force_reply);assert.ok(prompt);assert.equal(prompt.chat_id,1);
   assert.ok(a.marketCalls.includes('https://ecocoach.net/blackrock-index'));
   const promptKey=[...a.store.keys()].find(x=>x.startsWith('portfolio/gold-history/prompts/1/'));
@@ -103,7 +103,7 @@ test('website quote suppresses the manual weekly request and no guest fixed fall
   const html=`<h1>صندوق شاخصی بلک راک اکوکوچ</h1><table><caption>صندوق شاخصی بلک راک</caption><tr><th>قیمت هر واحد</th><td>1050000 تومان</td></tr><tr><th>تاریخ به‌روزرسانی قیمت</th><td><time datetime="2026-10-25T09:00:00Z">now</time></td></tr></table>`;
   const a=await app({now:()=>now,ecoCoachHtml:html});
   const result=await a.request('POST',{sync:'gold-observation'},{assets:{...a.assets,'بلک راک':15},source_checked_at:new Date(now).toISOString(),workbook_updated_at:'2026-10-24T12:00:00Z',workbook_sha256:'b'.repeat(64),bootstrap:true,notify:true},auth);
-  assert.equal(result.code,200);assert.equal(a.store.get(KEY).weeks[0].status,'complete');assert.equal(a.sends.length,0);
+  assert.equal(result.code,200);assert.equal(a.store.get(KEY).weeks[0].status,'complete');assert.equal(a.sends.length,0);assert.equal(result.data.complete_weeks,0);assert.equal(result.data.complete_observations,1);
   assert.equal(a.store.get(KEY).weeks[0].quotes['بلک راک'].source,'EcoCoach');
 });
 
@@ -135,4 +135,12 @@ test('demotion while rendering or downloading prevents history delivery beyond t
   const row={...input(),quantities};for(const [asset,qty] of Object.entries(a.ns.MANUAL))quantities[asset]=qty;
   await a.request('POST',{sync:'gold-history'},{revision:null,weeks:[row]},auth);demote=true;
   await request(a,'/gold_history',2);assert.equal(a.sends.some(x=>x.url.endsWith('/sendPhoto')),false);
+});
+
+
+test('a provisional bootstrap never broadcasts weekly price requests, even if its caller asks to notify',async()=>{
+  const now=Date.parse('2026-10-25T10:00:00Z'),a=await app({now:()=>now});
+  const result=await a.request('POST',{sync:'gold-observation'},{assets:{...a.assets,'بلک راک':15},
+    source_checked_at:new Date(now).toISOString(),workbook_updated_at:'2026-10-24T12:00:00Z',workbook_sha256:'b'.repeat(64),bootstrap:true,notify:true},auth);
+  assert.equal(result.code,200);assert.equal(a.store.get(KEY).weeks[0].mode,'baseline');assert.equal(a.sends.length,0);
 });

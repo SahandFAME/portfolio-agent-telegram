@@ -4,6 +4,7 @@ The source XLSM is never saved. Unreconciled/undated trades are not guessed.
 No holdings, quotes, tokens or raw service responses are printed.
 """
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta, timezone
 from io import BytesIO
 import base64
@@ -12,7 +13,8 @@ import json
 import math
 import os
 import re
-from urllib.parse import quote
+from urllib.parse import quote,urlsplit
+from urllib import request
 from zoneinfo import ZoneInfo
 
 import jdatetime
@@ -117,12 +119,28 @@ def api(query,body=None):
 def norm(text):return re.sub(r'[\s\u200c\u200d]','',text.translate(str.maketrans('كيى','کیی')))
 
 
+def market_json(url):
+    if urlsplit(url).scheme!='https' or urlsplit(url).hostname not in {'api.tgju.org','cdn.tsetmc.com','api.coingecko.com'}:
+        raise SyncError('unapproved_history_provider')
+    class NoRedirect(request.HTTPRedirectHandler):
+        def redirect_request(self,*args):return None
+    try:
+        opener=request.build_opener(NoRedirect)
+        with opener.open(request.Request(url,headers={'User-Agent':'Mozilla/5.0'}),timeout=8) as response:
+            content=response.read(5*1024*1024+1)
+        if len(content)>5*1024*1024:raise ValueError()
+        data=json.loads(content)
+        if not isinstance(data,dict):raise ValueError()
+        return data
+    except Exception:raise SyncError('historical_provider_unavailable') from None
+
+
 def tgju_history(slug):
     url='https://api.tgju.org/v1/market/indicator/summary-table-data/'+quote(slug,safe='')
-    first=json_request(url+'?lang=fa&start=0&length=1&order_dir=asc')
+    first=market_json(url+'?lang=fa&start=0&length=1&order_dir=asc')
     count=first.get('recordsTotal')
     if not isinstance(count,int) or count<0:raise SyncError('historical_price_schema')
-    data=json_request(url+f'?lang=fa&start={max(0,count-650)}&length=650&order_dir=asc')
+    data=market_json(url+f'?lang=fa&start={max(0,count-650)}&length=650&order_dir=asc')
     result=[]
     for row in data.get('data',[]):
         if not isinstance(row,list) or len(row)<8:raise SyncError('historical_price_schema')
@@ -133,11 +151,11 @@ def tgju_history(slug):
 
 
 def listed_history(asset):
-    data=json_request('https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/'+quote(asset,safe=''))
+    data=market_json('https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/'+quote(asset,safe=''))
     matches=[r for r in data.get('instrumentSearch',[]) if norm(str(r.get('lVal18AFC','')))==norm(asset)]
     codes={str(r.get('insCode')) for r in matches if r.get('insCode')}
     if len(codes)!=1:raise SyncError('historical_instrument_unverified')
-    data=json_request('https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceDailyList/'+next(iter(codes))+'/0')
+    data=market_json('https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceDailyList/'+next(iter(codes))+'/0')
     result=[]
     for row in data.get('closingPriceDaily',[]):
         day=datetime.strptime(str(row['dEven']),'%Y%m%d').date()
@@ -147,7 +165,7 @@ def listed_history(asset):
 
 
 def crypto_history(asset):
-    data=json_request('https://api.coingecko.com/api/v3/coins/'+CRYPTO[asset]+'/market_chart?vs_currency=usd&days=365')
+    data=market_json('https://api.coingecko.com/api/v3/coins/'+CRYPTO[asset]+'/market_chart?vs_currency=usd&days=365')
     return [(datetime.fromtimestamp(row[0]/1000,timezone.utc),float(row[1])) for row in data.get('prices',[]) if len(row)==2 and row[1]>0]
 
 
@@ -166,13 +184,16 @@ def historical_weeks(content,modified,checked,config,existing):
     for asset,slug in definitions.items():
         try:series[asset]=tgju_history(slug);source[asset]='TGJU daily close (IRR)'
         except Exception:series[asset]=[]
-    for asset in MAPPING:
-        if asset=='بلک راک' or problems[asset]:continue
+    def fetch_asset(asset):
         try:
-            if asset in CRYPTO:series[asset]=crypto_history(asset);source[asset]='CoinGecko USD × TGJU USD/IRR'
-            elif asset!='شمش نقره 999':series[asset]=listed_history(asset);source[asset]='TSETMC official daily market price (IRR)'
+            if asset in CRYPTO:return asset,crypto_history(asset),'CoinGecko USD × TGJU USD/IRR'
+            if asset!='شمش نقره 999':return asset,listed_history(asset),'TSETMC official daily market price (IRR)'
             # Silver must match the actual certificate. Never substitute spot silver.
-        except Exception:series[asset]=[]
+        except Exception:pass
+        return asset,[],'Historical quote unavailable'
+    targets=[asset for asset in MAPPING if asset!='بلک راک' and not problems[asset]]
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        for asset,values,label in pool.map(fetch_asset,targets):series[asset]=values;source[asset]=label
     rows=[];digest=hashlib.sha256(content).hexdigest()
     for day in dates:
         asof=datetime.combine(day,time.max,TEHRAN)
@@ -216,7 +237,7 @@ def export_excel(history,groups):
         gold=row.get('gold_quote')
         summary.append([week,row.get('gold_grams'),row.get('change_gold_grams'),row.get('change_percent'),
             math.floor(row['total_rial']/10+.5) if row.get('total_rial') is not None else None,math.floor(gold['price_rial']/10+.5) if gold else None,
-            'موقت' if row['mode']=='baseline' else 'کامل' if row['status']=='complete' else 'ناقص',row.get('quantity_change_count'),fa_time(row['as_of']),fa_time(row['source_checked_at'])])
+            ('موقت • کامل' if row['status']=='complete' else 'موقت • ناقص') if row['mode']=='baseline' else 'کامل' if row['status']=='complete' else 'ناقص',row.get('quantity_change_count'),fa_time(row['as_of']),fa_time(row['source_checked_at'])])
         for asset,qty in row['quantities'].items():
             p=row.get('quotes',{}).get(asset)
             if qty==0 or isinstance(qty,(int,float)) and p and qty*p['price_rial']<500000:continue
@@ -267,7 +288,7 @@ def publish_export():
     if result.get('ok') is not True or result.get('revision')!=history['revision']:raise SyncError('history_export_not_verified')
     readback=api('?data=gold-history-file')
     if readback.get('revision')!=history['revision'] or readback.get('sha256')!=hashlib.sha256(data).hexdigest():raise SyncError('history_export_readback_mismatch')
-    return {'weeks':len(history['weeks']),'complete_weeks':sum(w['status']=='complete' for w in history['weeks']),'excel_stored':True}
+    return {'weeks':sum(w['mode']!='baseline' for w in history['weeks']),'observations':len(history['weeks']),'complete_weeks':sum(w['mode']!='baseline' and w['status']=='complete' for w in history['weeks']),'complete_observations':sum(w['status']=='complete' for w in history['weeks']),'excel_stored':True}
 
 
 def run(action):

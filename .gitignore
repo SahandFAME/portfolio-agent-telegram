@@ -11,3 +11,4 @@ verification-result.json
 
 *.xlsx
 history-audit-result.json
+gold-history-result.json

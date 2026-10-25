@@ -31,7 +31,9 @@ Historical price adapters use TGJU daily closes in rial, exact-symbol TSETMC
 instrument identities and official daily market prices, and CoinGecko USD history
 converted with the independently dated USD/IRR history. Do not substitute physical
 silver spot for the user's silver certificate. Unsupported instruments stay
-unpriced. Select observations at or before the valuation time, no older than seven
+unpriced. Optional archive requests have an eight-second timeout and three-worker
+concurrency; their failures become missing quotes without delaying Graph auth or
+overwriting good data. Workflow outcomes publish aggregate status/coverage only. Select observations at or before the valuation time, no older than seven
 days; never forward-fill across an unverified trading/holiday gap.
 
 Validate all quantities and required positive-quantity quotes before applying the
