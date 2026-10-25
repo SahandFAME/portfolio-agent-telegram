@@ -86,6 +86,13 @@ export default async function handler(req,res){
   if(req.method==="POST" && req.query?.sync==="portfolio") return sync(req,res);
   if(req.method==="POST" && req.query?.complete==="latest-allocation") return completeLatestAllocation(req,res);
   if(req.method==="POST" && req.query?.configure==="access-expiry") return configureAccessExpiry(req,res);
+  if(req.method==="POST" && req.query?.maintain==="expired-access"){
+    if(!syncAuth(req))return res.status(401).json({ok:false});
+    try{
+      const state=await loadAccessState({strict:true,purgeExpired:true});
+      return res.status(200).json({ok:true,...accessExpirySummary(state)});
+    }catch(_){return res.status(503).json({ok:false});}
+  }
   if(req.method==="POST" && req.query?.verify==="access-storage"){
     if(!syncAuth(req))return res.status(401).json({ok:false});
     const result=await verifyAccessStorage();return res.status(result.ok?200:503).json(result);
@@ -236,7 +243,7 @@ async function telegram(req,res){
   const text=(message.text||"").trim();
   const command=MENU_COMMANDS.get(text)||text;
   const uid=String(userId);
-  const state=await loadAccessState();
+  const state=await loadAccessState({purgeExpired:true});
   const isAdmin=isBotAdmin(uid,state);
   const noteOptions={includePrivateNotes:isAdmin};
   waitUntil(notifyCommandActivity(req.body,message,command,state));
@@ -358,7 +365,7 @@ async function handleAllocationCallback(callback,updateId){
   const uid=String(callback.from?.id||""),chat=callback.message?.chat;
   if(chat?.type!=="private"||String(chat.id)!==uid){await answerCallback(callback.id,"دسترسی غیرمجاز.");return;}
   try{
-    const state=await loadAccessState({strict:true});
+    const state=await loadAccessState({strict:true,purgeExpired:true});
     if(!hasBotAccess(uid,state)){await answerCallback(callback.id,isExpiredMember(uid,state)?"":"دسترسی ندارید.");return;}
     const match=String(callback.data||"").match(/^allocation:pick:([0-9a-f-]{36}):(image|text|menu)$/);
     if(match?.[2]!=="menu"&&!canReadReports(uid,state)){await answerCallback(callback.id,"فقط نمودار درصدی برای مهمان قابل دسترسی است.");return;}
@@ -531,15 +538,26 @@ function hasBotAccess(uid,state){
 }
 function isExpiredMember(uid,state){
   uid=String(uid);
-  return !isBotAdmin(uid,state)&&(state.approved||[]).includes(uid)&&!hasBotAccess(uid,state);
+  return !isBotAdmin(uid,state)&&!!(state.expiredUsers?.[uid]||(state.approved||[]).includes(uid)&&!hasBotAccess(uid,state));
 }
 function canReadReports(uid,state){
   uid=String(uid);
   return isBotAdmin(uid,state)||(hasBotAccess(uid,state)&&(state.financialAdvisors||[]).includes(uid));
 }
 function roleLabel(uid,state){return isOwner(uid)?"مالک":isBotAdmin(uid,state)?"مدیر":(state.financialAdvisors||[]).includes(String(uid))?"مشاور مالی":"مهمان";}
-function emptyAccessState(){return {approved:[],pending:{},delegatedAdmins:[],financialAdvisors:[],users:{},audit:[],accessTerms:{},accessPolicy:null};}
-async function loadAccessState({strict=false}={}){
+function emptyAccessState(){return {approved:[],pending:{},delegatedAdmins:[],financialAdvisors:[],users:{},audit:[],accessTerms:{},accessPolicy:null,expiredUsers:{}};}
+function removeExpiredGrants(state){
+  const removed=state.approved.filter(uid=>!isBotAdmin(uid,state)&&accessTerm(uid,state)&&Date.parse(accessTerm(uid,state).expires_at)<=Date.now());
+  for(const uid of removed){
+    state.expiredUsers[uid]={expired_at:new Date().toISOString(),expires_at:accessTerm(uid,state).expires_at};
+    state.financialAdvisors=state.financialAdvisors.filter(id=>id!==uid);
+    delete state.accessTerms[uid];delete state.pending[uid];delete state.users[uid];
+  }
+  state.approved=state.approved.filter(uid=>!removed.includes(uid));
+  state.delegatedAdmins=state.delegatedAdmins.filter(uid=>!removed.includes(uid));
+  return removed.length;
+}
+async function loadAccessState({strict=false,purgeExpired=false,_attempt=0}={}){
   try{
     const r=await get(ACCESS_STATE,ACCESS_READ_OPTIONS);
     if(!r)return emptyAccessState();
@@ -547,7 +565,7 @@ async function loadAccessState({strict=false}={}){
     while(true){const x=await reader.read();if(x.done)break;chunks.push(Buffer.from(x.value));}
     const raw=JSON.parse(Buffer.concat(chunks).toString("utf8"));
     if(!raw||!Array.isArray(raw.approved)||!raw.pending||typeof raw.pending!=="object"||Array.isArray(raw.pending))throw new Error("invalid_access_state");
-    for(const field of ["accessTerms","accessPolicy"]){
+    for(const field of ["accessTerms","accessPolicy","expiredUsers"]){
       if(raw[field]!==undefined&&raw[field]!==null&&(typeof raw[field]!=="object"||Array.isArray(raw[field])))throw new Error("invalid_access_state");
     }
     const approved=[...new Set(raw.approved.map(String).filter(x=>/^[1-9]\d*$/.test(x)&&Number.isSafeInteger(Number(x))))];
@@ -556,12 +574,18 @@ async function loadAccessState({strict=false}={}){
       users:raw.users&&typeof raw.users==="object"&&!Array.isArray(raw.users)?raw.users:{},
       audit:Array.isArray(raw.audit)?raw.audit.slice(-100):[],
       accessTerms:raw.accessTerms&&typeof raw.accessTerms==="object"&&!Array.isArray(raw.accessTerms)?raw.accessTerms:{},
-      accessPolicy:raw.accessPolicy&&typeof raw.accessPolicy==="object"&&!Array.isArray(raw.accessPolicy)?raw.accessPolicy:null};
+      accessPolicy:raw.accessPolicy&&typeof raw.accessPolicy==="object"&&!Array.isArray(raw.accessPolicy)?raw.accessPolicy:null,
+      expiredUsers:raw.expiredUsers&&typeof raw.expiredUsers==="object"&&!Array.isArray(raw.expiredUsers)?raw.expiredUsers:{}};
     state.financialAdvisors=[...new Set((Array.isArray(raw.financialAdvisors)?raw.financialAdvisors:[]).map(String))]
       .filter(id=>approved.includes(id)&&!isOwner(id)&&!state.delegatedAdmins.includes(id));
     Object.defineProperties(state,{_etag:{value:r.blob?.etag},_exists:{value:true}});
+    if(purgeExpired&&removeExpiredGrants(state)){
+      await saveAccessState(state);
+      return loadAccessState({strict,purgeExpired:false});
+    }
     return state;
-  }catch(_){
+  }catch(error){
+    if(error instanceof BlobPreconditionFailedError&&_attempt<2)return loadAccessState({strict,purgeExpired,_attempt:_attempt+1});
     if(strict)throw new Error("access_state_unavailable");
     const state=emptyAccessState();Object.defineProperty(state,"_unavailable",{value:true});return state;
   }
@@ -576,6 +600,7 @@ function accessExpirySummary(state){
   return {tracked_non_admin_count:ids.length,active_non_admin_count:ids.filter(id=>hasBotAccess(id,state)).length,
     expired_non_admin_count:ids.filter(id=>!hasBotAccess(id,state)).length,
     persisted_expiry_count:ids.filter(id=>Object.hasOwn(state.accessTerms||{},id)&&accessTerm(id,state)!==null).length,
+    removed_expired_count:Object.keys(state.expiredUsers||{}).length,
     activation_date_fallback_count:ids.filter(id=>accessTerm(id,state)?.source==="policy_activation").length};
 }
 async function configureAccessExpiry(req,res){
@@ -670,7 +695,7 @@ async function handleAccessCallback(callback){
   if(chat?.type!=="private"||String(chat.id)!==uid){await answerCallback(callback.id,"دسترسی غیرمجاز.");return;}
   let changed=false;
   try{
-    const state=await loadAccessState({strict:true});
+    const state=await loadAccessState({strict:true,purgeExpired:true});
     if(isExpiredMember(uid,state)){await answerCallback(callback.id,"");return;}
     if(!isBotAdmin(uid,state)){await answerCallback(callback.id,"دسترسی مدیریت ندارید.");return;}
     const data=String(callback.data||"");
@@ -730,7 +755,7 @@ async function handleAccessCallback(callback){
 async function handleAdminAccessCommand(chatId,command,uid){
   let changed=false;
   try{
-    const state=await loadAccessState({strict:true});
+    const state=await loadAccessState({strict:true,purgeExpired:true});
     if(!isBotAdmin(uid,state)){await sendTelegram(chatId,"دسترسی مدیریت ندارید.",{
       menu:state.approved.includes(uid),removeMenu:!state.approved.includes(uid),audience:"guest"});return;}
     if(/^\/admin(?:@\w+)?$/.test(command)){
@@ -776,7 +801,7 @@ async function changeAccess(actor,target,action,state){
     state.approved=[...new Set([...state.approved,target])];
     if(state.pending[target])state.users[target]=state.pending[target];
     state.users[target]={...state.users[target],approvedAt:at};
-    delete state.pending[target];
+    delete state.pending[target];delete state.expiredUsers[target];
     if(action==="approve_advisor")state.financialAdvisors.push(target);
     if(action==="approve_admin")state.delegatedAdmins=[...new Set([...state.delegatedAdmins,target])];
   }else{
@@ -794,7 +819,7 @@ async function changeAccess(actor,target,action,state){
   state.audit.push({at,actor_id:actor,target_id:target,action});
   state.audit=state.audit.slice(-100);
   await saveAccessState(state);
-  if(["revoke","demote","guest","advisor"].includes(action)){
+  if(["revoke","demote","guest","advisor"].includes(action)||APPROVAL_ACTIONS.has(action)){
     try{await savePendingBlackRock(target,{type:"none",updatedAt:new Date().toISOString()});}catch(_){}
   }
   const notices={approve_advisor:"دسترسی شما به‌عنوان مشاور مالی تأیید شد؛ فقط گزارش‌های دارایی در دسترس است.",
@@ -841,7 +866,7 @@ async function memberLabel(id,state){
 const ADMIN_PAGE_SIZE=8;
 const adminBack=()=>[{text:"بازگشت به پنل",callback_data:"admin:home"}];
 async function showAdminDashboard(chatId,uid,section="home",page=0,previousPanel=null){
-  const state=await loadAccessState({strict:true});
+  const state=await loadAccessState({strict:true,purgeExpired:true});
   if(!isBotAdmin(uid,state))throw new Error("admin_permission_required");
   const owner=isOwner(uid);
   if(section==="home"){

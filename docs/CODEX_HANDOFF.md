@@ -55,6 +55,13 @@ come from saved approval history or a one-time activation anchor. Apply the
 protected expiry configuration and verify aggregate readback after deployment.
 Implementation and operational semantics: [admin dashboard](ADMIN_DASHBOARD.md#weekly-access-monitoring-and-command-activity-2026-10-17).
 
+**2026-10-25 expiry update:** expired non-admin grants are removed from approved
+membership and role lists, silently. Re-entry requires fresh approval. Cleanup
+runs before bot/admin operations and hourly; expiry authorization remains exact.
+The read-only history-input audit inspects table/date coverage without logging
+holdings or uploading the source workbook. Historical reconstruction must not
+assume today's quantities/manual assets existed for the past year.
+
 **As of:** 2026-10-10 (Tehran time)  
 **Primary repository:** https://github.com/SahandFAME/portfolio-agent-telegram  
 **Branch:** `main`  

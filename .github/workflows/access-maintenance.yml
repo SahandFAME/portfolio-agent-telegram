@@ -1,0 +1,28 @@
+name: Remove expired bot approvals
+on:
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: portfolio-access-maintenance
+  cancel-in-progress: false
+jobs:
+  remove-expired:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Remove expired non-admin grants without user messages
+        env:
+          PORTFOLIO_SYNC_SECRET_AGENT: ${{ secrets.PORTFOLIO_SYNC_SECRET_AGENT }}
+        run: |
+          python - <<'PY'
+          import json,os
+          from urllib.request import Request,urlopen
+          req=Request('https://portfolio-agent-telegram.vercel.app/api/telegram?maintain=expired-access',
+            data=b'{}',headers={'Content-Type':'application/json','x-portfolio-sync-secret':os.environ['PORTFOLIO_SYNC_SECRET_AGENT']})
+          with urlopen(req,timeout=45) as response:
+            result=json.load(response)
+          if result.get('ok') is not True: raise SystemExit('Access maintenance failed')
+          print(json.dumps(result))
+          PY
