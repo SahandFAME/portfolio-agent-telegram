@@ -103,6 +103,11 @@ class HistoryExcelTests(unittest.TestCase):
         self.assertEqual(book['ارزش هفتگی']['B2'].value,10);self.assertIsNone(book['ارزش هفتگی']['B3'].value)
         self.assertEqual(book['ارزش هفتگی']._charts[0].display_blanks,'gap');self.assertTrue(book['ارزش هفتگی']['I2'].font.bold)
         self.assertEqual(book['دارایی‌ها'].max_row,3);self.assertTrue(book['دارایی‌ها']['G2'].value.startswith("'="))
+        # A verified asset remains useful when another holding blocks the total.
+        self.assertEqual(book['دارایی‌ها']['F3'].value,10000000)
+        self.assertTrue(book['دارایی‌ها']['A3'].font.bold);self.assertTrue(book['دارایی‌ها']['H3'].font.bold)
+        self.assertIsNone(book['ارزش هفتگی']['E3'].value)
+        self.assertEqual(book['ترکیب دارایی'].max_row,2)
         self.assertTrue(all(cell.data_type!='f' for sheet in book for rows in sheet for cell in rows))
         with zipfile.ZipFile(BytesIO(data)) as archive:self.assertFalse(any('vba' in name.lower() for name in archive.namelist()))
         book.close()
