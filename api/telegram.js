@@ -2112,8 +2112,8 @@ async function historyWrite(req,res){
     if(weeks.length>1000)return res.status(400).json({ok:false});
     const data=await saveHistory(current,weeks);
     const pending=weeks.find(w=>w.week_ending===incoming.at(-1).week_ending&&w.mode!=='historical'&&w.quantities['بلک راک']>0&&!w.quotes['بلک راک']);
-    if(body.notify===true&&pending)waitUntil(notifyHistoryPrice(pending));
-    return res.status(200).json({ok:true,revision:data.revision,weeks:weeks.length,complete_weeks:weeks.filter(w=>w.status==='complete').length});
+    if(body.notify===true&&pending?.mode==='live')waitUntil(notifyHistoryPrice(pending));
+    return res.status(200).json({ok:true,revision:data.revision,weeks:weeks.filter(w=>w.mode!=='baseline').length,observations:weeks.length,complete_weeks:weeks.filter(w=>w.mode!=='baseline'&&w.status==='complete').length,complete_observations:weeks.filter(w=>w.status==='complete').length});
   }catch(error){return res.status(error instanceof BlobPreconditionFailedError?409:error.message==='invalid_gold_history_record'?400:503).json({ok:false,error:'history_write_failed'});}
 }
 async function notifyHistoryPrice(week){

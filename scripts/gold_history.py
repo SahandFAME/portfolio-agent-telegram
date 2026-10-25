@@ -237,7 +237,7 @@ def export_excel(history,groups):
         gold=row.get('gold_quote')
         summary.append([week,row.get('gold_grams'),row.get('change_gold_grams'),row.get('change_percent'),
             math.floor(row['total_rial']/10+.5) if row.get('total_rial') is not None else None,math.floor(gold['price_rial']/10+.5) if gold else None,
-            'موقت' if row['mode']=='baseline' else 'کامل' if row['status']=='complete' else 'ناقص',row.get('quantity_change_count'),fa_time(row['as_of']),fa_time(row['source_checked_at'])])
+            ('موقت • کامل' if row['status']=='complete' else 'موقت • ناقص') if row['mode']=='baseline' else 'کامل' if row['status']=='complete' else 'ناقص',row.get('quantity_change_count'),fa_time(row['as_of']),fa_time(row['source_checked_at'])])
         for asset,qty in row['quantities'].items():
             p=row.get('quotes',{}).get(asset)
             if qty==0 or isinstance(qty,(int,float)) and p and qty*p['price_rial']<500000:continue
@@ -288,7 +288,7 @@ def publish_export():
     if result.get('ok') is not True or result.get('revision')!=history['revision']:raise SyncError('history_export_not_verified')
     readback=api('?data=gold-history-file')
     if readback.get('revision')!=history['revision'] or readback.get('sha256')!=hashlib.sha256(data).hexdigest():raise SyncError('history_export_readback_mismatch')
-    return {'weeks':len(history['weeks']),'complete_weeks':sum(w['status']=='complete' for w in history['weeks']),'excel_stored':True}
+    return {'weeks':sum(w['mode']!='baseline' for w in history['weeks']),'observations':len(history['weeks']),'complete_weeks':sum(w['mode']!='baseline' and w['status']=='complete' for w in history['weeks']),'complete_observations':sum(w['status']=='complete' for w in history['weeks']),'excel_stored':True}
 
 
 def run(action):
