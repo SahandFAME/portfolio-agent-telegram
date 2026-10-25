@@ -230,3 +230,22 @@ prevent the user's report. An interrupted send whose acknowledgment was lost
 can be retried after its lease; Telegram offers no send-message idempotency key.
 Tests use genuine update IDs for activity while older focused fixtures can omit
 them; only a real update ID creates an activity receipt.
+
+## Expired membership removal (owner request, 2026-10-25)
+
+This supersedes the earlier retained-expired-grant behavior. Before bot commands,
+admin screens/actions and workflow completions, valid expired non-admin grants
+are removed conditionally from `approved`, financial-advisor roles, active terms,
+pending approvals and user profiles. Owners and delegated admins are exempt.
+Strong-ETag conflicts re-read current state so a concurrent extension is preserved.
+The authenticated `POST ?maintain=expired-access` performs the same cleanup with
+no Telegram sends. An hourly Actions job (minute 7 UTC, minute 37 Tehran) covers
+idle periods; exact deadline authorization remains independent of scheduler delays.
+
+Removed users do not appear in approved-user, role or monitoring lists. Old
+extension buttons cannot reinstate removed users. They must submit `/start` and
+receive a new approval; new approval clears the removal marker and old price
+prompt. Minimal private `expiredUsers` timestamps preserve silent rejection of
+old commands/callbacks. They are not active grants. Bot API cannot delete the
+private chat from the person's Telegram client. No activation/expiry warning is
+sent. Manual revocation remains separate and retains its existing notification.

@@ -57,3 +57,9 @@ extensions send no time-limit notice to the affected user. Legacy dates must be
 persisted once; never grant a sliding week on reads. Command activity goes only
 to currently authorized admins, without raw input/prices or report notes, and
 must not remove an admin's dashboard. See docs/ADMIN_DASHBOARD.md.
+
+Expired membership is now removed, not retained as an approved expired grant.
+Purge valid expired guest/advisor grants before bot/admin operations and via
+hourly maintenance; use strong-ETag retries to preserve concurrent renewals.
+Removed users require fresh approval, with no expiry notice. Keep owner/admin
+exemptions and never try to delete the user's private Telegram chat.

@@ -109,13 +109,15 @@ test('monitor shows remaining time, expired status and unlimited admins; extensi
   assert.equal(panel.parse_mode,'HTML');assert.match(panel.text,/زمان باقی‌مانده|منقضی|بدون محدودیت زمانی/);
   assert.match(panel.text,/پایان دسترسی: <b>[۰-۹]+\/[۰-۹]+\/[۰-۹]+/);
   const data=panel.reply_markup.inline_keyboard.flat().map(x=>x.callback_data);
-  for(const uid of ['2','4'])for(const days of [1,3,7])assert.ok(data.includes('admin:extend:'+uid+':'+days));
+  for(const days of [1,3,7])assert.ok(data.includes('admin:extend:2:'+days));
+  assert.equal(data.some(x=>x.startsWith('admin:extend:4:')),false);
+  assert.equal(a.store.get(KEY).approved.includes('4'),false);
   assert.equal(data.some(x=>/^admin:extend:(1|3):/.test(x)),false);
   const before=JSON.stringify(a.state);await click(a,'admin:extend:2:7',2);
   assert.equal(JSON.stringify(a.state),before);
 });
 
-test('extensions add 1/3/7 days to active expiry, revive expired access from now, and never notify the user',async()=>{
+test('extensions add 1/3/7 days to active expiry; removed expired users require approval again',async()=>{
   for(const days of [1,3,7])for(const actor of [1,3]){
     const a=await fixture();const deadline=Date.parse(a.state.accessTerms['2'].expires_at);
     await click(a,'admin:extend:2:'+days,actor);
@@ -123,7 +125,8 @@ test('extensions add 1/3/7 days to active expiry, revive expired access from now
     assert.deepEqual(a.store.get(KEY).financialAdvisors,['2']);assert.equal(own(a,2).length,0);
     const b=await fixture();b.state.accessTerms['2']=term(b.clock.value-9*DAY,b.clock.value-2*DAY);
     await click(b,'admin:extend:2:'+days,actor);
-    assert.equal(Date.parse(b.store.get(KEY).accessTerms['2'].expires_at),b.clock.value+days*DAY);
+    assert.equal(b.store.get(KEY).accessTerms['2'],undefined);
+    assert.equal(b.store.get(KEY).approved.includes('2'),false);
     assert.equal(own(b,2).length,0);
   }
 });
@@ -253,4 +256,31 @@ test('expired users can explicitly request renewed approval without expiry warni
   const a=await fixture();a.clock.value+=5*DAY;await command(a,'/start');
   assert.ok(a.store.get(KEY).pending['2']);assert.equal(own(a,2).length,1);assert.doesNotMatch(own(a,2)[0].text,/منقضی|تمدید|هفته/);
   await click(a,'admin:approve_advisor:2');assert.equal(Date.parse(a.store.get(KEY).accessTerms['2'].expires_at),a.clock.value+7*DAY);
+});
+
+
+test('scheduled removal purges expired membership, roles, pending requests and profiles without Telegram messages',async()=>{
+  const a=await fixture();a.state.users['2']={first_name:'Removed'};a.state.pending['2']={id:'2'};
+  a.state.accessTerms['3']=term(a.clock.value-10*DAY,a.clock.value-DAY);a.clock.value+=5*DAY;
+  assert.equal((await a.request('POST',{maintain:'expired-access'},{},{})).code,401);
+  const result=await a.request('POST',{maintain:'expired-access'},{},auth);assert.equal(result.code,200);
+  const stored=a.store.get(KEY);assert.deepEqual(stored.approved,['3']);assert.deepEqual(stored.financialAdvisors,[]);
+  assert.deepEqual(stored.delegatedAdmins,['3']);assert.equal(stored.users['2'],undefined);assert.equal(stored.pending['2'],undefined);
+  assert.equal(stored.accessTerms['2'],undefined);assert.ok(stored.expiredUsers['2']);assert.ok(stored.expiredUsers['4']);
+  assert.equal(a.sends.length,0);const writes=a.writes.length;
+  await a.request('POST',{maintain:'expired-access'},{},auth);assert.equal(a.writes.length,writes);
+  await command(a,'/assets');assert.equal(own(a,2).length,0);
+  await command(a,'/start');assert.ok(a.store.get(KEY).pending['2']);
+  await click(a,'admin:approve_advisor:2');assert.equal(a.store.get(KEY).expiredUsers['2'],undefined);
+  assert.equal(a.ns.hasBotAccess('2',await a.ns.loadAccessState({strict:true})),true);
+});
+
+test('a concurrent extension wins over stale cleanup and cannot be overwritten',async()=>{
+  let changed=false;let a;
+  a=await fixture({beforeWrite:(key,_value,_options,store)=>{
+    if(key===KEY&&!changed){changed=true;store.get(KEY).accessTerms['2'].expires_at=stamp(a.clock.value+DAY);}
+  }});
+  a.state.accessTerms['2']=term(a.clock.value-9*DAY,a.clock.value-DAY);
+  await a.request('POST',{maintain:'expired-access'},{},auth);
+  assert.equal(a.store.get(KEY).approved.includes('2'),true);assert.equal(a.store.get(KEY).expiredUsers?.['2'],undefined);
 });
