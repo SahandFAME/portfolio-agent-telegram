@@ -106,3 +106,20 @@ class HistoryExcelTests(unittest.TestCase):
         self.assertTrue(all(cell.data_type!='f' for sheet in book for rows in sheet for cell in rows))
         with zipfile.ZipFile(BytesIO(data)) as archive:self.assertFalse(any('vba' in name.lower() for name in archive.namelist()))
         book.close()
+
+class BoundedArchiveRequestTests(unittest.TestCase):
+    def test_public_archive_request_has_a_hard_timeout_and_never_forwards_credentials(self):
+        with patch.object(history.request,'build_opener') as factory:
+            response=factory.return_value.open.return_value.__enter__.return_value
+            response.read.return_value=b'{"data":[]}'
+            self.assertEqual(history.market_json('https://api.tgju.org/v1/example'),{'data':[]})
+            call=factory.return_value.open.call_args
+            self.assertEqual(call.kwargs['timeout'],8)
+            self.assertNotIn('Authorization',call.args[0].headers)
+        with self.assertRaises(history.SyncError):history.market_json('https://example.invalid/private')
+
+    def test_archive_timeout_produces_explicit_missing_quotes_without_losing_reconstructed_quantities(self):
+        with patch.object(history,'market_json',side_effect=TimeoutError()):
+            rows,_=history.historical_weeks(source_workbook(),'2026-10-24T00:00:00Z','2026-10-25T00:00:00Z',{'manual':{'دلار':100}}, {})
+        self.assertEqual(len(rows),52);self.assertEqual(rows[-1]['quantities']['طلا'],6)
+        self.assertIsNone(rows[-1]['gold_quote']);self.assertEqual(rows[-1]['quotes'],{})
