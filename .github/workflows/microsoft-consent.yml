@@ -1,4 +1,4 @@
-name: Authorize read-only Microsoft access
+name: Authorize Microsoft access
 on:
   workflow_dispatch:
     inputs:
@@ -6,10 +6,21 @@ on:
         description: Application (client) ID from the dedicated Microsoft app Overview
         required: true
         type: string
+        default: 04a73ec3-340a-4cb6-a087-7fdc4dfd93e0
+      purpose:
+        description: Read-only workbook sync or separate OneDrive report export
+        type: choice
+        options: [read_only, report_export]
+        default: read_only
+      signin_public_key:
+        description: Codex-generated public encryption key for private report-export sign-in
+        required: false
+        type: string
 permissions:
   contents: read
+  checks: write
 concurrency:
-  group: microsoft-consent
+  group: ${{ inputs.purpose == 'report_export' && 'onedrive-report-export' || 'microsoft-consent' }}
   cancel-in-progress: false
 jobs:
   consent:
@@ -17,6 +28,9 @@ jobs:
     timeout-minutes: 20
     env:
       MS_GRAPH_CLIENT_ID: ${{ inputs.client_id }}
+      MICROSOFT_CONSENT_PURPOSE: ${{ inputs.purpose || 'read_only' }}
+      MICROSOFT_SIGNIN_PUBLIC_KEY: ${{ inputs.signin_public_key }}
+      CONSENT_CHECK_TOKEN: ${{ github.token }}
       GH_TOKEN: ${{ secrets.PORTFOLIO_SECRET_WRITER_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

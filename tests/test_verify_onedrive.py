@@ -111,12 +111,14 @@ class GraphTests(unittest.TestCase):
     def test_rotated_refresh_token_persisted_via_stdin_without_logging(self):
         with patch.dict(os.environ, {'MS_GRAPH_CLIENT_ID':'fixture','MS_GRAPH_REFRESH_TOKEN':'old-fixture',
                                    'GH_TOKEN':'fixture', 'GITHUB_REPOSITORY':'fixture/repo'}), \
-             patch.object(sync, 'json_request', return_value={'access_token':'access-fixture','refresh_token':'new-fixture'}), \
+             patch.object(sync, 'json_request', return_value={'access_token':'access-fixture','refresh_token':'new-fixture'}) as token, \
              patch.object(sync.subprocess, 'run') as run:
             run.return_value.returncode = 0
             self.assertEqual(sync.graph_token(), 'access-fixture')
             self.assertEqual(run.call_args.kwargs['input'], b'new-fixture')
             self.assertNotIn('new-fixture', ' '.join(run.call_args.args[0]))
+            self.assertIn(b'scope=https%3A%2F%2Fgraph.microsoft.com%2FFiles.Read',token.call_args.kwargs['body'])
+            self.assertNotIn(b'ReadWrite',token.call_args.kwargs['body'])
 
     def test_refresh_persistence_failure_stops_sync(self):
         with patch.dict(os.environ, {'MS_GRAPH_CLIENT_ID':'fixture','MS_GRAPH_REFRESH_TOKEN':'old-fixture'}), \

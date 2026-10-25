@@ -1,9 +1,12 @@
 import contextlib
+import base64
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import unittest
+import tempfile
 from unittest.mock import patch, Mock
 
 spec = importlib.util.spec_from_file_location('consent',Path(__file__).parents[1]/'scripts/authorize_microsoft.py')
@@ -65,6 +68,35 @@ class ConsentTests(unittest.TestCase):
              patch.object(consent.time,'sleep'),contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(consent.ConsentError,'refresh_token_storage_failed'):
                 consent.authorize()
+
+    def test_report_consent_preserves_read_only_secret_and_does_not_print_code(self):
+        env={'MICROSOFT_CONSENT_PURPOSE':'report_export','MICROSOFT_SIGNIN_PUBLIC_KEY':'fixture','CONSENT_CHECK_TOKEN':'fixture','GITHUB_SHA':'fixture'}
+        output=io.StringIO()
+        with patch.dict(os.environ,env),patch.object(consent.subprocess,'run',return_value=Mock(returncode=0)) as run,patch.object(consent,'oauth',side_effect=[self.device,{'refresh_token':'write-secret','scope':'Files.ReadWrite'}]) as oauth,patch.object(consent,'publish_private_signin') as publish,patch.object(consent.time,'sleep'),contextlib.redirect_stdout(output):
+            consent.authorize()
+            self.assertIn('Files.ReadWrite',oauth.call_args_list[0].args[1]['scope'])
+            self.assertIn('MS_GRAPH_EXPORT_REFRESH_TOKEN',run.call_args.args[0]);self.assertNotIn('MS_GRAPH_REFRESH_TOKEN',run.call_args.args[0])
+            self.assertNotIn('USERCODE',output.getvalue());self.assertNotIn('write-secret',output.getvalue())
+            publish.assert_called_once_with(self.device)
+
+    def test_private_signin_check_contains_only_ciphertext_decryptable_by_requester(self):
+        real_run=consent.subprocess.run
+        with tempfile.TemporaryDirectory() as directory:
+            private=str(Path(directory)/'private.pem')
+            real_run(['openssl','genpkey','-algorithm','RSA','-pkeyopt','rsa_keygen_bits:2048','-out',private],check=True,capture_output=True)
+            public=real_run(['openssl','pkey','-in',private,'-pubout'],check=True,capture_output=True).stdout
+            calls=[]
+            def run(args,**kwargs):
+                if args[0]=='openssl':return real_run(args,**kwargs)
+                calls.append(kwargs);return Mock(returncode=0)
+            env={'MICROSOFT_SIGNIN_PUBLIC_KEY':base64.b64encode(public).decode(),'CONSENT_CHECK_TOKEN':'check-secret','GITHUB_SHA':'fixture'}
+            output=io.StringIO()
+            with patch.dict(os.environ,env),patch.object(consent.subprocess,'run',side_effect=run),contextlib.redirect_stdout(output):consent.publish_private_signin(self.device)
+            body=json.loads(calls[0]['input']);ciphertext=base64.b64decode(body['output']['summary'])
+            decrypted=real_run(['openssl','pkeyutl','-decrypt','-inkey',private,'-pkeyopt','rsa_padding_mode:oaep','-pkeyopt','rsa_oaep_md:sha256'],input=ciphertext,capture_output=True,check=True).stdout
+            self.assertEqual(json.loads(decrypted)['user_code'],'USERCODE')
+            self.assertNotIn('device_code',json.loads(decrypted))
+            self.assertNotIn('USERCODE',output.getvalue());self.assertNotIn('USERCODE',json.dumps(body))
 
 
 if __name__ == '__main__':

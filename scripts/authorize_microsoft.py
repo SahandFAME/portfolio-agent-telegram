@@ -3,10 +3,12 @@
 Tokens go directly to GitHub repository secrets through gh stdin. Only Microsoft's
 temporary user sign-in code is displayed. No workbook is read or written.
 """
+import base64
 import json
 import os
 import subprocess
 import time
+import tempfile
 from urllib import error, parse, request
 import uuid
 
@@ -38,7 +40,37 @@ def oauth(action, fields):
         raise ConsentError('microsoft_http_failure') from None
 
 
+def publish_private_signin(response):
+    """Only encrypted user instructions enter this public repository's checks."""
+    try:
+        key=base64.b64decode(required('MICROSOFT_SIGNIN_PUBLIC_KEY'),validate=True)
+        if len(key)>4096 or b'BEGIN PUBLIC KEY' not in key:raise ValueError()
+    except ValueError:raise ConsentError('invalid_signin_public_key') from None
+    payload=json.dumps({k:response[k] for k in ('user_code','verification_uri','expires_in')}).encode()
+    with tempfile.NamedTemporaryFile() as file:
+        file.write(key);file.flush()
+        encrypted=subprocess.run(['openssl','pkeyutl','-encrypt','-pubin','-inkey',file.name,
+            '-pkeyopt','rsa_padding_mode:oaep','-pkeyopt','rsa_oaep_md:sha256'],input=payload,capture_output=True)
+    if encrypted.returncode:raise ConsentError('signin_encryption_failed')
+    body={'name':'Private Microsoft report sign-in','head_sha':required('GITHUB_SHA'),'status':'completed','conclusion':'success',
+          'output':{'title':'Encrypted sign-in instructions for the requesting Codex session',
+                    'summary':base64.b64encode(encrypted.stdout).decode()}}
+    env={**os.environ,'GH_TOKEN':required('CONSENT_CHECK_TOKEN')}
+    result=subprocess.run(['gh','api','--method','POST','repos/'+required('GITHUB_REPOSITORY')+'/check-runs','--input','-'],
+        input=json.dumps(body).encode(),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,env=env)
+    if result.returncode:raise ConsentError('signin_instructions_unavailable')
+    print('Private Microsoft sign-in instructions encrypted for the requesting Codex session. No sign-in code is printed in public logs.',flush=True)
+
+
 def authorize():
+    purpose = os.environ.get('MICROSOFT_CONSENT_PURPOSE', 'read_only')
+    if purpose not in ('read_only', 'report_export'):
+        raise ConsentError('invalid_consent_purpose')
+    export = purpose == 'report_export'
+    if export:
+        required('MICROSOFT_SIGNIN_PUBLIC_KEY');required('CONSENT_CHECK_TOKEN');required('GITHUB_SHA')
+    permission = 'Files.ReadWrite' if export else 'Files.Read'
+    secret = 'MS_GRAPH_EXPORT_REFRESH_TOKEN' if export else 'MS_GRAPH_REFRESH_TOKEN'
     client = required('MS_GRAPH_CLIENT_ID').strip()
     try:
         uuid.UUID(client)
@@ -54,7 +86,7 @@ def authorize():
     if status.returncode:
         raise ConsentError('github_secret_access_denied')
     response = oauth('devicecode', {'client_id':client,
-                     'scope':'https://graph.microsoft.com/Files.Read offline_access'})
+                     'scope':'https://graph.microsoft.com/' + permission + ' offline_access'})
     if not all(response.get(k) for k in ('device_code','user_code','verification_uri','expires_in')):
         raise ConsentError('microsoft_device_signin_unavailable')
     uri = response['verification_uri']
@@ -63,10 +95,16 @@ def authorize():
     if uri not in ('https://www.microsoft.com/link', 'https://microsoft.com/devicelogin',
                    'https://www.microsoft.com/devicelogin'):
         raise ConsentError('unexpected_microsoft_signin_address')
-    print('Open ' + uri, flush=True)
-    print('Enter this temporary sign-in code:',response['user_code'],flush=True)
+    if export:publish_private_signin(response)
+    else:
+        print('Open ' + uri, flush=True)
+        print('Enter this temporary sign-in code:',response['user_code'],flush=True)
     print('Sign in with the personal Microsoft account holding Trading Journal.xlsm.',flush=True)
-    print('Review the read-only file access consent. No workbook write permission is requested.',flush=True)
+    if export:
+        print('Approve OneDrive file read/write access for the separate report exporter. Microsoft grants access to your files; the exporter only writes Portfolio-18K-Gold-History.xlsx inside اسناد.',flush=True)
+        print('Trading Journal.xlsm remains read-only and the existing sync connection is preserved.',flush=True)
+    else:
+        print('Review the read-only file access consent. No workbook write permission is requested.',flush=True)
     delay = max(5, int(response.get('interval',5)))
     deadline = time.monotonic() + min(int(response['expires_in']), 900)
     while time.monotonic() < deadline:
@@ -81,14 +119,17 @@ def authorize():
             continue
         if not result.get('refresh_token'):
             raise ConsentError('microsoft_consent_denied_or_failed')
-        if 'files.readwrite' in result.get('scope','').lower():
+        scopes = {s.rsplit('/',1)[-1].lower() for s in result.get('scope','').split()}
+        if export and 'files.readwrite' not in scopes:
+            raise ConsentError('report_write_scope_missing')
+        if not export and 'files.readwrite' in result.get('scope','').lower():
             raise ConsentError('unexpected_write_scope')
-        outcome = subprocess.run(['gh','secret','set','MS_GRAPH_REFRESH_TOKEN','--repo',repo],
+        outcome = subprocess.run(['gh','secret','set',secret,'--repo',repo],
                                  input=result['refresh_token'].encode(),
                                  stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         if outcome.returncode:
             raise ConsentError('refresh_token_storage_failed')
-        print('Microsoft consent completed; MS_GRAPH_REFRESH_TOKEN saved securely.',flush=True)
+        print('Microsoft consent completed; ' + secret + ' saved securely.',flush=True)
         return
     raise ConsentError('microsoft_consent_expired')
 

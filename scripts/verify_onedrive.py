@@ -165,7 +165,8 @@ def graph_token():
         raise SyncError('invalid_graph_tenant')
     fields = {'client_id': required('MS_GRAPH_CLIENT_ID')}
     if mode == 'delegated':
-        fields.update(grant_type='refresh_token', refresh_token=required('MS_GRAPH_REFRESH_TOKEN'))
+        fields.update(grant_type='refresh_token', refresh_token=required('MS_GRAPH_REFRESH_TOKEN'),
+                      scope='https://graph.microsoft.com/Files.Read')
         if os.environ.get('MS_GRAPH_CLIENT_SECRET'):
             fields['client_secret'] = os.environ['MS_GRAPH_CLIENT_SECRET']
     elif mode == 'application':

@@ -227,6 +227,7 @@ def safe_text(value):
 
 def export_excel(history,groups):
     book=Workbook();summary=book.active;summary.title='ارزش هفتگی'
+    book.properties.identifier='portfolio-agent:18k-gold-history:v1'
     summary.append(['هفته منتهی به','طلای ۱۸ عیار (گرم)','تغییر هفتگی (گرم)','تغییر هفتگی (درصد)','ارزش (تومان)','قیمت هر گرم (تومان)','وضعیت','تغییر تعداد دارایی‌ها','زمان مشاهده (تهران)','زمان بررسی منبع (تهران)'])
     holdings=book.create_sheet('دارایی‌ها');holdings.append(['هفته','دارایی','گروه','تعداد','قیمت واحد (ریال)','ارزش دارایی (تومان)','منبع قیمت','زمان قیمت (تهران)'])
     allocations=book.create_sheet('ترکیب دارایی');allocations.append(['هفته','گروه','درصد'])

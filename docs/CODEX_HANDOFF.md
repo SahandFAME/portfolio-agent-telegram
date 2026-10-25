@@ -71,6 +71,14 @@ The restricted chart, schedule, APIs, limitations and verification requirements
 are documented in [GOLD_HISTORY.md](GOLD_HISTORY.md). This does not establish
 that every historical week is complete; inspect actual coverage and exceptions.
 
+**2026-10-25 report destination:** owner selected OneDrive **اسناد** for
+`Portfolio-18K-Gold-History.xlsx` and future report updates. Use a separate
+`MS_GRAPH_EXPORT_REFRESH_TOKEN` with delegated Files.ReadWrite; keep the source
+credential explicitly Files.Read and Trading Journal read-only. Upload requires
+owner Microsoft consent and actual downloaded-hash verification. Export consent
+instructions are encrypted in public checks for the requesting Codex session.
+See [OneDrive destination](GOLD_HISTORY.md#owner-selected-onedrive-destination-2026-10-25).
+
 **As of:** 2026-10-10 (Tehran time)  
 **Primary repository:** https://github.com/SahandFAME/portfolio-agent-telegram  
 **Branch:** `main`  
