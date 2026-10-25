@@ -8,6 +8,7 @@ import hashlib
 from io import BytesIO
 import json
 import os
+import re
 import subprocess
 from urllib.parse import quote, urlencode, urlsplit
 import zipfile
@@ -23,6 +24,13 @@ FOLDER='اسناد'
 FILENAME='Portfolio-18K-Gold-History.xlsx'
 IDENTIFIER='portfolio-agent:18k-gold-history:v1'
 MAX_REPORT_BYTES=3*1024*1024
+
+
+def same_drive(value):
+    # Personal OneDrive CID values may be returned with a leading zero.
+    # Compare only bounded hexadecimal IDs, never arbitrary suffixes or names.
+    return bool(isinstance(value,str) and re.fullmatch(r'[0-9a-fA-F]{1,16}',value)
+                and int(value,16)==int(DRIVE,16))
 
 
 def export_token():
@@ -62,7 +70,7 @@ def validate_report(data):
 
 def check_item(item,folder_id):
     parent=item.get('parentReference',{})
-    if not item.get('id') or item['id'].lower()==SOURCE_ITEM.lower() or item.get('name')!=FILENAME or not isinstance(item.get('file'),dict) or not item.get('eTag') or parent.get('id')!=folder_id or parent.get('driveId','').lower()!=DRIVE:
+    if not item.get('id') or item['id'].lower()==SOURCE_ITEM.lower() or item.get('name')!=FILENAME or not isinstance(item.get('file'),dict) or not item.get('eTag') or parent.get('id')!=folder_id or not same_drive(parent.get('driveId')):
         raise SyncError('report_destination_not_verified')
 
 
@@ -86,9 +94,9 @@ def upload_report():
     validate_report(data)
     token=export_token();headers={'Authorization':'Bearer '+token}
     drive=json_request(GRAPH+'/me/drive?$select=id',headers=headers)
-    if drive.get('id','').lower()!=DRIVE:raise SyncError('unexpected_onedrive_account')
+    if not same_drive(drive.get('id')):raise SyncError('unexpected_onedrive_account')
     folder=json_request(f'{GRAPH}/drives/{DRIVE}/root:/{quote(FOLDER,safe="")}?$select=id,name,folder,parentReference',headers=headers)
-    if folder.get('name')!=FOLDER or not isinstance(folder.get('folder'),dict) or not folder.get('id') or folder.get('parentReference',{}).get('driveId','').lower()!=DRIVE:
+    if folder.get('name')!=FOLDER or not isinstance(folder.get('folder'),dict) or not folder.get('id') or not same_drive(folder.get('parentReference',{}).get('driveId')):
         raise SyncError('report_folder_not_verified')
     folder_id=folder['id'];base=f'{GRAPH}/drives/{DRIVE}/items/{quote(folder_id,safe="")}'
     target=base+':/'+quote(FILENAME,safe='')
