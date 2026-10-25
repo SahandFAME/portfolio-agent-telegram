@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  checks: write
 concurrency:
   group: microsoft-consent
   cancel-in-progress: false
@@ -27,4 +28,18 @@ jobs:
           MS_GRAPH_ITEM_ID: DAEF687B3C624F3!2063
           MS_GRAPH_REFRESH_TOKEN: ${{ secrets.MS_GRAPH_REFRESH_TOKEN }}
           GH_TOKEN: ${{ secrets.PORTFOLIO_SECRET_WRITER_TOKEN }}
-        run: python scripts/audit_history_inputs.py
+        run: python scripts/audit_history_inputs.py > history-audit-result.json
+      - name: Publish schema-only diagnostic for private review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PYTHON'
+          import json,os,subprocess
+          from pathlib import Path
+          result=json.loads(Path('history-audit-result.json').read_text())
+          body={'name':'Portfolio history schema audit','head_sha':os.environ['GITHUB_SHA'],'status':'completed','conclusion':'success',
+            'output':{'title':'Read-only schema and coverage (no holdings or credentials)','summary':json.dumps(result,ensure_ascii=False)}}
+          p=subprocess.run(['gh','api','--method','POST',f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs",'--input','-'],
+            input=json.dumps(body),text=True,capture_output=True)
+          if p.returncode: raise SystemExit('Unable to publish schema audit')
+          PYTHON

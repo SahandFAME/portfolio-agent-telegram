@@ -40,10 +40,28 @@ def audit(content):
         return {'ok':True,'configured_tables':len(result),'unconfigured_table_count':len(tables)-len(MAPPING),'tables':result}
     finally:book.close()
 
+def provider_probes():
+    from urllib.request import Request, urlopen
+    probes=[]
+    for url in [
+        'https://api.tgju.org/v1/market/indicator/summary-table-data/geram18?lang=fa&start=0&length=600&order_dir=asc',
+        'https://api.tgju.org/v1/market/indicator/summary-table-data/price_dollar_rl?lang=fa&start=0&length=600&order_dir=asc',
+        'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=365']:
+        try:
+            with urlopen(Request(url,headers={'User-Agent':'Mozilla/5.0'}),timeout=12) as response:
+                data=json.loads(response.read(5000000))
+            rows=data.get('data',data.get('prices',[]))
+            probes.append({'url':url,'ok':True,'keys':list(data)[:12],'row_count':len(rows),'first':rows[:1],'last':rows[-1:]})
+        except Exception as error:probes.append({'url':url,'ok':False,'error':type(error).__name__})
+    return probes
+
+
 if __name__=='__main__':
     try:
         content,_=download_workbook(graph_token())
-        print(json.dumps(audit(content),ensure_ascii=False))
+        result=audit(content)
+        result['provider_probes']=provider_probes()
+        print(json.dumps(result,ensure_ascii=False))
     except Exception as error:
         print(json.dumps({'ok':False,'error':str(error) if isinstance(error,SyncError) else 'history_audit_failed'}))
         raise SystemExit(1)
