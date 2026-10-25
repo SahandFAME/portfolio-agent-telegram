@@ -8,3 +8,6 @@ __pycache__/
 latest-allocation-result.json
 verification-result.json
 *.xlsm
+
+*.xlsx
+history-audit-result.json

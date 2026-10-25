@@ -62,6 +62,15 @@ The read-only history-input audit inspects table/date coverage without logging
 holdings or uploading the source workbook. Historical reconstruction must not
 assume today's quantities/manual assets existed for the past year.
 
+**2026-10-25 gold-history update:** the owner confirmed all six manual quantities
+were unchanged over the past year and BlackRock launched with the recorded
+purchase. Implement a separate private weekly 18K-gold-equivalent history and
+Excel report; unresolved source data stays blank, never a fabricated total.
+Weekly captures request an admin EcoCoach quote when the website lacks one.
+The restricted chart, schedule, APIs, limitations and verification requirements
+are documented in [GOLD_HISTORY.md](GOLD_HISTORY.md). This does not establish
+that every historical week is complete; inspect actual coverage and exceptions.
+
 **As of:** 2026-10-10 (Tehran time)  
 **Primary repository:** https://github.com/SahandFAME/portfolio-agent-telegram  
 **Branch:** `main`  

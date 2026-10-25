@@ -6,6 +6,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { Resvg } from '@resvg/resvg-js';
 import { BlobPreconditionFailedError } from '@vercel/blob';
+import * as goldHistory from '../lib/gold-history.js';
 
 const source = await fs.readFile(new URL('../api/telegram.js', import.meta.url), 'utf8');
 // Evaluate the actual unmodified handler, injecting only external dependencies.
@@ -37,6 +38,7 @@ async function app({readError=false, env={}}={}) {
       return quotes(url,options);
     }});
   const dependencies = {
+    '../lib/gold-history.js':goldHistory,
     '@vercel/blob':{
       BlobPreconditionFailedError,
       head:async key=>({etag:JSON.stringify(store.get(key)),size:Buffer.byteLength(JSON.stringify(store.get(key)))}),
@@ -74,7 +76,7 @@ async function app({readError=false, env={}}={}) {
 
 
 
-const buttons=[['آخرین ترکیب دارایی','/latest_allocation'],['وضعیت','/status'],['دارایی‌ها','/assets'],['طلا و سایر فلزات گرانبها','/gold_and_other_precious_metals'],['رمزارز','/crypto'],['دلار نقدی','/cash_dollar'],['نمودار ترکیب دارایی','/allocation_chart'],['راهنما','/help']];
+const buttons=[['آخرین ترکیب دارایی','/latest_allocation'],['وضعیت','/status'],['دارایی‌ها','/assets'],['طلا و سایر فلزات گرانبها','/gold_and_other_precious_metals'],['رمزارز','/crypto'],['دلار نقدی','/cash_dollar'],['نمودار ترکیب دارایی','/allocation_chart'],['روند ارزش بر حسب طلا','/gold_history'],['راهنما','/help']];
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const message=(text,id=1,type='private')=>({message:{chat:{id,type},from:{id},text}});
 
@@ -97,9 +99,9 @@ for(const [label,command] of buttons) test(`button ${label} runs ${command} with
 for(const command of ['/start','/help','/menu']) test(`${command} exposes the reusable menu`,async()=>{
   const a=await app();await a.request('POST',{},message(command),header);
   const reply=JSON.parse(a.sends[0].options.body);
-  assert.ok(reply.reply_markup.keyboard.length===5);assert.match(reply.text,/دکمه‌های منو/);
+  assert.ok(reply.reply_markup.keyboard.length===6);assert.match(reply.text,/دکمه‌های منو/);
   assert.deepEqual(reply.reply_markup.keyboard[0],[{text:'آخرین ترکیب دارایی'}]);
-  assert.ok(reply.reply_markup.keyboard.slice(1).every(row=>row.length===2));
+  assert.ok(reply.reply_markup.keyboard.slice(1,4).every(row=>row.length===2));
   assert.deepEqual(reply.reply_markup.keyboard.at(-1),[{text:'راهنما'},{text:'پنل مدیریت'}]);
   assert.ok(reply.text.includes('/cash_dollar — Cash Dollar (دلار نقدی)\n\nبرای تهیه گزارش ارزش‌گذاری'));
   assert.ok(reply.text.includes('بلک راک* (EcoCoach)'));

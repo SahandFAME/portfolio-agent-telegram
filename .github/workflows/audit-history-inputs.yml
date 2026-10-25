@@ -12,6 +12,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Remove temporary detailed check diagnostics
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PYTHON'
+          import json,os,subprocess
+          # Only the creating GitHub Actions app may edit its old check output.
+          for sha in ['f3014d2085f41fab6ab8887c359763d670e33799','15e3b161a6531d59cfe2b69fef8c60e8dcd437eb']:
+              r=subprocess.run(['gh','api',f"repos/{os.environ['GITHUB_REPOSITORY']}/commits/{sha}/check-runs"],capture_output=True,text=True,check=True)
+              for check in json.loads(r.stdout)['check_runs']:
+                  if check['name']=='Portfolio history schema audit':
+                      output={'output':{'title':'Read-only audit completed','summary':'Detailed temporary diagnostics removed. Future diagnostics are aggregate-only; the source workbook and history report remain private.'}}
+                      fixed=subprocess.run(['gh','api','--method','PATCH',f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs/{check['id']}",'--input','-'],input=json.dumps(output),capture_output=True,text=True)
+                      if fixed.returncode:raise SystemExit('Unable to remove temporary check diagnostics')
+          PYTHON
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
@@ -38,7 +53,7 @@ jobs:
           from pathlib import Path
           result=json.loads(Path('history-audit-result.json').read_text())
           body={'name':'Portfolio history schema audit','head_sha':os.environ['GITHUB_SHA'],'status':'completed','conclusion':'success',
-            'output':{'title':'Read-only schema and coverage (no holdings or credentials)','summary':json.dumps(result,ensure_ascii=False)}}
+            'output':{'title':'Read-only schema and coverage (no holdings or credentials)','summary':json.dumps({key:result[key] for key in ['ok','configured_tables','unconfigured_table_count','reconciliation_failures']})}}
           p=subprocess.run(['gh','api','--method','POST',f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs",'--input','-'],
             input=json.dumps(body),text=True,capture_output=True)
           if p.returncode: raise SystemExit('Unable to publish schema audit')

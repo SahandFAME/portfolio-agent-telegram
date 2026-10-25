@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import path from "path";
+import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg} from "../lib/gold-history.js";
 
 const ONEDRIVE_CLIENT_ID = '04a73ec3-340a-4cb6-a087-7fdc4dfd93e0';
 const SNAPSHOT = "portfolio/latest.json";
@@ -81,6 +82,7 @@ export default async function handler(req,res){
     if(req.query?.setup==="webhook") return setup(req,res);
     if(req.query?.data==="portfolio") return readSnapshot(req,res);
     if(req.query?.data==="access-health") return readAccessHealth(req,res);
+    if(["gold-history","gold-history-config","gold-history-file"].includes(req.query?.data))return historyRead(req,res);
     return res.status(200).json({ok:true,service:"Portfolio Agent Telegram Bot"});
   }
   if(req.method==="POST" && req.query?.sync==="portfolio") return sync(req,res);
@@ -93,6 +95,7 @@ export default async function handler(req,res){
       return res.status(200).json({ok:true,...accessExpirySummary(state)});
     }catch(_){return res.status(503).json({ok:false});}
   }
+  if(req.method==="POST" && ["gold-history","gold-observation","gold-history-file"].includes(req.query?.sync))return historyWrite(req,res);
   if(req.method==="POST" && req.query?.verify==="access-storage"){
     if(!syncAuth(req))return res.status(401).json({ok:false});
     const result=await verifyAccessStorage();return res.status(result.ok?200:503).json(result);
@@ -235,7 +238,7 @@ async function telegram(req,res){
   if(!secret)return res.status(503).json({ok:false});
   if(secret&&req.headers["x-telegram-bot-api-secret-token"]!==secret)return res.status(401).json({ok:false});
   const callback=req.body?.callback_query;
-  if(callback){waitUntil(String(callback.data||"").startsWith("allocation:")?handleAllocationCallback(callback,req.body.update_id):handleAccessCallback(callback));return res.status(200).json({ok:true});}
+  if(callback){waitUntil(String(callback.data||"").startsWith("history:")?handleHistoryCallback(callback):String(callback.data||"").startsWith("allocation:")?handleAllocationCallback(callback,req.body.update_id):handleAccessCallback(callback));return res.status(200).json({ok:true});}
   const message=req.body?.message;
   if(!message?.chat?.id)return res.status(200).json({ok:true});
   const userId=message.from?.id;
@@ -262,6 +265,13 @@ async function telegram(req,res){
       waitUntil(sendTelegram(message.chat.id,"This bot is private. Send /start to request access.",{removeMenu:true}));
     }
     return res.status(200).json({ok:true});
+  }
+  if(canReadReports(uid,state)&&command==="/gold_history"){
+    waitUntil(sendGoldHistory(message.chat.id).catch(()=>sendTelegram(message.chat.id,'دریافت تاریخچه فعلاً ممکن نیست؛ دوباره تلاش کنید.',{menu:true}))); return res.status(200).json({ok:true});
+  }
+  if(isAdmin&&message.reply_to_message?.message_id&&!command.startsWith("/")){
+    const prompt=await readPrivateJson("portfolio/gold-history/prompts/"+uid+"/"+message.reply_to_message.message_id+".json");
+    if(prompt){waitUntil(acceptHistoryPrice(message.chat.id,uid,prompt.week_ending,command).catch(()=>sendTelegram(message.chat.id,'قیمت یا وضعیت هفته تغییر کرده است؛ تاریخچه را دوباره باز کنید.',{menu:true,audience:'admin'})));return res.status(200).json({ok:true});}
   }
 
   if(!canReadReports(uid,state)){
@@ -1842,7 +1852,7 @@ function formatToman(rial){return formatTomanAmount(rial/10,{persian:false})+" t
 function format(v){return Number(v).toLocaleString("en-US",{maximumFractionDigits:8});}
 function group(q,names,noteOptions={}){return withAssetFootnotes(names.map(n=>assetLabel(n,noteOptions)+": "+(q[n]===undefined?"not synchronized":format(q[n]))).join("\n"),names,noteOptions);}
 function guestHelp(){return "دسترسی شما مهمان است. فقط نمودار درصد ترکیب دارایی در دسترس است؛ از دکمه زیر استفاده کنید.";}
-function help({reportsOnly=false}={}){return withAssetFootnotes((reportsOnly?"دسترسی مشاور مالی • گزارش‌های دارایی\n":"Portfolio Agent is online.\n")+"برای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n"+(reportsOnly?"":"/status — portfolio status\n")+"/assets — asset list\n/latest_allocation — آخرین ترکیب دارایی: انتخاب گزارش تصویری یا متنی با مقادیر و قیمت‌های تازه\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/allocation_chart — نمودار سه‌بعدی ترکیب دارایی با مقادیر و قیمت‌های تازه\n/cash_dollar — Cash Dollar (دلار نقدی)\n\nبرای تهیه گزارش ارزش‌گذاری، ربات قیمت فعلی هر واحد "+assetLabel("بلک راک")+" (EcoCoach) را به تومان از شما می‌پرسد.",["بلک راک"]);}
+function help({reportsOnly=false}={}){return withAssetFootnotes((reportsOnly?"دسترسی مشاور مالی • گزارش‌های دارایی\n":"Portfolio Agent is online.\n")+"برای انتخاب گزارش، از دکمه‌های منو استفاده کنید.\n\n"+(reportsOnly?"":"/status — portfolio status\n")+"/assets — asset list\n/latest_allocation — آخرین ترکیب دارایی: انتخاب گزارش تصویری یا متنی با مقادیر و قیمت‌های تازه\n/gold_and_other_precious_metals — gold and other precious metals\n/crypto — live crypto valuation\n/gold_history — ارزش هفتگی بر حسب گرم طلای ۱۸ عیار\n/allocation_chart — نمودار سه‌بعدی ترکیب دارایی با مقادیر و قیمت‌های تازه\n/cash_dollar — Cash Dollar (دلار نقدی)\n\nبرای تهیه گزارش ارزش‌گذاری، ربات قیمت فعلی هر واحد "+assetLabel("بلک راک")+" (EcoCoach) را به تومان از شما می‌پرسد.",["بلک راک"]);}
 async function safeSnapshot(){try{return await loadSnapshot();}catch(e){return null;}}
 function quantitySnapshotStatus(snapshot){
   const stamp=snapshot?.updated_at;
@@ -1861,6 +1871,7 @@ const BUTTON_MENU=[
   [{text:"وضعیت",command:"/status"},{text:"دارایی‌ها",command:"/assets"}],
   [{text:"طلا و سایر فلزات گرانبها",command:"/gold_and_other_precious_metals"},{text:"رمزارز",command:"/crypto"}],
   [{text:"دلار نقدی",command:"/cash_dollar"},{text:"نمودار ترکیب دارایی",command:"/allocation_chart"}],
+  [{text:"روند ارزش بر حسب طلا",command:"/gold_history"}],
   [{text:"راهنما",command:"/help"}]
 ];
 const MENU_COMMANDS=new Map([...BUTTON_MENU.flat().map(button=>[button.text,button.command]),
@@ -2017,6 +2028,169 @@ async function sendTelegramPhoto(chatId,png,caption,{guestSafe=false,audience="r
   form.append("reply_markup",JSON.stringify(keyboard));
   if(caption)form.append("caption",caption);
   return deliverTelegram(chatId,"sendPhoto",{method:"POST",body:form});
+}
+
+
+const GOLD_HISTORY_KEY='portfolio/gold-history/latest.json';
+const historyOptions=()=>({assets:ASSETS,groups:Object.fromEntries(ASSETS.map(a=>[a,categoryName(a)])),now:Date.now()});
+async function historyState(){
+  const blob=await get(GOLD_HISTORY_KEY,ACCESS_READ_OPTIONS);
+  if(!blob)return {data:{version:1,revision:null,weeks:[]},etag:null};
+  const data=await streamJson(blob.stream);
+  if(data.version!==1||!Array.isArray(data.weeks)||!blob.blob?.etag||blob.blob.etag.startsWith('W/'))throw new Error('history_unavailable');
+  return {data,etag:blob.blob.etag};
+}
+async function saveHistory(current,weeks){
+  const data={version:1,manual_baseline:current.data.manual_baseline||{...MANUAL},revision:crypto.randomUUID(),updated_at:new Date().toISOString(),weeks};
+  await put(GOLD_HISTORY_KEY,JSON.stringify(data),{access:'private',addRandomSuffix:false,contentType:'application/json',
+    ...(current.etag?{ifMatch:current.etag}:{allowOverwrite:false})});
+  return data;
+}
+async function historyRead(req,res){
+  if(!syncAuth(req))return res.status(401).json({ok:false});
+  try{
+    if(req.query.data==='gold-history-file'){
+      const current=await historyState(),file=await readPrivateJson('portfolio/gold-history/workbook.json');
+      if(!file||file.revision!==current.data.revision)return res.status(409).json({ok:false,error:'workbook_not_current'});
+      const blob=await get(file.key,{access:'private',useCache:false});if(!blob)return res.status(404).json({ok:false});
+      const reader=blob.stream.getReader(),chunks=[];while(true){const part=await reader.read();if(part.done)break;chunks.push(Buffer.from(part.value));}
+      const bytes=Buffer.concat(chunks);
+      return res.status(200).json({ok:true,revision:file.revision,content_base64:bytes.toString('base64'),sha256:Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex')});
+    }
+    if(req.query.data==='gold-history-config')return res.status(200).json({ok:true,assets:ASSETS,manual:(await historyState()).data.manual_baseline||MANUAL,
+      groups:historyOptions().groups,minimum_rial:MIN_REPORT_VALUE_RIAL,manual_unchanged_since:'2025-10-25',manual_unchanged_until:'2026-10-25',
+      manual_confirmation:'Owner confirmed unchanged over the preceding year on 2026-10-25'});
+    return res.status(200).json({ok:true,...(await historyState()).data});
+  }catch(_){return res.status(503).json({ok:false});}
+}
+function currentHistoryWeek(){
+  const local=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tehran',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  const day=new Date(local+'T12:00:00Z');day.setUTCDate(day.getUTCDate()-(day.getUTCDay()+2)%7);
+  return day.toISOString().slice(0,10);
+}
+async function historyWrite(req,res){
+  if(!syncAuth(req))return res.status(401).json({ok:false});
+  try{
+    const current=await historyState(),body=req.body||{};
+    if(req.query.sync==='gold-history-file'){
+      if(body.revision!==current.data.revision)return res.status(409).json({ok:false,error:'history_changed'});
+      if(typeof body.content_base64!=='string'||body.content_base64.length>3000000)return res.status(400).json({ok:false});
+      const bytes=Buffer.from(body.content_base64,'base64');
+      if(bytes.length<100||bytes.subarray(0,2).toString()!=='PK'||bytes.includes(Buffer.from('vbaProject.bin')))return res.status(400).json({ok:false});
+      const key='portfolio/gold-history/workbooks/'+body.revision+'.xlsx';
+      await put(key,bytes,{access:'private',addRandomSuffix:false,allowOverwrite:true,contentType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+      const latest=await historyState();if(latest.data.revision!==body.revision)return res.status(409).json({ok:false,error:'history_changed'});
+      await writePrivateJson('portfolio/gold-history/workbook.json',{revision:body.revision,key,updated_at:new Date().toISOString()});
+      return res.status(200).json({ok:true,revision:body.revision,stored:true});
+    }
+    let incoming;
+    if(req.query.sync==='gold-observation'){
+      const journal=ASSETS.filter(a=>!(a in MANUAL));
+      if(!body.assets||Object.keys(body.assets).length!==23||journal.some(a=>typeof body.assets[a]!=='number'||!Number.isFinite(body.assets[a])||body.assets[a]<0)||
+        !Number.isFinite(Date.parse(body.source_checked_at))||Date.now()-Date.parse(body.source_checked_at)>120000||Date.parse(body.source_checked_at)>Date.now())return res.status(400).json({ok:false});
+      let week=currentHistoryWeek();const localDay=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Tehran',weekday:'short'}).format(new Date());
+      if(body.bootstrap===true){const day=new Date(week+'T12:00:00Z');if(localDay!=='Fri')day.setUTCDate(day.getUTCDate()+7);week=day.toISOString().slice(0,10);}
+      if(body.bootstrap!==true&&!['Fri','Sat'].includes(localDay))return res.status(409).json({ok:false,error:'outside_weekly_capture_window'});
+      const {prices}=await getPrices(),asof=new Date().toISOString(),fx=prices['دلار']?.priceRial,quotes={};
+      for(const asset of ASSETS){
+        const p=prices[asset];if(!p)continue;
+        const price=cryptoAsset(asset)?p.priceUsd*fx:p.priceRial;
+        if(Number.isFinite(price)&&price>0)quotes[asset]={price_rial:price,source:cryptoAsset(asset)?p.source+' × '+prices['دلار']?.source:p.source,quoted_at:p.quotedAt||p.retrievedAt||asof};
+      }
+      const gold=prices['آبشده (طلب)'];
+      incoming=[{week_ending:week,mode:body.bootstrap===true?'baseline':'live',as_of:asof,source_checked_at:body.source_checked_at,workbook_updated_at:body.workbook_updated_at,
+        workbook_sha256:body.workbook_sha256,quantities:{...body.assets,...MANUAL},quotes,
+        gold_quote:gold?{price_rial:gold.priceRial,source:gold.source,quoted_at:gold.quotedAt||gold.retrievedAt||asof}:null,issues:[]}];
+    }else{
+      if(body.revision!==current.data.revision)return res.status(409).json({ok:false,error:'history_changed'});
+      if(!Array.isArray(body.weeks)||!body.weeks.length||body.weeks.length>60)return res.status(400).json({ok:false});
+      const manual=current.data.manual_baseline||MANUAL;
+      if(body.weeks.some(w=>w.mode!=='historical'||Object.entries(manual).some(([a,q])=>w.quantities?.[a]!==q)))return res.status(400).json({ok:false});
+      incoming=body.weeks;
+    }
+    const weeks=mergeGoldWeeks(current.data.weeks,incoming,historyOptions());
+    if(weeks.length>1000)return res.status(400).json({ok:false});
+    const data=await saveHistory(current,weeks);
+    const pending=weeks.find(w=>w.week_ending===incoming.at(-1).week_ending&&w.mode!=='historical'&&w.quantities['بلک راک']>0&&!w.quotes['بلک راک']);
+    if(body.notify===true&&pending)waitUntil(notifyHistoryPrice(pending));
+    return res.status(200).json({ok:true,revision:data.revision,weeks:weeks.length,complete_weeks:weeks.filter(w=>w.status==='complete').length});
+  }catch(error){return res.status(error instanceof BlobPreconditionFailedError?409:error.message==='invalid_gold_history_record'?400:503).json({ok:false,error:'history_write_failed'});}
+}
+async function notifyHistoryPrice(week){
+  const access=await loadAccessState({strict:true});
+  for(const uid of [...new Set([...adminUserIds(),...access.delegatedAdmins])])await historyPricePrompt(uid,week.week_ending);
+}
+async function historyPricePrompt(uid,weekEnding){
+  if(!isBotAdmin(uid,await loadAccessState({strict:true})))return false;
+  const week=(await historyState()).data.weeks.find(w=>w.week_ending===weekEnding);
+  if(!week||!(week.quantities['بلک راک']>0)||week.quotes['بلک راک'])return false;
+  const response=await fetch('https://api.telegram.org/bot'+process.env.TELEGRAM_BOT_TOKEN+'/sendMessage',{
+    method:'POST',signal:AbortSignal.timeout(8000),headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:Number(uid),parse_mode:'HTML',
+      text:'برای ثبت ارزش هفتگی پرتفوی، قیمت هر واحد صندوق بلک راک (اکوکوچ) در زمان زیر را به تومان پاسخ دهید.\n\nزمان ثبت: '+boldPortfolioTime(week.as_of),
+      reply_markup:{force_reply:true,input_field_placeholder:'قیمت هر واحد به تومان'}})});
+  const result=await response.json();
+  if(response.ok&&result.ok&&result.result?.message_id){
+    await writePrivateJson('portfolio/gold-history/prompts/'+uid+'/'+result.result.message_id+'.json',{week_ending:weekEnding});
+    await cleanupTemporaryReplies(Number(uid),result.result.message_id,true);return true;
+  }
+  return false;
+}
+async function acceptHistoryPrice(chatId,uid,weekEnding,text){
+  if(!isBotAdmin(uid,await loadAccessState({strict:true})))return;
+  const price=parseUserPrice(text);
+  if(!Number.isFinite(price)||price<=0||price>Number.MAX_SAFE_INTEGER){await sendTelegram(chatId,'قیمت معتبر هر واحد را به تومان پاسخ دهید.',{menu:true,audience:'admin'});return;}
+  const current=await historyState(),week=current.data.weeks.find(w=>w.week_ending===weekEnding);
+  if(!week||week.quotes['بلک راک']){await sendTelegram(chatId,'قیمت این هفته قبلاً ثبت شده است.',{menu:true,audience:'admin'});return;}
+  const input={...week,quotes:{...week.quotes,'بلک راک':{price_rial:price,source:'Admin confirmed for recorded week',quoted_at:week.as_of}}};
+  const replacement=calculateGoldWeek(input,historyOptions());
+  const weeks=mergeGoldWeeks(current.data.weeks.filter(w=>w.week_ending!==weekEnding),[replacement],historyOptions());
+  await saveHistory(current,weeks);
+  const queued=await dispatchHistoryExport();
+  await sendTelegram(chatId,replacement.status==='complete'?'قیمت ثبت شد؛ ارزش هفتگی محاسبه شد.'+(queued?' فایل Excel در حال به‌روزرسانی است.':''):
+    'قیمت بلک راک ثبت شد؛ این هفته هنوز داده‌های تأییدنشدهٔ دیگری دارد.',{menu:true,audience:'admin'});
+}
+async function dispatchHistoryExport(){
+  try{
+    const r=await fetch('https://api.github.com/repos/SahandFAME/portfolio-agent-telegram/actions/workflows/gold-history.yml/dispatches',{
+      method:'POST',redirect:'error',signal:AbortSignal.timeout(12000),headers:{Authorization:'Bearer '+process.env.GITHUB_ACTIONS_TOKEN,
+        Accept:'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'},body:JSON.stringify({ref:'main',inputs:{action:'export'}})});
+    return r.status===204;
+  }catch(_){return false;}
+}
+async function sendGoldHistory(chatId){
+  if(!canReadReports(String(chatId),await loadAccessState({strict:true})))return;
+  const data=(await historyState()).data;
+  if(!data.weeks.length){await sendTelegram(chatId,'تاریخچهٔ هفتگی هنوز ثبت نشده است.',{menu:true});return;}
+  const svg=goldHistorySvg(data.weeks,{formatTime:portfolioTime,escape:escXml,number:n=>Number(n).toLocaleString('fa-IR',{maximumFractionDigits:3})});
+  await sendTelegramPhoto(chatId,renderAllocationSvg(svg),'ارزش هفتگی پرتفوی بر حسب گرم طلای ۱۸ عیار');
+  if(isBotAdmin(String(chatId),await loadAccessState({strict:true}))){
+    const buttons=[[{text:'دریافت فایل Excel',callback_data:'history:excel'}]];
+    const pending=data.weeks.filter(w=>w.mode!=='historical'&&w.quantities['بلک راک']>0&&!w.quotes['بلک راک']).at(-1);
+    if(pending)buttons.unshift([{text:'ثبت قیمت بلک راک هفته',callback_data:'history:price:'+pending.week_ending}]);
+    await sendTelegramWithKeyboard(chatId,'تاریخچهٔ هفتگی',buttons,{temporary:false});
+  }
+}
+async function handleHistoryCallback(callback){
+  const uid=String(callback.from?.id||''),chat=callback.message?.chat;
+  if(chat?.type!=='private'||String(chat.id)!==uid)return;
+  try{
+    const access=await loadAccessState({strict:true,purgeExpired:true});
+    if(isExpiredMember(uid,access)){await answerCallback(callback.id,'');return;}
+    if(!isBotAdmin(uid,access)){await answerCallback(callback.id,'دسترسی مدیریت ندارید.');return;}
+    if(callback.data==='history:excel'){
+      const current=await historyState(),file=await readPrivateJson('portfolio/gold-history/workbook.json');
+      if(!file||file.revision!==current.data.revision){await dispatchHistoryExport();await answerCallback(callback.id,'فایل Excel در حال آماده‌سازی است؛ کمی بعد دوباره انتخاب کنید.');return;}
+      const blob=await get(file.key,{access:'private',useCache:false});if(!blob)throw new Error();
+      const reader=blob.stream.getReader(),chunks=[];while(true){const part=await reader.read();if(part.done)break;chunks.push(Buffer.from(part.value));}
+      if((await historyState()).data.revision!==file.revision){await answerCallback(callback.id,'تاریخچه تغییر کرده است؛ فایل در حال به‌روزرسانی است.');return;}
+      if(!isBotAdmin(uid,await loadAccessState({strict:true})))return;
+      const form=new FormData();form.append('chat_id',uid);form.append('document',new Blob([Buffer.concat(chunks)],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),'Portfolio-18K-Gold-History.xlsx');
+      await answerCallback(callback.id,'');await deliverTelegram(chat.id,'sendDocument',{method:'POST',body:form});return;
+    }
+    const match=String(callback.data).match(/^history:price:(\d{4}-\d{2}-\d{2})$/);
+    if(match){await answerCallback(callback.id,'');await historyPricePrompt(uid,match[1]);return;}
+    await answerCallback(callback.id,'گزینه نامعتبر.');
+  }catch(_){await answerCallback(callback.id,'دریافت تاریخچه ناموفق بود؛ دوباره تلاش کنید.');}
 }
 
 function setup(req,res){
