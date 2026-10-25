@@ -1,0 +1,296 @@
+"""Read-only historical reconstruction and new, separate Excel history export.
+
+The source XLSM is never saved. Unreconciled/undated trades are not guessed.
+No holdings, quotes, tokens or raw service responses are printed.
+"""
+from collections import defaultdict
+from datetime import date, datetime, time, timedelta, timezone
+from io import BytesIO
+import base64
+import hashlib
+import json
+import math
+import os
+import re
+from urllib.parse import quote
+from zoneinfo import ZoneInfo
+
+import jdatetime
+from openpyxl import Workbook,load_workbook
+from openpyxl.chart import LineChart,Reference
+from openpyxl.styles import Alignment,Font,PatternFill
+from openpyxl.utils.cell import range_boundaries
+from verify_onedrive import (MAPPING,SyncError,download_workbook,extract_quantities,graph_token,
+                             http,json_request,required,utcnow)
+
+TEHRAN=ZoneInfo('Asia/Tehran')
+ENDPOINT='https://portfolio-agent-telegram.vercel.app/api/telegram'
+DIGITS=str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789')
+CRYPTO={'BTC':'bitcoin','ETH':'ethereum','Tether':'tether','Link':'chainlink','ADA':'cardano','SOL':'solana','ONDO':'ondo-finance'}
+
+
+def parse_trade_date(value):
+    if isinstance(value,datetime):return value.date()
+    if isinstance(value,date):return value
+    raw=str(value or '').translate(DIGITS).strip()
+    parts=re.fullmatch(r'(\d{1,4})[/-](\d{1,2})[/-](\d{1,4})',raw)
+    if not parts:raise ValueError('undated_or_compound_trade')
+    a,b,c=map(int,parts.groups())
+    if a>=1700:return date(a,b,c)
+    if 1300<=a<=1599:return jdatetime.date(a,b,c).togregorian()
+    # Year-last strings are accepted only when month/day order is unambiguous.
+    if c>=1700 and a>12 and b<=12:return date(c,b,a)
+    if c>=1700 and b>12 and a<=12:return date(c,a,b)
+    raise ValueError('ambiguous_trade_date')
+
+
+def reconstruct(content,config):
+    current=extract_quantities(content)
+    book=load_workbook(BytesIO(content),data_only=True,keep_links=False)
+    try:
+        tables={t.name:(s,t) for s in book for t in s.tables.values()}
+        trades={};problems={};extras=[]
+        for asset,spec in MAPPING.items():
+            sheet,table=tables[spec['table']];left,top,right,bottom=range_boundaries(table.ref)
+            headers=[c.name for c in table.tableColumns];qi=left+headers.index(spec['column'])
+            di=left+headers.index('Date' if 'Date' in headers else 'تاریخ')
+            events=[];issues=[];net=0.0
+            for row in range(top+1,bottom):
+                quantity=sheet.cell(row,qi).value
+                if quantity is None:continue
+                if isinstance(quantity,bool) or not isinstance(quantity,(int,float)) or not math.isfinite(quantity):
+                    issues.append('invalid_transaction_quantity@'+spec['table']+'#'+str(row));continue
+                net+=quantity
+                if quantity==0:continue
+                try:events.append((parse_trade_date(sheet.cell(row,di).value),float(quantity)))
+                except (ValueError,TypeError,OverflowError):issues.append('ambiguous_transaction_date@'+spec['table']+'#'+str(row))
+            if not math.isclose(net,current[asset],rel_tol=1e-10,abs_tol=1e-8):issues.append('quantity_reconciliation_failed')
+            balance=0.0;daily=defaultdict(float)
+            for day,q in events:daily[day]+=q
+            for day in sorted(daily):
+                balance+=daily[day]
+                if balance < -max(1e-8,abs(current[asset])*1e-10):issues.append('negative_reconstructed_balance')
+            trades[asset]=events;problems[asset]=sorted(set(issues))
+        for name,(sheet,table) in tables.items():
+            if name in {v['table'] for v in MAPPING.values()}:continue
+            columns=[c.name for c in table.tableColumns]
+            if any(c in columns for c in ('Quantity','حجم خرید')) and any(c in columns for c in ('Date','تاریخ')):
+                left,top,right,bottom=range_boundaries(table.ref)
+                qi=left+columns.index('Quantity' if 'Quantity' in columns else 'حجم خرید')
+                di=left+columns.index('Date' if 'Date' in columns else 'تاریخ')
+                events=[];ambiguous=False
+                for r in range(top+1,bottom):
+                    amount=sheet.cell(r,qi).value
+                    if amount is None or amount==0:continue
+                    if isinstance(amount,bool) or not isinstance(amount,(int,float)) or not math.isfinite(amount):ambiguous=True;continue
+                    try:events.append((parse_trade_date(sheet.cell(r,di).value),float(amount)))
+                    except (ValueError,TypeError):ambiguous=True
+                balance=sheet.cell(bottom,qi).value
+                closed_before_window=table.totalsRowCount==1 and balance==0 and not ambiguous and events and max(d for d,_ in events)<date(2025,10,25) and math.isclose(sum(q for _,q in events),0,abs_tol=1e-8)
+                if (events or ambiguous) and not closed_before_window:
+                    extras.append(sheet.title+' / '+name)
+        return current,trades,problems,extras
+    finally:book.close()
+
+
+def week_dates():
+    # The initial owner-confirmed year is immutable. Future records are live
+    # observations; a later manual-quantity edit must not rewrite this baseline.
+    end=date(2026,10,23)
+    return [end-timedelta(weeks=i) for i in reversed(range(52))]
+
+
+def quantities_at(day,trades,problems,manual):
+    result={}
+    for asset,events in trades.items():
+        result[asset]=None if problems[asset] else max(0.0,sum(q for d,q in events if d<=day))
+    result.update(manual)
+    return result
+
+
+def api(query,body=None):
+    return json_request(ENDPOINT+query,method='POST' if body is not None else 'GET',
+        headers={'x-portfolio-sync-secret':required('PORTFOLIO_SYNC_SECRET_AGENT'),'Content-Type':'application/json'},
+        body=json.dumps(body,allow_nan=False).encode() if body is not None else None,retries=0,redirect=False)
+
+
+def norm(text):return re.sub(r'[\s\u200c\u200d]','',text.translate(str.maketrans('كيى','کیی')))
+
+
+def tgju_history(slug):
+    url='https://api.tgju.org/v1/market/indicator/summary-table-data/'+quote(slug,safe='')
+    first=json_request(url+'?lang=fa&start=0&length=1&order_dir=asc')
+    count=first.get('recordsTotal')
+    if not isinstance(count,int) or count<0:raise SyncError('historical_price_schema')
+    data=json_request(url+f'?lang=fa&start={max(0,count-650)}&length=650&order_dir=asc')
+    result=[]
+    for row in data.get('data',[]):
+        if not isinstance(row,list) or len(row)<8:raise SyncError('historical_price_schema')
+        day=datetime.strptime(row[6],'%Y/%m/%d').date()
+        value=float(str(row[3]).translate(DIGITS).replace(',',''))
+        if math.isfinite(value) and value>0:result.append((datetime.combine(day,time.max,TEHRAN),value))
+    return sorted(result)
+
+
+def listed_history(asset):
+    data=json_request('https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/'+quote(asset,safe=''))
+    matches=[r for r in data.get('instrumentSearch',[]) if norm(str(r.get('lVal18AFC','')))==norm(asset)]
+    codes={str(r.get('insCode')) for r in matches if r.get('insCode')}
+    if len(codes)!=1:raise SyncError('historical_instrument_unverified')
+    data=json_request('https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceDailyList/'+next(iter(codes))+'/0')
+    result=[]
+    for row in data.get('closingPriceDaily',[]):
+        day=datetime.strptime(str(row['dEven']),'%Y%m%d').date()
+        value=row.get('pDrCotVal') or row.get('pClosing')
+        if isinstance(value,(float,int)) and math.isfinite(value) and value>0:result.append((datetime.combine(day,time.max,TEHRAN),float(value)))
+    return sorted(result)
+
+
+def crypto_history(asset):
+    data=json_request('https://api.coingecko.com/api/v3/coins/'+CRYPTO[asset]+'/market_chart?vs_currency=usd&days=365')
+    return [(datetime.fromtimestamp(row[0]/1000,timezone.utc),float(row[1])) for row in data.get('prices',[]) if len(row)==2 and row[1]>0]
+
+
+def last_quote(series,asof,source):
+    before=[row for row in series if row[0]<=asof and asof-row[0]<=timedelta(days=7)]
+    if not before:return None
+    stamp,value=max(before,key=lambda row:row[0])
+    return {'price_rial':value,'quoted_at':stamp.astimezone(timezone.utc).isoformat(),'source':source}
+
+
+def historical_weeks(content,modified,checked,config,existing):
+    current,trades,problems,extras=reconstruct(content,config)
+    manual=existing.get('manual_baseline') or config['manual']
+    dates=week_dates();series={};source={}
+    definitions={'gold':'geram18','دلار':'price_dollar_rl','سکه تمام':'sekee','ربع سکه بانکی':'rob'}
+    for asset,slug in definitions.items():
+        try:series[asset]=tgju_history(slug);source[asset]='TGJU daily close (IRR)'
+        except Exception:series[asset]=[]
+    for asset in MAPPING:
+        if asset=='بلک راک' or problems[asset]:continue
+        try:
+            if asset in CRYPTO:series[asset]=crypto_history(asset);source[asset]='CoinGecko USD × TGJU USD/IRR'
+            elif asset!='شمش نقره 999':series[asset]=listed_history(asset);source[asset]='TSETMC official daily market price (IRR)'
+            # Silver must match the actual certificate. Never substitute spot silver.
+        except Exception:series[asset]=[]
+    rows=[];digest=hashlib.sha256(content).hexdigest()
+    for day in dates:
+        asof=datetime.combine(day,time.max,TEHRAN)
+        quantities=quantities_at(day,trades,problems,manual)
+        quotes={};gold=last_quote(series.get('gold',[]),asof,'TGJU 18K gram daily close (IRR)')
+        fx=last_quote(series.get('دلار',[]),asof,'TGJU USD/IRR daily close')
+        for asset,q in quantities.items():
+            if q is None or q==0:continue
+            if asset in ('آبشده (طلب)','آبشده (شمش زربد)'):p=gold
+            elif asset=='ربع سکه غیره':p={**gold,'price_rial':gold['price_rial']*2.03325,'source':'TGJU 18K gram × 2.03325'} if gold else None
+            else:p=last_quote(series.get(asset,[]),asof,source.get(asset,'Historical quote'))
+            if asset in CRYPTO:
+                p={**p,'price_rial':p['price_rial']*fx['price_rial']} if p and fx else None
+            if p:quotes[asset]=p
+        issues=['unmapped_historical_trade_table:'+re.sub(r'[<>&\n]','',name) for name in extras]
+        issues.extend(code+':'+asset for asset,codes in problems.items() for code in codes)
+        rows.append({'week_ending':day.isoformat(),'as_of':asof.astimezone(timezone.utc).isoformat(),'source_checked_at':checked,
+            'workbook_updated_at':modified,'workbook_sha256':digest,'mode':'historical','quantities':quantities,'quotes':quotes,'gold_quote':gold,'issues':issues})
+    return rows,{'unmapped_trade_tables':len(extras),'unreconciled_assets':sum(bool(p) for p in problems.values())}
+
+
+def fa_time(stamp):
+    value=datetime.fromisoformat(stamp.replace('Z','+00:00')).astimezone(TEHRAN)
+    return jdatetime.datetime.fromgregorian(datetime=value).strftime('%Y/%m/%d %H:%M').translate(str.maketrans('0123456789','۰۱۲۳۴۵۶۷۸۹'))
+
+
+def safe_text(value):
+    value=str(value)
+    return "'"+value if value.startswith(('=','+','-','@')) else value
+
+
+def export_excel(history,groups):
+    book=Workbook();summary=book.active;summary.title='ارزش هفتگی'
+    summary.append(['هفته منتهی به','طلای ۱۸ عیار (گرم)','تغییر هفتگی (گرم)','تغییر هفتگی (درصد)','ارزش (تومان)','قیمت هر گرم (تومان)','وضعیت','تغییر تعداد دارایی‌ها','زمان مشاهده (تهران)','زمان بررسی منبع (تهران)'])
+    holdings=book.create_sheet('دارایی‌ها');holdings.append(['هفته','دارایی','گروه','تعداد','قیمت واحد (ریال)','ارزش منظورشده (تومان)','منبع قیمت','زمان قیمت (تهران)'])
+    allocations=book.create_sheet('ترکیب دارایی');allocations.append(['هفته','گروه','درصد'])
+    exceptions=book.create_sheet('موارد نیازمند بررسی');exceptions.append(['هفته','نوع مسئله','دارایی'])
+    for row in history['weeks']:
+        label_day=datetime.fromisoformat(row['as_of'].replace('Z','+00:00')).astimezone(TEHRAN).date() if row['mode']=='baseline' else date.fromisoformat(row['week_ending'])
+        week=jdatetime.date.fromgregorian(date=label_day).strftime('%Y/%m/%d').translate(str.maketrans('0123456789','۰۱۲۳۴۵۶۷۸۹'))
+        gold=row.get('gold_quote')
+        summary.append([week,row.get('gold_grams'),row.get('change_gold_grams'),row.get('change_percent'),
+            math.floor(row['total_rial']/10+.5) if row.get('total_rial') is not None else None,math.floor(gold['price_rial']/10+.5) if gold else None,
+            'موقت' if row['mode']=='baseline' else 'کامل' if row['status']=='complete' else 'ناقص',row.get('quantity_change_count'),fa_time(row['as_of']),fa_time(row['source_checked_at'])])
+        for asset,qty in row['quantities'].items():
+            p=row.get('quotes',{}).get(asset)
+            if qty==0 or isinstance(qty,(int,float)) and p and qty*p['price_rial']<500000:continue
+            value=row.get('included_values',{});value=value.get(asset) if isinstance(value,dict) else None
+            holdings.append([week,safe_text(asset),safe_text(groups.get(asset,'')),qty,p['price_rial'] if p else None,math.floor(value/10+.5) if value is not None else None,
+                safe_text(p['source']) if p else None,fa_time(p['quoted_at']) if p else None])
+        for group,pct in (row.get('allocation') or {}).items():allocations.append([week,safe_text(group),pct])
+        for issue in row.get('issues',[]):
+            kind,_,asset=issue.partition(':')
+            label,_,location=kind.partition('@')
+            labels={'ambiguous_transaction_date':'تاریخ تراکنش نامشخص یا چندپهلو','invalid_transaction_quantity':'تعداد تراکنش معتبر نیست',
+                'quantity_reconciliation_failed':'جمع تغییرات تعداد با ماندهٔ تأییدشده تطبیق ندارد','negative_reconstructed_balance':'ماندهٔ تاریخی منفی می‌شود',
+                'unmapped_historical_trade_table':'جدول معاملاتی خارج از نگاشت فعلی نیاز به بررسی دارد'}
+            description=labels.get(label,label)+(' • '+location if location else '')
+            exceptions.append([week,safe_text(description),safe_text(asset)])
+        for asset in row.get('missing_assets',[]):exceptions.append([week,'تعداد تاریخی تأیید نشده' if row['quantities'].get(asset) is None else 'قیمت تاریخی تأیید نشده',safe_text(asset)])
+        if not gold:exceptions.append([week,'قیمت تاریخی هر گرم طلای ۱۸ عیار تأیید نشده',''])
+    analysis=book.create_sheet('خلاصه تحلیل')
+    analysis.append(['شاخص','مقدار'])
+    final=[r for r in history['weeks'] if r['mode']!='baseline']
+    valid=[r for r in final if r['status']=='complete']
+    analysis.append(['هفته‌های ثبت‌شده',len(final)])
+    analysis.append(['هفته‌های کامل و تأییدشده',len(valid)])
+    analysis.append(['هفته‌های نیازمند بررسی',len(final)-len(valid)])
+    endpoints=len(final)>1 and final[0]['status']=='complete' and final[-1]['status']=='complete'
+    analysis.append(['تغییر ارزش در بازه (گرم طلای ۱۸ عیار)',final[-1]['gold_grams']-final[0]['gold_grams'] if endpoints else None])
+    analysis.append(['کمترین ارزش تأییدشده (گرم)',min(r['gold_grams'] for r in valid) if valid else None])
+    analysis.append(['بیشترین ارزش تأییدشده (گرم)',max(r['gold_grams'] for r in valid) if valid else None])
+    for row in summary.iter_rows(min_row=2):
+        for col in [1,2]:row[col].number_format='0.000000'
+        for col in [4,5]:row[col].number_format='#,##0'
+    chart=LineChart();chart.title='ارزش پرتفوی بر حسب طلای ۱۸ عیار';chart.y_axis.title='گرم';chart.x_axis.title='هفته';chart.display_blanks='gap'
+    chart.add_data(Reference(summary,min_col=2,min_row=1,max_row=summary.max_row),titles_from_data=True)
+    chart.set_categories(Reference(summary,min_col=1,min_row=2,max_row=summary.max_row));chart.width=25;chart.height=13;summary.add_chart(chart,'L2')
+    for sheet in book:
+        sheet.sheet_view.rightToLeft=True;sheet.freeze_panes='A2';sheet.auto_filter.ref=sheet.dimensions
+        for cell in sheet[1]:cell.font=Font(name='Tahoma',bold=True,color='FFFFFF');cell.fill=PatternFill('solid',fgColor='17283E');cell.alignment=Alignment(horizontal='center')
+        for column in sheet.columns:sheet.column_dimensions[column[0].column_letter].width=24
+    for row in summary.iter_rows(min_row=2):
+        for col in [0,8,9]:row[col].font=Font(name='Tahoma',bold=True)
+    stream=BytesIO();book.save(stream);return stream.getvalue()  # New report workbook only.
+
+
+def publish_export():
+    history=api('?data=gold-history');config=api('?data=gold-history-config')
+    data=export_excel(history,config['groups'])
+    result=api('?sync=gold-history-file',{'revision':history['revision'],'content_base64':base64.b64encode(data).decode()})
+    if result.get('ok') is not True or result.get('revision')!=history['revision']:raise SyncError('history_export_not_verified')
+    readback=api('?data=gold-history-file')
+    if readback.get('revision')!=history['revision'] or readback.get('sha256')!=hashlib.sha256(data).hexdigest():raise SyncError('history_export_readback_mismatch')
+    return {'weeks':len(history['weeks']),'complete_weeks':sum(w['status']=='complete' for w in history['weeks']),'excel_stored':True}
+
+
+def run(action):
+    diagnostics={}
+    if action!='export':
+        token=graph_token();content,modified=download_workbook(token);checked=utcnow()
+        config=api('?data=gold-history-config');existing=api('?data=gold-history')
+        if action in ('backfill','bootstrap'):
+            rows,diagnostics=historical_weeks(content,modified,checked,config,existing)
+            result=api('?sync=gold-history',{'revision':existing['revision'],'weeks':rows})
+            if result.get('ok') is not True:raise SyncError('history_not_stored')
+        if action in ('capture','bootstrap'):
+            if action=='bootstrap':content,modified=download_workbook(token);checked=utcnow()
+            result=api('?sync=gold-observation',{'assets':extract_quantities(content),'workbook_updated_at':modified,'source_checked_at':checked,
+                'workbook_sha256':hashlib.sha256(content).hexdigest(),'notify':action=='capture','bootstrap':action=='bootstrap'})
+            if result.get('ok') is not True:raise SyncError('weekly_observation_not_stored')
+    return {'ok':True,**diagnostics,**publish_export()}
+
+if __name__=='__main__':
+    try:
+        action=os.environ.get('HISTORY_ACTION','export')
+        if action not in ('export','backfill','capture','bootstrap'):raise SyncError('invalid_history_action')
+        print(json.dumps(run(action)))
+    except Exception as error:
+        print(json.dumps({'ok':False,'error':str(error) if isinstance(error,SyncError) else 'gold_history_failed'}))
+        raise SystemExit(1)

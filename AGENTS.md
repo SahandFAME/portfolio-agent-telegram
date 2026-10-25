@@ -63,3 +63,10 @@ Purge valid expired guest/advisor grants before bot/admin operations and via
 hourly maintenance; use strong-ETag retries to preserve concurrent renewals.
 Removed users require fresh approval, with no expiry notice. Keep owner/admin
 exemptions and never try to delete the user's private Telegram chat.
+
+Gold history uses grams of 18K gold (portfolio rial value / rial-per-gram quote).
+Do not fabricate old quantities, prices, starting balances or complete totals.
+Unreconciled/ambiguous transactions remain gaps. Keep the Trading Journal read-only;
+write only the separate private report workbook. Owners/admins/advisors may view
+the chart; Excel downloads and weekly price entry remain admin-only. Public
+workflow output must contain aggregate diagnostics only. See docs/GOLD_HISTORY.md.

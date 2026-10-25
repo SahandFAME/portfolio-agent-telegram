@@ -6,6 +6,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { Resvg } from '@resvg/resvg-js';
 import { BlobPreconditionFailedError } from '@vercel/blob';
+import * as goldHistory from '../lib/gold-history.js';
 
 const source = await fs.readFile(new URL('../api/telegram.js', import.meta.url), 'utf8');
 // Evaluate the actual unmodified handler, injecting only external dependencies.
@@ -38,6 +39,7 @@ async function app({readError=false, quoteFailure=false, env={}}={}) {
       return quotes(url,options);
     }});
   const dependencies = {
+    '../lib/gold-history.js':goldHistory,
     '@vercel/blob':{
       BlobPreconditionFailedError,
       head:async key=>({etag:JSON.stringify(store.get(key)),size:Buffer.byteLength(JSON.stringify(store.get(key)))}),

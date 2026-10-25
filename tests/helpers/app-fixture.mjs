@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import path from 'node:path';
 import sharp from 'sharp';
 import { Resvg } from '@resvg/resvg-js';
+import * as goldHistory from '../../lib/gold-history.js';
 import { BlobPreconditionFailedError } from '@vercel/blob';
 
 const source = await fs.readFile(new URL('../../api/telegram.js', import.meta.url), 'utf8');
@@ -52,6 +53,7 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
       return quotes(url,options);
     }});
   const dependencies = {
+    '../lib/gold-history.js':goldHistory,
     '@vercel/blob':{
       BlobPreconditionFailedError,
       head:async key=>({etag:JSON.stringify(store.get(key)),size:Buffer.byteLength(JSON.stringify(store.get(key)))}),
@@ -60,7 +62,7 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
         if(!store.has(key)) return null;
         const text=JSON.stringify(store.get(key));
         const weak=forceWeakEtag||(compressAccessReads&&options.headers?.['Accept-Encoding']!=='identity');
-        return {blob:{etag:weak?'W/'+text:text},stream:new ReadableStream({start(c){c.enqueue(Buffer.from(text));c.close();}})};
+        return {blob:{etag:weak?'W/'+text:text},stream:new ReadableStream({start(c){c.enqueue(Buffer.isBuffer(store.get(key))?store.get(key):Buffer.from(text));c.close();}})};
       },
       put:async(key,value,options)=>{
         if(beforeWrite)await beforeWrite(key,value,options,store);
@@ -68,7 +70,8 @@ export async function app({readError=false, dispatchStatus=204, env={}, telegram
           throw new BlobPreconditionFailedError();
         }
         if(options.allowOverwrite===false&&store.has(key))throw new Error('fixture blob already exists');
-        writes.push({key,value:JSON.parse(value),options});store.set(key,JSON.parse(value));
+        const stored=typeof value==='string'?JSON.parse(value):Buffer.from(value);
+        writes.push({key,value:stored,options});store.set(key,stored);
       }
     },
     '@vercel/functions':{waitUntil:promise=>background.push(promise)},

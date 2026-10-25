@@ -5,7 +5,7 @@ import sys
 import unittest
 
 sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
-from audit_history_inputs import audit
+from audit_history_inputs import audit,safe_summary
 from test_verify_onedrive import workbook
 
 
@@ -18,6 +18,9 @@ class HistoryAuditTests(unittest.TestCase):
         self.assertTrue(all(row['nonempty_rows']==1 for row in result['tables']))
         self.assertTrue(all(row['transaction_net_matches_current_total'] is False for row in result['tables']))
         self.assertNotIn('999999',json.dumps(result))
+        summary=safe_summary(result)
+        self.assertEqual(set(summary),{'ok','configured_tables','unconfigured_table_count','reconciliation_failures'})
+        self.assertNotIn('tables',summary)
         self.assertEqual(content,before)
 
     def test_audit_keeps_existing_missing_total_and_incomplete_table_guards(self):
