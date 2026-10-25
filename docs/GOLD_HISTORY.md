@@ -57,6 +57,9 @@ qualifying asset rows, allocations, source exceptions and an analysis/coverage
 summary. Its real Excel line chart uses blank gaps. Money displays whole toman;
 quantity arithmetic retains precision. Timestamps use bold Solar Hijri dates and
 Tehran time. Formula-like text is escaped and no source macros are copied.
+Verified individual asset values remain available in the asset sheet when
+another asset blocks a week's total. Unknown asset values stay blank; incomplete
+weeks still have no portfolio total, gold-equivalent value or group percentages.
 
 Regenerate the same logical workbook from the accumulated manifest; private
 revision files preserve prior exports. The pointer must match the current data

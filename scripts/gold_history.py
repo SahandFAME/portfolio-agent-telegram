@@ -228,7 +228,7 @@ def safe_text(value):
 def export_excel(history,groups):
     book=Workbook();summary=book.active;summary.title='ارزش هفتگی'
     summary.append(['هفته منتهی به','طلای ۱۸ عیار (گرم)','تغییر هفتگی (گرم)','تغییر هفتگی (درصد)','ارزش (تومان)','قیمت هر گرم (تومان)','وضعیت','تغییر تعداد دارایی‌ها','زمان مشاهده (تهران)','زمان بررسی منبع (تهران)'])
-    holdings=book.create_sheet('دارایی‌ها');holdings.append(['هفته','دارایی','گروه','تعداد','قیمت واحد (ریال)','ارزش منظورشده (تومان)','منبع قیمت','زمان قیمت (تهران)'])
+    holdings=book.create_sheet('دارایی‌ها');holdings.append(['هفته','دارایی','گروه','تعداد','قیمت واحد (ریال)','ارزش دارایی (تومان)','منبع قیمت','زمان قیمت (تهران)'])
     allocations=book.create_sheet('ترکیب دارایی');allocations.append(['هفته','گروه','درصد'])
     exceptions=book.create_sheet('موارد نیازمند بررسی');exceptions.append(['هفته','نوع مسئله','دارایی'])
     for row in history['weeks']:
@@ -242,6 +242,7 @@ def export_excel(history,groups):
             p=row.get('quotes',{}).get(asset)
             if qty==0 or isinstance(qty,(int,float)) and p and qty*p['price_rial']<500000:continue
             value=row.get('included_values',{});value=value.get(asset) if isinstance(value,dict) else None
+            if value is None and isinstance(qty,(int,float)) and p:value=qty*p['price_rial']
             holdings.append([week,safe_text(asset),safe_text(groups.get(asset,'')),qty,p['price_rial'] if p else None,math.floor(value/10+.5) if value is not None else None,
                 safe_text(p['source']) if p else None,fa_time(p['quoted_at']) if p else None])
         for group,pct in (row.get('allocation') or {}).items():allocations.append([week,safe_text(group),pct])
@@ -278,6 +279,9 @@ def export_excel(history,groups):
         for column in sheet.columns:sheet.column_dimensions[column[0].column_letter].width=24
     for row in summary.iter_rows(min_row=2):
         for col in [0,8,9]:row[col].font=Font(name='Tahoma',bold=True)
+    for sheet,columns in [(holdings,[0,7]),(allocations,[0]),(exceptions,[0])]:
+        for row in sheet.iter_rows(min_row=2):
+            for col in columns:row[col].font=Font(name='Tahoma',bold=True)
     stream=BytesIO();book.save(stream);return stream.getvalue()  # New report workbook only.
 
 
