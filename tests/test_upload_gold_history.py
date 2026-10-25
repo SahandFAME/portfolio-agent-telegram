@@ -44,6 +44,16 @@ class ReportUploadTests(unittest.TestCase):
         self.assertNotIn('Trading',writes[0].args[0]);self.assertTrue(result['onedrive_hash_verified'])
         self.assertEqual(downloads[0].kwargs,{})
 
+    def test_personal_drive_ids_allow_only_equivalent_hex_padding(self):
+        self.assertTrue(upload.same_drive('0'+upload.DRIVE.upper()))
+        for value in [None,42,'other-account','1'+upload.DRIVE,'00'+upload.DRIVE,'b!'+upload.DRIVE,upload.DRIVE+' ']:
+            self.assertFalse(upload.same_drive(value),value)
+        self.folder['parentReference']['driveId']='0'+upload.DRIVE.upper()
+        self.item['parentReference']['driveId']='0'+upload.DRIVE.upper()
+        self.metadata['parentReference']['driveId']='0'+upload.DRIVE.upper()
+        result,_,_=self.run_upload([{'id':'0'+upload.DRIVE.upper()},self.folder,upload.SyncError('http_404'),self.item,self.metadata])
+        self.assertTrue(result['onedrive_hash_verified'])
+
     def test_existing_generated_report_uses_conditional_update(self):
         old=workbook(value=2)
         with patch.object(upload,'api',side_effect=[self.report,{'revision':'rev1'},{'revision':'rev1'}]),patch.object(upload,'export_token',return_value='fixture'),patch.object(upload,'json_request',side_effect=[{'id':upload.DRIVE},self.folder,self.item,self.metadata,self.item,self.metadata]) as graph,patch.object(upload,'http',side_effect=[old,self.data]):
@@ -67,8 +77,9 @@ class ReportUploadTests(unittest.TestCase):
             self.run_upload([{'id':upload.DRIVE},self.folder,self.item,self.metadata],workbook(marker='unrelated workbook'))
 
     def test_source_item_id_is_always_rejected_even_if_renamed(self):
-        with self.assertRaisesRegex(upload.SyncError,'report_destination_not_verified'):
-            self.run_upload([{'id':upload.DRIVE},self.folder,{**self.item,'id':upload.SOURCE_ITEM}])
+        for source in [upload.SOURCE_ITEM,'0'+upload.SOURCE_ITEM]:
+            with self.assertRaisesRegex(upload.SyncError,'report_destination_not_verified'):
+                self.run_upload([{'id':upload.DRIVE},self.folder,{**self.item,'id':source}])
 
     def test_hash_mismatch_is_not_reported_as_success(self):
         with self.assertRaisesRegex(upload.SyncError,'onedrive_report_readback_mismatch'):
