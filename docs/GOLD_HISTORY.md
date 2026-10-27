@@ -22,6 +22,13 @@ not zero. Additional unmapped trade tables are flagged unless they are explicitl
 closed, reconciled and entirely before the historical window. Source table and
 row locators appear in the private workbook exceptions sheet.
 
+On 2026-10-27 the owner confirmed/corrected BTC and Link dates to day/month/year.
+Interpret year-last text dates as day-first for those two assets only, including
+four-digit Gregorian or Solar Hijri years. Native Excel dates and year-first
+dates retain their existing meaning. Invalid, compound and two-digit-year text
+still fails; other assets do not inherit an unconfirmed date convention. After
+parsing, net quantities and nonnegative reconstructed balances must still pass.
+
 BlackRock is zero before its recorded first purchase, consistent with the owner's
 confirmed launch/purchase explanation. It needs no fabricated pre-launch price.
 After purchase it requires an evidenced historical price; a current website quote,
@@ -138,6 +145,17 @@ workbook collision. Generated reports carry the document identifier
 new uploads request conflict rejection. No write retries follow ambiguous upload
 failures. Re-running verifies a completed identical upload without rewriting it.
 Revision changes fail rather than claiming an obsolete report is current.
+
+After verified publication, save the managed report item ID in repository secret
+`ONEDRIVE_GOLD_HISTORY_REPORT_ID`. Some Excel clients remove the document's custom
+identifier on save; a missing identifier is acceptable only for this exact managed
+item in the verified drive/folder, with the expected report structure and no
+macros. Another item with the same filename is not accepted. Before an item ID
+has been saved, one-time recovery may supply `previous_report_fingerprint` to the
+publication workflow. Compute it from the preceding private generated report;
+all worksheet names and cell contents must match, independent of ZIP metadata
+and formatting. Changed contents fail without a write. Save the managed ID only
+after the newly uploaded report passes downloaded-hash and revision checks.
 
 The original `MS_GRAPH_REFRESH_TOKEN` remains dedicated to read-only source
 retrieval and explicitly requests `Files.Read` at refresh, including after a

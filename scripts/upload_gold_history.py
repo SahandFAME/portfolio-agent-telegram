@@ -7,6 +7,7 @@ import base64
 import hashlib
 from io import BytesIO
 import json
+import math
 import os
 import re
 import subprocess
@@ -52,7 +53,7 @@ def export_token():
     return token['access_token']
 
 
-def validate_report(data):
+def validate_report(data,*,require_marker=True):
     if not isinstance(data,bytes) or not 0<len(data)<=MAX_REPORT_BYTES:
         raise SyncError('invalid_report_size')
     try:
@@ -61,11 +62,45 @@ def validate_report(data):
                 raise ValueError()
         book=load_workbook(BytesIO(data),read_only=True,keep_links=False)
         try:
-            if book.properties.identifier!=IDENTIFIER or book.sheetnames!=['ارزش هفتگی','دارایی‌ها','ترکیب دارایی','موارد نیازمند بررسی','خلاصه تحلیل']:
+            marker=book.properties.identifier
+            if (marker!=IDENTIFIER if require_marker else marker not in (None,'',IDENTIFIER)) or book.sheetnames!=['ارزش هفتگی','دارایی‌ها','ترکیب دارایی','موارد نیازمند بررسی','خلاصه تحلیل']:
                 raise ValueError()
         finally:book.close()
     except Exception:
         raise SyncError('report_identity_not_verified') from None
+
+
+def report_fingerprint(data):
+    """Compare report cells independently of ZIP timestamps and Excel metadata."""
+    validate_report(data,require_marker=False)
+    book=load_workbook(BytesIO(data),read_only=True,keep_links=False)
+    def cell(value):
+        if value is None or value=='':return None
+        if isinstance(value,bool):return ['boolean',value]
+        if isinstance(value,(int,float)) and math.isfinite(value):return ['number',format(value,'.15g')]
+        if isinstance(value,str):return ['text',value]
+        raise SyncError('report_cells_not_verified')
+    try:
+        sheets=[]
+        for sheet in book:
+            rows=[]
+            for values in sheet.values:
+                row=[cell(v) for v in values]
+                while row and row[-1] is None:row.pop()
+                rows.append(row)
+            while rows and not rows[-1]:rows.pop()
+            sheets.append([sheet.title,rows])
+        return hashlib.sha256(json.dumps(sheets,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
+    finally:book.close()
+
+
+def remember_report(item_id):
+    if os.environ.get('ONEDRIVE_GOLD_HISTORY_REPORT_ID')==item_id:return
+    required('GH_TOKEN')
+    if required('GITHUB_REPOSITORY')!='SahandFAME/portfolio-agent-telegram':raise SyncError('unexpected_repository')
+    result=subprocess.run(['gh','secret','set','ONEDRIVE_GOLD_HISTORY_REPORT_ID','--repo',os.environ['GITHUB_REPOSITORY']],
+        input=item_id.encode(),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    if result.returncode:raise SyncError('report_identity_persistence_failed')
 
 
 def check_item(item,folder_id):
@@ -74,7 +109,7 @@ def check_item(item,folder_id):
         raise SyncError('report_destination_not_verified')
 
 
-def download_report(item,headers,folder_id):
+def download_report(item,headers,folder_id,*,require_marker=True):
     check_item(item,folder_id)
     meta=json_request(f'{GRAPH}/drives/{DRIVE}/items/{quote(item["id"],safe="")}',headers=headers)
     check_item(meta,folder_id)
@@ -82,7 +117,7 @@ def download_report(item,headers,folder_id):
     if urlsplit(url).scheme!='https':raise SyncError('report_download_unavailable')
     # Preauthenticated OneDrive URL receives no Graph Authorization header.
     data=http(url)
-    validate_report(data)
+    validate_report(data,require_marker=require_marker)
     return data
 
 
@@ -104,10 +139,15 @@ def upload_report():
     except SyncError as error:
         if str(error)!='http_404':raise
         existing=None
+    managed_id=os.environ.get('ONEDRIVE_GOLD_HISTORY_REPORT_ID')
+    recovery=os.environ.get('ONEDRIVE_PREVIOUS_REPORT_FINGERPRINT','')
+    if recovery and not re.fullmatch(r'[a-f0-9]{64}',recovery):raise SyncError('invalid_report_recovery_fingerprint')
+    if managed_id and (not existing or existing.get('id')!=managed_id):raise SyncError('managed_report_identity_changed')
     if existing:
         check_item(existing,folder_id)
         # Refuse to replace an unrelated workbook with the same filename.
-        previous=download_report(existing,headers,folder_id)
+        previous=download_report(existing,headers,folder_id,require_marker=not (managed_id or recovery))
+        if recovery and report_fingerprint(previous)!=recovery:raise SyncError('previous_report_fingerprint_mismatch')
         target=f'{GRAPH}/drives/{DRIVE}/items/{quote(existing["id"],safe="")}/content'
         write_headers={**headers,'If-Match':existing['eTag']}
     else:
@@ -126,6 +166,7 @@ def upload_report():
         raise SyncError('onedrive_report_readback_mismatch')
     if api('?data=gold-history').get('revision')!=report.get('revision'):
         raise SyncError('history_revision_changed_after_onedrive_upload')
+    remember_report(uploaded['id'])
     return {'ok':True,'onedrive_uploaded':True,'onedrive_hash_verified':True}
 
 

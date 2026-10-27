@@ -10,6 +10,7 @@ from unittest.mock import Mock,patch
 from openpyxl import Workbook
 sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
 import upload_gold_history as upload
+REAL_REMEMBER_REPORT=upload.remember_report
 
 
 def workbook(marker=upload.IDENTIFIER,value=1):
@@ -21,6 +22,7 @@ def workbook(marker=upload.IDENTIFIER,value=1):
 
 class ReportUploadTests(unittest.TestCase):
     def setUp(self):
+        remembered=patch.object(upload,'remember_report');self.remembered=remembered.start();self.addCleanup(remembered.stop)
         self.data=workbook()
         self.report={'content_base64':base64.b64encode(self.data).decode(),'sha256':hashlib.sha256(self.data).hexdigest(),'revision':'rev1'}
         self.folder={'id':'FOLDER','name':upload.FOLDER,'folder':{},'parentReference':{'driveId':upload.DRIVE}}
@@ -43,6 +45,36 @@ class ReportUploadTests(unittest.TestCase):
         self.assertEqual(writes[0].kwargs['body'],self.data)
         self.assertNotIn('Trading',writes[0].args[0]);self.assertTrue(result['onedrive_hash_verified'])
         self.assertEqual(downloads[0].kwargs,{})
+        self.remembered.assert_called_once_with('REPORT')
+
+    def test_excel_metadata_loss_requires_exact_managed_item_or_prior_report_cells(self):
+        stripped=workbook(marker=None,value=2)
+        with patch.dict(os.environ,{'ONEDRIVE_GOLD_HISTORY_REPORT_ID':'REPORT'}),patch.object(upload,'api',side_effect=[self.report,{'revision':'rev1'},{'revision':'rev1'}]),patch.object(upload,'export_token',return_value='fixture'),patch.object(upload,'json_request',side_effect=[{'id':upload.DRIVE},self.folder,self.item,self.metadata,self.item,self.metadata]),patch.object(upload,'http',side_effect=[stripped,self.data]):
+            self.assertTrue(upload.upload_report()['ok'])
+        with patch.dict(os.environ,{'ONEDRIVE_PREVIOUS_REPORT_FINGERPRINT':upload.report_fingerprint(stripped)}),patch.object(upload,'api',side_effect=[self.report,{'revision':'rev1'},{'revision':'rev1'}]),patch.object(upload,'export_token',return_value='fixture'),patch.object(upload,'json_request',side_effect=[{'id':upload.DRIVE},self.folder,self.item,self.metadata,self.item,self.metadata]),patch.object(upload,'http',side_effect=[stripped,self.data]):
+            self.assertTrue(upload.upload_report()['ok'])
+
+    def test_recovery_rejects_changed_cells_without_writing(self):
+        with patch.dict(os.environ,{'ONEDRIVE_PREVIOUS_REPORT_FINGERPRINT':upload.report_fingerprint(workbook(value=2))}),patch.object(upload,'api',return_value=self.report),patch.object(upload,'export_token',return_value='fixture'),patch.object(upload,'json_request',side_effect=[{'id':upload.DRIVE},self.folder,self.item,self.metadata]) as graph,patch.object(upload,'http',return_value=workbook(marker=None,value=3)):
+            with self.assertRaisesRegex(upload.SyncError,'previous_report_fingerprint_mismatch'):upload.upload_report()
+            self.assertFalse(any(c.kwargs.get('method')=='PUT' for c in graph.call_args_list))
+
+    def test_recreated_item_is_not_accepted_as_the_managed_report(self):
+        with patch.dict(os.environ,{'ONEDRIVE_GOLD_HISTORY_REPORT_ID':'ORIGINAL-REPORT'}),patch.object(upload,'api',return_value=self.report),patch.object(upload,'export_token',return_value='fixture'),patch.object(upload,'json_request',side_effect=[{'id':upload.DRIVE},self.folder,self.item]) as graph:
+            with self.assertRaisesRegex(upload.SyncError,'managed_report_identity_changed'):upload.upload_report()
+            self.assertFalse(any(c.kwargs.get('method')=='PUT' for c in graph.call_args_list))
+
+    def test_fingerprint_ignores_missing_metadata_but_not_report_values(self):
+        self.assertEqual(upload.report_fingerprint(workbook(value=2)),upload.report_fingerprint(workbook(marker=None,value=2)))
+        self.assertNotEqual(upload.report_fingerprint(workbook(value=2)),upload.report_fingerprint(workbook(value=3)))
+        with self.assertRaisesRegex(upload.SyncError,'report_identity_not_verified'):upload.validate_report(workbook(marker=None))
+
+    def test_managed_report_identity_is_stored_via_stdin_after_verification(self):
+        with patch.dict(os.environ,{'GH_TOKEN':'fixture','GITHUB_REPOSITORY':'SahandFAME/portfolio-agent-telegram'},clear=True),patch.object(upload.subprocess,'run',return_value=Mock(returncode=0)) as run:
+            REAL_REMEMBER_REPORT('REPORT')
+            self.assertIn('ONEDRIVE_GOLD_HISTORY_REPORT_ID',run.call_args.args[0])
+            self.assertEqual(run.call_args.kwargs['input'],b'REPORT')
+            self.assertNotIn('REPORT',run.call_args.args[0])
 
     def test_personal_drive_ids_allow_only_equivalent_hex_padding(self):
         self.assertTrue(upload.same_drive('0'+upload.DRIVE.upper()))

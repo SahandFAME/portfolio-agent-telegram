@@ -16,7 +16,7 @@ import gold_history as history
 from verify_onedrive import MAPPING
 
 
-def source_workbook(*,ambiguous=False,mismatch=False,extra=False):
+def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=None):
     book=Workbook();book.remove(book.active);totals={}
     for i,(asset,spec) in enumerate(MAPPING.items()):
         sheet=book.create_sheet('Fixture'+str(i));sheet.append([spec['column'],'Date' if asset in history.CRYPTO else 'تاریخ'])
@@ -26,6 +26,7 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False):
             sheet.append([10,'01/02/2025' if ambiguous and i==0 else datetime(2025,2,1)])
             sheet.append([-4,datetime(2026,9,26)]);total=6
         sheet.append(['=SUBTOTAL(109,A2:A3)',None])
+        for row,value in (date_overrides or {}).get(asset,{}).items():sheet.cell(row,2).value=value
         cols=[TableColumn(id=1,name=spec['column'],totalsRowFunction='sum'),TableColumn(id=2,name=sheet.cell(1,2).value)]
         sheet.add_table(Table(displayName=spec['table'],ref='A1:B4',tableColumns=cols,totalsRowCount=1))
         totals[f'xl/worksheets/sheet{i+1}.xml']=total+(1 if mismatch and i==0 else 0)
@@ -43,6 +44,24 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False):
 
 
 class HistoricalQuantityTests(unittest.TestCase):
+    def test_confirmed_day_first_text_has_one_meaning_and_still_rejects_invalid_dates(self):
+        for value,expected in [('01/02/2026',date(2026,2,1)),('۰۶/۰۷/۱۴۰۵',date(2026,9,28)),('2026/09/28',date(2026,9,28)),(datetime(2026,9,28),date(2026,9,28))]:
+            self.assertEqual(history.parse_trade_date(value,day_first=True),expected)
+        for value in ['09/28/2026','31/02/2026','01/02/26','2025/10/231','01/02/2026 & 02/02/2026']:
+            with self.assertRaises(ValueError):history.parse_trade_date(value,day_first=True)
+        with self.assertRaises(ValueError):history.parse_trade_date('01/02/2026')
+
+    def test_day_first_confirmation_is_scoped_to_btc_and_link_and_reconciles_weekly_quantities(self):
+        content=source_workbook(date_overrides={a:{2:'01/02/2025',3:'02/03/2026'} for a in ['BTC','Link','Tether']})
+        before=bytes(content)
+        _,trades,problems,_=history.reconstruct(content,{})
+        for asset in ['BTC','Link']:
+            self.assertFalse(problems[asset]);self.assertEqual(trades[asset][0][0],date(2025,2,1))
+            self.assertEqual(history.quantities_at(date(2026,2,20),trades,problems,{})[asset],10)
+            self.assertEqual(history.quantities_at(date(2026,3,6),trades,problems,{})[asset],6)
+        self.assertTrue(any(i.startswith('ambiguous_transaction_date') for i in problems['Tether']))
+        self.assertEqual(content,before)
+
     def test_dates_support_excel_solar_hijri_and_unambiguous_english_without_guessing(self):
         for value in [datetime(2026,9,28),'2026/09/28','1405/07/06','۱۴۰۵/۰۷/۰۶','09/28/2026','28/09/2026']:
             self.assertEqual(history.parse_trade_date(value),date(2026,9,28))
