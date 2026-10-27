@@ -51,16 +51,32 @@ class HistoricalQuantityTests(unittest.TestCase):
             with self.assertRaises(ValueError):history.parse_trade_date(value,day_first=True)
         with self.assertRaises(ValueError):history.parse_trade_date('01/02/2026')
 
-    def test_day_first_confirmation_is_scoped_to_btc_and_link_and_reconciles_weekly_quantities(self):
-        content=source_workbook(date_overrides={a:{2:'01/02/2025',3:'02/03/2026'} for a in ['BTC','Link','Tether']})
+    def test_day_first_confirmation_is_scoped_to_confirmed_assets_and_reconciles_weekly_quantities(self):
+        content=source_workbook(date_overrides={a:{2:'01/02/2025',3:'02/03/2026'} for a in ['BTC','Link','Tether','ETH']})
         before=bytes(content)
         _,trades,problems,_=history.reconstruct(content,{})
-        for asset in ['BTC','Link']:
+        for asset in ['BTC','Link','Tether']:
             self.assertFalse(problems[asset]);self.assertEqual(trades[asset][0][0],date(2025,2,1))
             self.assertEqual(history.quantities_at(date(2026,2,20),trades,problems,{})[asset],10)
             self.assertEqual(history.quantities_at(date(2026,3,6),trades,problems,{})[asset],6)
-        self.assertTrue(any(i.startswith('ambiguous_transaction_date') for i in problems['Tether']))
+        self.assertTrue(any(i.startswith('ambiguous_transaction_date') for i in problems['ETH']))
         self.assertEqual(content,before)
+
+    def test_owner_ignored_tether_label_is_excluded_without_bypassing_balance_reconciliation(self):
+        content=source_workbook(date_overrides={'Tether':{3:'هزینه گم شده'},'BTC':{3:'هزینه گم شده'}})
+        before=bytes(content)
+        current,trades,problems,_=history.reconstruct(content,{})
+        self.assertEqual(current['Tether'],6)
+        self.assertEqual(sum(q for _,q in trades['Tether']),10)
+        self.assertEqual(problems['Tether'],['quantity_reconciliation_failed@Table13444#current_minus_retained_net=-4'])
+        self.assertIsNone(history.quantities_at(date(2026,10,23),trades,problems,{})['Tether'])
+        self.assertTrue(any(i.startswith('ambiguous_transaction_date') for i in problems['BTC']))
+        self.assertEqual(content,before)
+
+    def test_ignored_label_matches_only_the_exact_tether_date_note(self):
+        for value,ignored in [('  هزینه\u200cگم شده  ',True),('هزینه گم شده دیگری',False),(None,False)]:
+            _,_,problems,_=history.reconstruct(source_workbook(date_overrides={'Tether':{3:value}}),{})
+            self.assertEqual(any(i.startswith('ambiguous_transaction_date') for i in problems['Tether']),not ignored)
 
     def test_dates_support_excel_solar_hijri_and_unambiguous_english_without_guessing(self):
         for value in [datetime(2026,9,28),'2026/09/28','1405/07/06','۱۴۰۵/۰۷/۰۶','09/28/2026','28/09/2026']:

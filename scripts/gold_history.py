@@ -29,7 +29,7 @@ TEHRAN=ZoneInfo('Asia/Tehran')
 ENDPOINT='https://portfolio-agent-telegram.vercel.app/api/telegram'
 DIGITS=str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789')
 CRYPTO={'BTC':'bitcoin','ETH':'ethereum','Tether':'tether','Link':'chainlink','ADA':'cardano','SOL':'solana','ONDO':'ondo-finance'}
-DAY_FIRST_ASSETS=frozenset({'BTC','Link'})  # Owner confirmed 2026-10-27.
+DAY_FIRST_ASSETS=frozenset({'BTC','Link','Tether'})  # Owner confirmed 2026-10-27.
 
 
 def parse_trade_date(value,*,day_first=False):
@@ -62,6 +62,9 @@ def reconstruct(content,config):
             di=left+headers.index('Date' if 'Date' in headers else 'تاریخ')
             events=[];issues=[];net=0.0
             for row in range(top+1,bottom):
+                # Owner-authorized exclusion, scoped to this exact Tether label.
+                # Reconcile the remaining signed quantities to the untouched total.
+                if asset=='Tether' and norm(str(sheet.cell(row,di).value or ''))==norm('هزینه گم شده'):continue
                 quantity=sheet.cell(row,qi).value
                 if quantity is None:continue
                 if isinstance(quantity,bool) or not isinstance(quantity,(int,float)) or not math.isfinite(quantity):
@@ -70,7 +73,9 @@ def reconstruct(content,config):
                 if quantity==0:continue
                 try:events.append((parse_trade_date(sheet.cell(row,di).value,day_first=asset in DAY_FIRST_ASSETS),float(quantity)))
                 except (ValueError,TypeError,OverflowError):issues.append('ambiguous_transaction_date@'+spec['table']+'#'+str(row))
-            if not math.isclose(net,current[asset],rel_tol=1e-10,abs_tol=1e-8):issues.append('quantity_reconciliation_failed')
+            if not math.isclose(net,current[asset],rel_tol=1e-10,abs_tol=1e-8):
+                detail='@'+spec['table']+'#current_minus_retained_net='+format(current[asset]-net,'.15g') if asset=='Tether' else ''
+                issues.append('quantity_reconciliation_failed'+detail)
             balance=0.0;daily=defaultdict(float)
             for day,q in events:daily[day]+=q
             for day in sorted(daily):

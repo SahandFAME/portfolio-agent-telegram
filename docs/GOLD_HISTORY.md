@@ -29,6 +29,15 @@ dates retain their existing meaning. Invalid, compound and two-digit-year text
 still fails; other assets do not inherit an unconfirmed date convention. After
 parsing, net quantities and nonnegative reconstructed balances must still pass.
 
+The owner subsequently corrected Tether dates to the same day/month/year format
+and explicitly requested ignoring the `هزینه گم شده` cell. Exclude a Tether
+transaction row only when its date cell exactly matches that label after Persian
+letter/whitespace normalization; do not match substrings, other cells or assets.
+Exclude its quantity from both dated trades and the reconciliation net. Keep the
+authoritative current total unchanged and reject historical quantities if the
+remaining trades fail to reconcile. This does not assign a date to an undated
+adjustment, change the live holding or waive other date/balance errors.
+
 BlackRock is zero before its recorded first purchase, consistent with the owner's
 confirmed launch/purchase explanation. It needs no fabricated pre-launch price.
 After purchase it requires an evidenced historical price; a current website quote,
