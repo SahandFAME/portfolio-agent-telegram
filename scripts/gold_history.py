@@ -29,9 +29,10 @@ TEHRAN=ZoneInfo('Asia/Tehran')
 ENDPOINT='https://portfolio-agent-telegram.vercel.app/api/telegram'
 DIGITS=str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789')
 CRYPTO={'BTC':'bitcoin','ETH':'ethereum','Tether':'tether','Link':'chainlink','ADA':'cardano','SOL':'solana','ONDO':'ondo-finance'}
+DAY_FIRST_ASSETS=frozenset({'BTC','Link'})  # Owner confirmed 2026-10-27.
 
 
-def parse_trade_date(value):
+def parse_trade_date(value,*,day_first=False):
     if isinstance(value,datetime):return value.date()
     if isinstance(value,date):return value
     raw=str(value or '').translate(DIGITS).strip()
@@ -40,6 +41,9 @@ def parse_trade_date(value):
     a,b,c=map(int,parts.groups())
     if a>=1700:return date(a,b,c)
     if 1300<=a<=1599:return jdatetime.date(a,b,c).togregorian()
+    if day_first:
+        if c>=1700:return date(c,b,a)
+        if 1300<=c<=1599:return jdatetime.date(c,b,a).togregorian()
     # Year-last strings are accepted only when month/day order is unambiguous.
     if c>=1700 and a>12 and b<=12:return date(c,b,a)
     if c>=1700 and b>12 and a<=12:return date(c,a,b)
@@ -64,7 +68,7 @@ def reconstruct(content,config):
                     issues.append('invalid_transaction_quantity@'+spec['table']+'#'+str(row));continue
                 net+=quantity
                 if quantity==0:continue
-                try:events.append((parse_trade_date(sheet.cell(row,di).value),float(quantity)))
+                try:events.append((parse_trade_date(sheet.cell(row,di).value,day_first=asset in DAY_FIRST_ASSETS),float(quantity)))
                 except (ValueError,TypeError,OverflowError):issues.append('ambiguous_transaction_date@'+spec['table']+'#'+str(row))
             if not math.isclose(net,current[asset],rel_tol=1e-10,abs_tol=1e-8):issues.append('quantity_reconciliation_failed')
             balance=0.0;daily=defaultdict(float)

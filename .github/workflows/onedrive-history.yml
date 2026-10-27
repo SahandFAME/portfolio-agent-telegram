@@ -1,6 +1,11 @@
 name: Publish gold history to OneDrive
 on:
   workflow_dispatch:
+    inputs:
+      previous_report_fingerprint:
+        description: One-time recovery fingerprint from the previous private export; normally empty
+        required: false
+        type: string
   workflow_run:
     workflows: [Weekly 18K gold portfolio history, Authorize Microsoft access]
     types: [completed]
@@ -17,6 +22,8 @@ jobs:
     timeout-minutes: 8
     env:
       MS_GRAPH_EXPORT_REFRESH_TOKEN: ${{ secrets.MS_GRAPH_EXPORT_REFRESH_TOKEN }}
+      ONEDRIVE_GOLD_HISTORY_REPORT_ID: ${{ secrets.ONEDRIVE_GOLD_HISTORY_REPORT_ID }}
+      ONEDRIVE_PREVIOUS_REPORT_FINGERPRINT: ${{ inputs.previous_report_fingerprint || '' }}
     steps:
       - name: Await separate Microsoft consent when not configured
         if: env.MS_GRAPH_EXPORT_REFRESH_TOKEN == ''
