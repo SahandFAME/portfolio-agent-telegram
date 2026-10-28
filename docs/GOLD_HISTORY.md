@@ -82,6 +82,16 @@ its quantities or formula. Other outstanding balances still require source revie
 ADA's year-last Solar Hijri dates use the day/month/year order shown in the
 owner's Excel evidence. No other asset inherits that date convention.
 
+Historical crypto backfills may recover already verified CoinGecko USD evidence
+from a persisted historical conversion when the provider is unavailable. Require
+the original CoinGecko/TGJU provenance, positive finite rial and FX prices, and
+both original quote timestamps at/before the historical observation within seven
+days. Recover USD by reversing that recorded FX conversion; never substitute a
+live quote or reuse a cached quantity. Fresh provider evidence wins at the same
+timestamp, and quantities/remaining discrepancies are checked anew against the
+fresh source. Aggregate runs count dust candidates and accepted asset-weeks so a
+successful export cannot hide an unprocessed balance.
+
 BlackRock is zero before its recorded first purchase, consistent with the owner's
 confirmed launch/purchase explanation. It needs no fabricated pre-launch price.
 After purchase it requires an evidenced historical price; a current website quote,

@@ -53,6 +53,38 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=
 
 
 class HistoricalQuantityTests(unittest.TestCase):
+    def test_verified_historical_crypto_prices_survive_provider_outage_without_bypassing_source_checks(self):
+        dates=[datetime.combine(d,history.time(12),history.TEHRAN) for d in history.week_dates()]
+        content=source_workbook(dust_assets={'ADA','SOL','ONDO','Link'})
+        with patch.object(history,'tgju_history',return_value=[(d,1000000) for d in dates]),patch.object(history,'listed_history',return_value=[]),patch.object(history,'crypto_history',return_value=[(d,1) for d in dates]):
+            rows,_=history.historical_weeks(content,'2026-10-24T00:00:00Z','2026-10-25T00:00:00Z',{'manual':{}},{})
+        with patch.object(history,'tgju_history',return_value=[(d,1000000) for d in dates]),patch.object(history,'listed_history',return_value=[]),patch.object(history,'crypto_history',side_effect=TimeoutError()):
+            recovered,diagnostics=history.historical_weeks(content,'2026-10-24T00:00:00Z','2026-10-25T00:00:00Z',{'manual':{}},{'weeks':rows})
+        self.assertEqual(diagnostics['dust_candidate_assets'],4)
+        self.assertEqual(diagnostics['dust_accepted_asset_weeks'],208)
+        for old,new in zip(rows,recovered):
+            for asset in ['ADA','SOL','ONDO','Link']:
+                self.assertEqual(new['quotes'][asset],old['quotes'][asset])
+                self.assertEqual(new['quantities'][asset],old['quantities'][asset])
+        invalid=source_workbook(dust_assets={'ADA','SOL','ONDO','Link'},date_overrides={'SOL':{2:'not a date'}})
+        with patch.object(history,'tgju_history',return_value=[(d,1000000) for d in dates]),patch.object(history,'listed_history',return_value=[]),patch.object(history,'crypto_history',side_effect=TimeoutError()):
+            rejected,_=history.historical_weeks(invalid,'2026-10-24T00:00:00Z','2026-10-25T00:00:00Z',{'manual':{}},{'weeks':rows})
+        self.assertTrue(all(r['quantities']['SOL'] is None for r in rejected))
+
+    def test_crypto_evidence_cache_rejects_wrong_units_missing_fx_and_future_or_stale_quotes(self):
+        stamp='2026-10-23T12:00:00+00:00'
+        row={'mode':'historical','as_of':stamp,'quotes':{'SOL':{'price_rial':2000000,'quoted_at':stamp,'source':'CoinGecko USD × TGJU USD/IRR'}},
+            'usd_quote':{'price_rial':1000000,'quoted_at':stamp,'source':'TGJU USD/IRR daily close'}}
+        self.assertEqual(history.saved_crypto_series({'weeks':[row]},'SOL')[0][1],2)
+        import copy
+        changes=[lambda r:r.update(mode='live'),lambda r:r.update(usd_quote=None),
+            lambda r:r['quotes']['SOL'].update(source='Unverified'),lambda r:r['usd_quote'].update(price_rial=-1),
+            lambda r:r['quotes']['SOL'].update(quoted_at='2026-10-24T12:00:00+00:00'),
+            lambda r:r['usd_quote'].update(quoted_at='2026-10-01T12:00:00+00:00')]
+        for change in changes:
+            bad=copy.deepcopy(row);change(bad)
+            self.assertEqual(history.saved_crypto_series({'weeks':[bad]},'SOL'),[])
+
     def test_confirmed_sol_ondo_link_dust_uses_same_weekly_dollar_bound_without_waiving_other_assets(self):
         dates=[datetime.combine(d,history.time(12),history.TEHRAN) for d in history.week_dates()]
         content=source_workbook(dust_assets={'ADA','SOL','ONDO','Link','BTC'})

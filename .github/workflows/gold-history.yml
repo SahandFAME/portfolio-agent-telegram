@@ -52,7 +52,7 @@ jobs:
           from pathlib import Path
           path=Path('gold-history-result.json')
           result=json.loads(path.read_text()) if path.exists() and path.stat().st_size else {'ok':False,'error':'history_worker_not_completed'}
-          allowed={'ok','error','weeks','complete_weeks','observations','complete_observations','excel_stored','unmapped_trade_tables','unreconciled_assets'}
+          allowed={'ok','error','weeks','complete_weeks','observations','complete_observations','excel_stored','unmapped_trade_tables','unreconciled_assets','dust_candidate_assets','dust_accepted_asset_weeks'}
           result={k:v for k,v in result.items() if k in allowed}
           body={'name':'Portfolio gold history result','head_sha':os.environ['GITHUB_SHA'],'status':'completed',
             'conclusion':'success' if result.get('ok') else 'failure',
