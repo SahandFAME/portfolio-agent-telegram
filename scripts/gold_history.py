@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta, timezone
 from io import BytesIO
 from html.parser import HTMLParser
+from pathlib import Path
 import base64
 import hashlib
 import json
@@ -38,6 +39,9 @@ DAY_FIRST_ASSETS=frozenset({'BTC','Link','Tether','ADA'})  # ADA: owner's 2026-1
 DUST_TOTAL_ASSETS=frozenset({'ADA','SOL','ONDO','Link'})  # Owner-confirmed small-balance totals.
 MATIC_WAIVED_REMAINDER_SIGNATURE='16c88b27aacb62e7b845677132ff4d3137527101d572c3a3d0437a5c6fd735e4'
 PREWINDOW_TETHER_SIGNATURE='3a187613376cf0faa691753a09296c65d859d7d91ddbd3b3999fa7293aa7f1df'
+HISTORY_CALENDAR='wednesday-v1'
+MARKET_CLOSURES=json.loads((Path(__file__).resolve().parents[1]/'lib'/'iran-market-closures.json').read_text())['closures']
+LISTED_QUOTE_SOURCES=frozenset({'Shakhesban historical daily close (IRR)','TSETMC official daily market price (IRR)'})
 
 
 class HistoricalEvents(list):
@@ -221,7 +225,7 @@ def reconstruct(content,config):
 def week_dates():
     # The initial owner-confirmed year is immutable. Future records are live
     # observations; a later manual-quantity edit must not rewrite this baseline.
-    end=date(2026,10,23)
+    end=date(2026,10,21)
     return [end-timedelta(weeks=i) for i in reversed(range(52))]
 
 
@@ -367,12 +371,20 @@ def crypto_history(asset):
     return [(datetime.fromtimestamp(row[0]/1000,timezone.utc),float(row[1])) for row in data.get('prices',[]) if len(row)==2 and row[1]>0]
 
 
-def last_quote(series,asof,source):
-    before=[row for row in series if row[0]<=asof and asof-row[0]<=timedelta(days=7)
+def closure_for_quote(asset,asof,stamp):
+    day=asof.astimezone(TEHRAN).date().isoformat();price_day=stamp.astimezone(TEHRAN).date().isoformat()
+    return next((c for c in MARKET_CLOSURES if asset in c['assets'] and c['start']<=day<=c['end'] and price_day==c['last_open']),None)
+
+
+def last_quote(series,asof,source,asset=None):
+    before=[row for row in series if row[0]<=asof
         and isinstance(row[1],(int,float)) and not isinstance(row[1],bool) and math.isfinite(row[1]) and row[1]>0]
     if not before:return None
     stamp,value=max(before,key=lambda row:row[0])
-    return {'price_rial':value,'quoted_at':stamp.astimezone(timezone.utc).isoformat(),'source':source}
+    closure=closure_for_quote(asset,asof,stamp) if source in LISTED_QUOTE_SOURCES else None
+    if asof-stamp>timedelta(days=7) and not closure:return None
+    return {'price_rial':value,'quoted_at':stamp.astimezone(timezone.utc).isoformat(),'source':source,
+        **({'pricing_basis':'last_open_before_confirmed_closure','closure_id':closure['id']} if closure else {})}
 
 
 def saved_crypto_series(existing,asset):
@@ -397,8 +409,8 @@ def saved_crypto_series(existing,asset):
 def saved_listed_quote(row,asset,asof):
     if not row or row.get('mode')!='historical':return None
     raw=row.get('quotes',{}).get(asset)
-    if not raw or raw.get('source') not in {'Shakhesban historical daily close (IRR)','TSETMC official daily market price (IRR)'}:return None
-    try:return last_quote([(datetime.fromisoformat(raw['quoted_at'].replace('Z','+00:00')),raw['price_rial'])],asof,raw['source'])
+    if not raw or raw.get('source') not in LISTED_QUOTE_SOURCES:return None
+    try:return last_quote([(datetime.fromisoformat(raw['quoted_at'].replace('Z','+00:00')),raw['price_rial'])],asof,raw['source'],asset)
     except (KeyError,TypeError,ValueError):return None
 
 
@@ -406,7 +418,7 @@ def historical_weeks(content,modified,checked,config,existing):
     current,trades,problems,extras=reconstruct(content,config)
     manual=existing.get('manual_baseline') or config['manual']
     dates=week_dates();series={};source={}
-    previous={r['week_ending']:r for r in existing.get('weeks',[]) if r.get('mode')=='historical'}
+    previous=[r for r in existing.get('weeks',[]) if r.get('mode')=='historical']
     definitions={'gold':'geram18','دلار':'price_dollar_rl','سکه تمام':'sekee','ربع سکه بانکی':'rob'}
     for asset,slug in definitions.items():
         try:series[asset]=tgju_history(slug);source[asset]='TGJU daily close (IRR)'
@@ -451,11 +463,12 @@ def historical_weeks(content,modified,checked,config,existing):
             if q is None or q==0:continue
             if asset in ('آبشده (طلب)','آبشده (شمش زربد)'):p=gold
             elif asset=='ربع سکه غیره':p={**gold,'price_rial':gold['price_rial']*2.03325,'source':'TGJU 18K gram × 2.03325'} if gold else None
-            else:p=last_quote(series.get(asset,[]),asof,source.get(asset,'Historical quote'))
+            else:p=last_quote(series.get(asset,[]),asof,source.get(asset,'Historical quote'),asset)
             if asset in CRYPTO:
                 p={**p,'price_rial':p['price_rial']*fx['price_rial']} if p and fx else None
             elif not p and (asset in MAPPING or asset=='اهرم') and asset not in {'بلک راک','شمش نقره 999'}:
-                p=saved_listed_quote(previous.get(day.isoformat()),asset,asof)
+                saved=[p for r in previous if (p:=saved_listed_quote(r,asset,asof))]
+                p=max(saved,key=lambda p:p['quoted_at']) if saved else None
             if p:quotes[asset]=p
         issues=['unmapped_historical_trade_table:'+re.sub(r'[<>&\n]','',name) for name in extras]
         issues.extend(code+':'+asset for asset,codes in week_problems.items() for code in codes)
@@ -481,7 +494,7 @@ def export_excel(history,groups):
     book=Workbook();summary=book.active;summary.title='ارزش هفتگی'
     book.properties.identifier='portfolio-agent:18k-gold-history:v1'
     summary.append(['هفته منتهی به','طلای ۱۸ عیار (گرم)','تغییر هفتگی (گرم)','تغییر هفتگی (درصد)','ارزش (تومان)','قیمت هر گرم (تومان)','وضعیت','تغییر تعداد دارایی‌ها','زمان مشاهده (تهران)','زمان بررسی منبع (تهران)'])
-    holdings=book.create_sheet('دارایی‌ها');holdings.append(['هفته','دارایی','گروه','تعداد','قیمت واحد (ریال)','ارزش دارایی (تومان)','منبع قیمت','زمان قیمت (تهران)'])
+    holdings=book.create_sheet('دارایی‌ها');holdings.append(['هفته','دارایی','گروه','تعداد','قیمت واحد (ریال)','ارزش دارایی (تومان)','منبع قیمت','زمان قیمت (تهران)','مبنای قیمت','شناسه تعطیلی بازار'])
     allocations=book.create_sheet('ترکیب دارایی');allocations.append(['هفته','گروه','درصد'])
     exceptions=book.create_sheet('موارد نیازمند بررسی');exceptions.append(['هفته','نوع مسئله','دارایی'])
     for row in history['weeks']:
@@ -497,7 +510,9 @@ def export_excel(history,groups):
             value=row.get('included_values',{});value=value.get(asset) if isinstance(value,dict) else None
             if value is None and isinstance(qty,(int,float)) and p:value=qty*p['price_rial']
             holdings.append([week,safe_text(asset),safe_text(groups.get(asset,'')),qty,p['price_rial'] if p else None,math.floor(value/10+.5) if value is not None else None,
-                safe_text(p['source']) if p else None,fa_time(p['quoted_at']) if p else None])
+                safe_text(p['source']) if p else None,fa_time(p['quoted_at']) if p else None,
+                'آخرین قیمت پایانی پیش از تعطیلی تأییدشده بازار' if p and p.get('pricing_basis')=='last_open_before_confirmed_closure' else None,
+                safe_text(p['closure_id']) if p and p.get('closure_id') else None])
         for group,pct in (row.get('allocation') or {}).items():allocations.append([week,safe_text(group),pct])
         for issue in row.get('issues',[]):
             kind,_,asset=issue.partition(':')
@@ -515,6 +530,8 @@ def export_excel(history,groups):
         if not gold:exceptions.append([week,'قیمت تاریخی هر گرم طلای ۱۸ عیار تأیید نشده',''])
     analysis=book.create_sheet('خلاصه تحلیل')
     analysis.append(['شاخص','مقدار'])
+    analysis.append(['پایان هفته','چهارشنبه، به وقت تهران'])
+    analysis.append(['قیمت در تعطیلی جنگی تأییدشده','آخرین قیمت پایانی روز باز بازار، با حفظ تاریخ واقعی قیمت'])
     final=[r for r in history['weeks'] if r['mode']!='baseline']
     valid=[r for r in final if r['status']=='complete']
     analysis.append(['هفته‌های ثبت‌شده',len(final)])
@@ -580,7 +597,7 @@ def run(action):
         config=api('?data=gold-history-config');existing=api('?data=gold-history')
         if action in ('backfill','bootstrap'):
             rows,diagnostics=historical_weeks(content,modified,checked,config,existing)
-            result=api('?sync=gold-history',{'revision':existing['revision'],'weeks':rows})
+            result=api('?sync=gold-history',{'revision':existing['revision'],'calendar':HISTORY_CALENDAR,'weeks':rows})
             if result.get('ok') is not True:raise SyncError('history_not_stored')
         if action in ('capture','bootstrap'):
             if action=='bootstrap':content,modified=download_workbook(token);checked=utcnow()
