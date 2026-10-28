@@ -17,7 +17,7 @@ import gold_history as history
 from verify_onedrive import MAPPING
 
 
-def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=None,tether_accounting=False,dust_ada=False,dust_assets=()):
+def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=None,tether_accounting=False,dust_ada=False,dust_assets=(),matic_remainder=False,matic_date=None):
     book=Workbook();book.remove(book.active);totals={}
     for i,(asset,spec) in enumerate(MAPPING.items()):
         sheet=book.create_sheet('Fixture'+str(i));sheet.append([spec['column'],'Date' if asset in history.CRYPTO else 'تاریخ'])
@@ -41,6 +41,12 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=
     if extra:
         sheet=book.create_sheet('OldAssetFixture');sheet.append(['Quantity','Date']);sheet.append([1,datetime(2025,1,1)]);sheet.append([0,None]);
         sheet.add_table(Table(displayName='UnknownOldHolding',ref='A1:B3',tableColumns=[TableColumn(id=1,name='Quantity'),TableColumn(id=2,name='Date')],totalsRowCount=1))
+    if matic_remainder:
+        sheet=book.create_sheet('Crypto Investing Portfolio');sheet.append(['Matic']);sheet.append(['Quantity','Date'])
+        sheet.append([10,datetime(2024,1,1)]);sheet.append([-9.5,matic_date or datetime(2025,1,1)])
+        sheet.append(['=SUBTOTAL(109,Table1312131921[Quantity])-0.5',None])
+        sheet.add_table(Table(displayName='Table1312131921',ref='A2:B5',tableColumns=[TableColumn(id=1,name='Quantity'),TableColumn(id=2,name='Date')],totalsRowCount=1))
+        totals[f'xl/worksheets/sheet{len(book.worksheets)}.xml']=(5,0)
     raw=BytesIO();book.save(raw);out=BytesIO();ns={'s':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
     with zipfile.ZipFile(raw) as src,zipfile.ZipFile(out,'w') as dst:
         for name in src.namelist():
@@ -53,6 +59,37 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=
 
 
 class HistoricalQuantityTests(unittest.TestCase):
+    def test_owner_waiver_ignores_only_the_identified_preperiod_matic_remainder(self):
+        signature=history.hashlib.sha256(b'0.5').hexdigest()
+        content=source_workbook(matic_remainder=True,extra=True);before=bytes(content)
+        with patch.object(history,'MATIC_WAIVED_REMAINDER_SIGNATURE',signature):
+            _,_,_,extras=history.reconstruct(content,{})
+            self.assertEqual(extras,['OldAssetFixture / UnknownOldHolding'])
+            _,_,_,extras=history.reconstruct(source_workbook(matic_remainder=True,matic_date='01/02/2025'),{})
+            self.assertEqual(extras,[])
+            for day in [datetime(2025,10,25),'not a date',datetime(2026,1,1)]:
+                _,_,_,extras=history.reconstruct(source_workbook(matic_remainder=True,matic_date=day),{})
+                self.assertIn('Crypto Investing Portfolio / Table1312131921',extras)
+        _,_,_,extras=history.reconstruct(content,{})
+        self.assertIn('Crypto Investing Portfolio / Table1312131921',extras)
+        self.assertEqual(content,before)
+
+    def test_matic_waiver_rejects_changed_identity_formula_amount_balance_or_hidden_rows(self):
+        content=source_workbook(matic_remainder=True)
+        book=load_workbook(BytesIO(content),data_only=True);formulas=load_workbook(BytesIO(content),data_only=False)
+        s=book['Crypto Investing Portfolio'];f=formulas[s.title];table=s.tables['Table1312131921']
+        events=[(date(2024,1,1),10),(date(2025,1,1),-9.5)]
+        def accepted(balance=0):return history.owner_waived_matic_remainder(s,f,table,1,2,5,events,False,balance)
+        try:
+            with patch.object(history,'MATIC_WAIVED_REMAINDER_SIGNATURE',history.hashlib.sha256(b'0.5').hexdigest()):
+                self.assertTrue(accepted())
+                self.assertFalse(accepted(1));self.assertFalse(accepted(False))
+                s['A1']='Other';self.assertFalse(accepted());s['A1']='Matic'
+                s.row_dimensions[3].hidden=True;self.assertFalse(accepted());s.row_dimensions[3].hidden=False
+                for value in ['=SUBTOTAL(109,Table1312131921[Quantity])-0.6','=UNTRUSTED()']:
+                    f['A5']=value;self.assertFalse(accepted())
+        finally:book.close();formulas.close()
+
     def test_verified_historical_crypto_prices_survive_provider_outage_without_bypassing_source_checks(self):
         dates=[datetime.combine(d,history.time(12),history.TEHRAN) for d in history.week_dates()]
         content=source_workbook(dust_assets={'ADA','SOL','ONDO','Link'})

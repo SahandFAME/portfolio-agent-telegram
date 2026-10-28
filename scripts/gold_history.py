@@ -31,6 +31,7 @@ DIGITS=str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','012345678901234
 CRYPTO={'BTC':'bitcoin','ETH':'ethereum','Tether':'tether','Link':'chainlink','ADA':'cardano','SOL':'solana','ONDO':'ondo-finance'}
 DAY_FIRST_ASSETS=frozenset({'BTC','Link','Tether','ADA'})  # ADA: owner's 2026-10-28 Excel evidence.
 DUST_TOTAL_ASSETS=frozenset({'ADA','SOL','ONDO','Link'})  # Owner-confirmed small-balance totals.
+MATIC_WAIVED_REMAINDER_SIGNATURE='16c88b27aacb62e7b845677132ff4d3137527101d572c3a3d0437a5c6fd735e4'
 PREWINDOW_TETHER_SIGNATURE='3a187613376cf0faa691753a09296c65d859d7d91ddbd3b3999fa7293aa7f1df'
 
 
@@ -92,6 +93,20 @@ def negative_historical_balance(events,current,*,start=None):
         balance+=daily[day]
         if balance < -tolerance:return True
     return False
+
+
+def owner_waived_matic_remainder(sheet,formulas,table,qi,top,bottom,events,ambiguous,balance):
+    """Owner's immateriality waiver, not an invented fee or historical quote."""
+    if sheet.title!='Crypto Investing Portfolio' or table.name!='Table1312131921' or top<=1:return False
+    left,_,_,_=range_boundaries(table.ref)
+    if norm(str(sheet.cell(top-1,left).value or '')).lower()!='matic':return False
+    if table.totalsRowCount!=1 or isinstance(balance,bool) or balance!=0 or ambiguous or not events or max(d for d,_ in events)>=date(2025,10,25):return False
+    if any(sheet.row_dimensions[r].hidden for r in range(top+1,bottom)) or negative_historical_balance(events,0):return False
+    formula=re.sub(r'\s+','',str(formulas.cell(bottom,qi).value or ''))
+    match=re.fullmatch(r'=SUBTOTAL\(109,'+re.escape(table.name)+r'\[Quantity\]\)-(\d+(?:\.\d+)?)',formula,re.I)
+    if not match:return False
+    remainder=float(match[1])
+    return math.isfinite(remainder) and remainder>0 and math.isclose(sum(q for _,q in events),remainder,abs_tol=1e-8,rel_tol=1e-10) and hashlib.sha256(format(remainder,'.15g').encode()).hexdigest()==MATIC_WAIVED_REMAINDER_SIGNATURE
 
 
 def reconstruct(content,config):
@@ -157,11 +172,14 @@ def reconstruct(content,config):
                     amount=sheet.cell(r,qi).value
                     if amount is None or amount==0:continue
                     if isinstance(amount,bool) or not isinstance(amount,(int,float)) or not math.isfinite(amount):ambiguous=True;continue
-                    try:events.append((parse_trade_date(sheet.cell(r,di).value),float(amount)))
+                    # The owner confirmed day/month/year in Trading Journal.
+                    # Scope this additional year-last interpretation to MATIC.
+                    try:events.append((parse_trade_date(sheet.cell(r,di).value,day_first=name=='Table1312131921' and sheet.title=='Crypto Investing Portfolio'),float(amount)))
                     except (ValueError,TypeError):ambiguous=True
                 balance=sheet.cell(bottom,qi).value
                 closed_before_window=table.totalsRowCount==1 and balance==0 and not ambiguous and events and max(d for d,_ in events)<date(2025,10,25) and math.isclose(sum(q for _,q in events),0,abs_tol=1e-8)
-                if (events or ambiguous) and not closed_before_window:
+                waived=owner_waived_matic_remainder(sheet,formulas[sheet.title],table,qi,top,bottom,events,ambiguous,balance)
+                if (events or ambiguous) and not closed_before_window and not waived:
                     extras.append(sheet.title+' / '+name)
         return current,trades,problems,extras
     finally:book.close();formulas.close()
