@@ -82,6 +82,18 @@ its quantities or formula. Other outstanding balances still require source revie
 ADA's year-last Solar Hijri dates use the day/month/year order shown in the
 owner's Excel evidence. No other asset inherits that date convention.
 
+The owner explicitly instructed ignoring the inspected MATIC remainder as worth
+less than USD 5. This is an owner-directed materiality exclusion, not a claim
+that every historical MATIC price was independently available or that an expense
+occurred on an invented date. Exclude only the identified MATIC table with the
+confirmed remainder signature, exact subtotal-minus-remainder formula, matching
+transaction net, no hidden rows, valid nonnegative dated transactions entirely
+before the analysis period and no nonzero current total. Changed amounts,
+identity, formula, dates or an in-period transaction restore the review flag.
+Other unmapped assets remain unresolved; the current 23+6 holdings are unchanged.
+MATIC year-last text dates use the owner's confirmed day/month/year convention;
+this does not waive malformed dates or extend that parser rule to other tables.
+
 Historical crypto backfills may recover already verified CoinGecko USD evidence
 from a persisted historical conversion when the provider is unavailable. Require
 the original CoinGecko/TGJU provenance, positive finite rial and FX prices, and
