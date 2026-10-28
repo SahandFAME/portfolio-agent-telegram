@@ -138,6 +138,19 @@ concurrency; their failures become missing quotes without delaying Graph auth or
 overwriting good data. Workflow outcomes publish aggregate status/coverage only. Select observations at or before the valuation time, no older than seven
 days; never forward-fill across an unverified trading/holiday gap.
 
+Listed fund/share archives now also use Shakhesban's published historical trade
+table, on the same rial-per-unit basis as the existing current-price adapter.
+Verify the JSON-LD ticker, instrument type and canonical provider path before
+decoding the server-rendered history payload as JSON; never execute webpage
+scripts. Use the published `close_price` column (پایانی), not `real_close_price`,
+NAV, chart returns or a current quote. Require valid dated positive prices with
+positive trading volume/count and reject conflicting duplicate days. Full-page
+requests use HTTPS, no redirects/credentials, an eight-second timeout and a
+five-MiB limit. TSETMC remains an independent fallback. Persisted, previously
+verified rial history may survive a provider outage with its original source
+and timestamp; fresh source quantities are still recomputed. Trading gaps longer
+than seven days remain unknown, rather than silently carrying old closes.
+
 Validate all quantities and required positive-quantity quotes before applying the
 owner's 50,000-toman asset cutoff. Incomplete weeks have no total, gold-equivalent
 value, group percentages or claimed weekly return. Charts leave real gaps.
