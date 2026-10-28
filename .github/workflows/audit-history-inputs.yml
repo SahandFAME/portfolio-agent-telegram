@@ -1,6 +1,11 @@
 name: Audit gold history inputs (read only)
 on:
   workflow_dispatch:
+    inputs:
+      diagnostic_certificate:
+        description: Optional public encryption certificate for private total-cell inspection
+        required: false
+        type: string
 permissions:
   contents: read
   checks: write
@@ -35,6 +40,7 @@ jobs:
           python-version: '3.12'
       - run: pip install -r scripts/requirements-sync.txt
       - name: Inspect historical table/date coverage, never values
+        if: inputs.diagnostic_certificate == ''
         env:
           MS_GRAPH_CLIENT_ID: 04a73ec3-340a-4cb6-a087-7fdc4dfd93e0
           MS_GRAPH_TENANT_ID: consumers
@@ -44,7 +50,21 @@ jobs:
           MS_GRAPH_REFRESH_TOKEN: ${{ secrets.MS_GRAPH_REFRESH_TOKEN }}
           GH_TOKEN: ${{ secrets.PORTFOLIO_SECRET_WRITER_TOKEN }}
         run: python scripts/audit_history_inputs.py > history-audit-result.json
+      - name: Inspect requested total formula privately
+        if: inputs.diagnostic_certificate != ''
+        env:
+          DIAGNOSTIC_CERTIFICATE: ${{ inputs.diagnostic_certificate }}
+          MS_GRAPH_CLIENT_ID: 04a73ec3-340a-4cb6-a087-7fdc4dfd93e0
+          MS_GRAPH_TENANT_ID: consumers
+          MS_GRAPH_AUTH_MODE: delegated
+          MS_GRAPH_DRIVE_ID: daef687b3c624f3
+          MS_GRAPH_ITEM_ID: DAEF687B3C624F3!2063
+          MS_GRAPH_REFRESH_TOKEN: ${{ secrets.MS_GRAPH_REFRESH_TOKEN }}
+          GH_TOKEN: ${{ secrets.PORTFOLIO_SECRET_WRITER_TOKEN }}
+          PRIVATE_AUDIT_CHECK_TOKEN: ${{ github.token }}
+        run: python scripts/inspect_tether_total.py
       - name: Publish schema-only diagnostic for private review
+        if: inputs.diagnostic_certificate == ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
