@@ -387,7 +387,7 @@ class BoundedArchiveRequestTests(unittest.TestCase):
         with self.assertRaises(history.SyncError):history.market_json('https://example.invalid/private')
 
     def test_archive_timeout_produces_explicit_missing_quotes_without_losing_reconstructed_quantities(self):
-        with patch.object(history,'market_json',side_effect=TimeoutError()):
+        with patch.object(history,'market_json',side_effect=TimeoutError()),patch.object(history,'market_text',side_effect=TimeoutError()):
             rows,_=history.historical_weeks(source_workbook(),'2026-10-24T00:00:00Z','2026-10-25T00:00:00Z',{'manual':{'دلار':100}}, {})
         self.assertEqual(len(rows),52);self.assertEqual(rows[-1]['quantities']['طلا'],6)
         self.assertIsNone(rows[-1]['gold_quote']);self.assertEqual(rows[-1]['quotes'],{})

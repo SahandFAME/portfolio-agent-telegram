@@ -7,13 +7,14 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta, timezone
 from io import BytesIO
+from html.parser import HTMLParser
 import base64
 import hashlib
 import json
 import math
 import os
 import re
-from urllib.parse import quote,urlsplit
+from urllib.parse import quote,urlsplit,unquote
 from urllib import request
 from zoneinfo import ZoneInfo
 
@@ -273,7 +274,81 @@ def tgju_history(slug):
     return sorted(result)
 
 
+class PriceSeries(list):
+    def __init__(self,rows,source):super().__init__(rows);self.source=source
+
+
+def market_text(url):
+    parts=urlsplit(url)
+    if parts.scheme!='https' or parts.hostname!='www.shakhesban.com' or parts.username or parts.password:raise SyncError('unapproved_history_provider')
+    class NoRedirect(request.HTTPRedirectHandler):
+        def redirect_request(self,*args):return None
+    try:
+        with request.build_opener(NoRedirect).open(request.Request(url,headers={'User-Agent':'Mozilla/5.0'}),timeout=8) as response:
+            content=response.read(5*1024*1024+1)
+        if len(content)>5*1024*1024:raise ValueError()
+        return content.decode('utf-8')
+    except Exception:raise SyncError('historical_provider_unavailable') from None
+
+
+class ArchiveScripts(HTMLParser):
+    def __init__(self):super().__init__();self.active=None;self.parts=[];self.scripts=[]
+    def handle_starttag(self,tag,attrs):
+        if tag=='script':self.active=dict(attrs).get('type','');self.parts=[]
+    def handle_data(self,data):
+        if self.active is not None:self.parts.append(data)
+    def handle_endtag(self,tag):
+        if tag=='script' and self.active is not None:
+            self.scripts.append((self.active,''.join(self.parts)));self.active=None
+
+
+def parse_shakhesban_history(html,asset):
+    symbol={'فلز فارابی':'فلزفارابی'}.get(asset,asset)
+    kind='stock' if asset in {'فملی','سجام'} else 'fund'
+    parser=ArchiveScripts();parser.feed(html);identities=[];chunks=[]
+    for content_type,body in parser.scripts:
+        if content_type=='application/ld+json':
+            try:metadata=json.loads(body)
+            except ValueError:continue
+            if isinstance(metadata,dict) and metadata.get('@type')=='Corporation':identities.append(metadata)
+        for match in re.finditer(r'self\.__next_f\.push\((.*?)\)\s*;?\s*$',body,re.S):
+            try:
+                data=json.loads(match[1])
+                if isinstance(data,list) and len(data)==2 and data[0]==1 and isinstance(data[1],str):chunks.append(data[1])
+            except ValueError:continue
+    expected='/markets/'+kind+'/'+symbol
+    if len(identities)!=1 or norm(str(identities[0].get('tickerSymbol','')))!=norm(symbol):raise SyncError('historical_instrument_unverified')
+    identity=urlsplit(str(identities[0].get('url','')))
+    if identity.scheme!='https' or identity.hostname!='www.shakhesban.com' or identity.username or identity.password or unquote(identity.path).rstrip('/')!=expected:raise SyncError('historical_instrument_unverified')
+    stream=''.join(chunks);candidates=[]
+    for match in re.finditer(r'"rows"\s*:\s*\[',stream):
+        try:rows,_=json.JSONDecoder().raw_decode(stream[match.end()-1:])
+        except ValueError:continue
+        if isinstance(rows,list) and rows and all(isinstance(r,dict) and 'trade_date' in r and 'close_price' in r for r in rows):candidates.append(rows)
+    if len(candidates)!=1 or len(candidates[0])>20000:raise SyncError('historical_price_schema')
+    byday={}
+    for row in candidates[0]:
+        raw=row['trade_date'];value=row['close_price']
+        if not isinstance(raw,str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}',raw):raise SyncError('historical_price_schema')
+        try:day=date.fromisoformat(raw)
+        except ValueError:raise SyncError('historical_price_schema') from None
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:continue
+        if any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<=0 for v in [row.get('volume'),row.get('trade_count')]):continue
+        if day in byday and byday[day]!=value:raise SyncError('historical_price_conflict')
+        byday[day]=float(value)
+    if not byday:raise SyncError('historical_price_schema')
+    return PriceSeries([(datetime.combine(d,time.max,TEHRAN),p) for d,p in sorted(byday.items())],'Shakhesban historical daily close (IRR)')
+
+
 def listed_history(asset):
+    symbol={'فلز فارابی':'فلزفارابی'}.get(asset,asset)
+    kind='stock' if asset in {'فملی','سجام'} else 'fund'
+    try:return parse_shakhesban_history(market_text('https://www.shakhesban.com/markets/'+kind+'/'+quote(symbol,safe='')+'/history'),asset)
+    except Exception:pass
+    return tsetmc_history(asset)
+
+
+def tsetmc_history(asset):
     data=market_json('https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/'+quote(asset,safe=''))
     matches=[r for r in data.get('instrumentSearch',[]) if norm(str(r.get('lVal18AFC','')))==norm(asset)]
     codes={str(r.get('insCode')) for r in matches if r.get('insCode')}
@@ -284,7 +359,7 @@ def listed_history(asset):
         day=datetime.strptime(str(row['dEven']),'%Y%m%d').date()
         value=row.get('pDrCotVal') or row.get('pClosing')
         if isinstance(value,(float,int)) and math.isfinite(value) and value>0:result.append((datetime.combine(day,time.max,TEHRAN),float(value)))
-    return sorted(result)
+    return PriceSeries(sorted(result),'TSETMC official daily market price (IRR)')
 
 
 def crypto_history(asset):
@@ -319,10 +394,19 @@ def saved_crypto_series(existing,asset):
     return result
 
 
+def saved_listed_quote(row,asset,asof):
+    if not row or row.get('mode')!='historical':return None
+    raw=row.get('quotes',{}).get(asset)
+    if not raw or raw.get('source') not in {'Shakhesban historical daily close (IRR)','TSETMC official daily market price (IRR)'}:return None
+    try:return last_quote([(datetime.fromisoformat(raw['quoted_at'].replace('Z','+00:00')),raw['price_rial'])],asof,raw['source'])
+    except (KeyError,TypeError,ValueError):return None
+
+
 def historical_weeks(content,modified,checked,config,existing):
     current,trades,problems,extras=reconstruct(content,config)
     manual=existing.get('manual_baseline') or config['manual']
     dates=week_dates();series={};source={}
+    previous={r['week_ending']:r for r in existing.get('weeks',[]) if r.get('mode')=='historical'}
     definitions={'gold':'geram18','دلار':'price_dollar_rl','سکه تمام':'sekee','ربع سکه بانکی':'rob'}
     for asset,slug in definitions.items():
         try:series[asset]=tgju_history(slug);source[asset]='TGJU daily close (IRR)'
@@ -335,7 +419,9 @@ def historical_weeks(content,modified,checked,config,existing):
                 except Exception:fresh=[]
                 # Equal timestamps prefer the freshly fetched provider value.
                 return asset,sorted(dict(saved+fresh).items()),'CoinGecko USD × TGJU USD/IRR'
-            if asset!='شمش نقره 999':return asset,listed_history(asset),'TSETMC official daily market price (IRR)'
+            if asset!='شمش نقره 999':
+                values=listed_history(asset)
+                return asset,values,getattr(values,'source','TSETMC official daily market price (IRR)')
             # Silver must match the actual certificate. Never substitute spot silver.
         except Exception:pass
         return asset,[],'Historical quote unavailable'
@@ -368,6 +454,8 @@ def historical_weeks(content,modified,checked,config,existing):
             else:p=last_quote(series.get(asset,[]),asof,source.get(asset,'Historical quote'))
             if asset in CRYPTO:
                 p={**p,'price_rial':p['price_rial']*fx['price_rial']} if p and fx else None
+            elif not p and (asset in MAPPING or asset=='اهرم') and asset not in {'بلک راک','شمش نقره 999'}:
+                p=saved_listed_quote(previous.get(day.isoformat()),asset,asof)
             if p:quotes[asset]=p
         issues=['unmapped_historical_trade_table:'+re.sub(r'[<>&\n]','',name) for name in extras]
         issues.extend(code+':'+asset for asset,codes in week_problems.items() for code in codes)
@@ -479,7 +567,7 @@ def additional_observation(content,config):
                 if p and fx:quotes[asset]={'price_rial':p['price_rial']*fx['price_rial'],
                     'quoted_at':min(p['quoted_at'],fx['quoted_at']),'source':'CoinGecko USD × TGJU USD/IRR'}
             else:
-                p=last_quote(listed_history(asset),asof,'TSETMC official daily market price (IRR)')
+                values=listed_history(asset);p=last_quote(values,asof,getattr(values,'source','TSETMC official daily market price (IRR)'))
                 if p:quotes[asset]=p
         except Exception:pass
     return quantities,quotes
