@@ -23,6 +23,13 @@ class PrivateTotalInspectionTests(unittest.TestCase):
         self.assertEqual(result['current_total'],6);self.assertEqual(result['first_quantity'],10)
         self.assertEqual(content,before)
 
+    def test_dust_and_unmapped_table_review_is_narrow_and_source_is_unchanged(self):
+        content=source_workbook(extra=True);before=bytes(content)
+        result=inspector.inspect(content)['dust_and_unmapped_tables']
+        self.assertEqual({r['asset'] for r in result},{'ADA','SOL','ONDO','Link',None})
+        self.assertTrue(all('total_formula' in r and len(r['rows'])<=64 for r in result))
+        self.assertEqual(content,before)
+
     def test_public_check_contains_only_ciphertext_decryptable_by_requester(self):
         real_run=subprocess.run
         with tempfile.TemporaryDirectory() as directory:

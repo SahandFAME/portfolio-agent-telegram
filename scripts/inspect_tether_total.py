@@ -15,6 +15,30 @@ from gold_history import norm,reconstruct
 from verify_onedrive import MAPPING,SyncError,download_workbook,extract_quantities,graph_token,required
 
 
+def inspect_dust_tables(book,cached):
+    """Narrow, encrypted source review for confirmed dust totals and old tables."""
+    selected={v['table']:a for a,v in MAPPING.items() if a in {'ADA','SOL','ONDO','Link'}}
+    mapped={v['table'] for v in MAPPING.values()};result=[]
+    def value(v):return v.isoformat() if isinstance(v,(date,datetime)) else v
+    for sheet in book:
+        for table in sheet.tables.values():
+            columns=[c.name for c in table.tableColumns]
+            if table.name not in selected and table.name in mapped:continue
+            if not any(c in columns for c in ('Quantity','حجم خرید')) or not any(c in columns for c in ('Date','تاریخ')):continue
+            left,top,right,bottom=range_boundaries(table.ref)
+            qi=left+columns.index('Quantity' if 'Quantity' in columns else 'حجم خرید')
+            di=left+columns.index('Date' if 'Date' in columns else 'تاریخ')
+            total=sheet.cell(bottom,qi);values=cached[sheet.title]
+            result.append({'asset':selected.get(table.name),'sheet':sheet.title,'table':table.name,'range':table.ref,
+                'labels':{sheet.cell(r,c).coordinate:str(sheet.cell(r,c).value)[:100] for r in range(max(1,top-2),top+1) for c in range(left,right+1) if isinstance(sheet.cell(r,c).value,str)},
+                'total_formula':total.value,'total_comment':total.comment.text if total.comment else None,
+                'current_total':value(values.cell(bottom,qi).value),'totals_row_count':table.totalsRowCount,
+                'hidden_transaction_rows':sum(bool(values.row_dimensions[r].hidden) for r in range(top+1,bottom)),
+                'transaction_rows':bottom-top-1,
+                'rows':[{'row':r,'date':value(values.cell(r,di).value),'quantity':value(values.cell(r,qi).value)} for r in range(top+1,min(bottom,top+65))]})
+    return result
+
+
 def inspect(content):
     current=extract_quantities(content)
     book=load_workbook(BytesIO(content),data_only=False,keep_links=False)
@@ -52,7 +76,7 @@ def inspect(content):
             'first_row_text':{sheet.cell(top,c).value:str(cached[sheet.title].cell(first,c).value)[:500] for c in range(left,right+1) if isinstance(cached[sheet.title].cell(first,c).value,str)},
             'residual_after_first_row_exclusion':current['Tether']-(retained-q) if isinstance(q,(int,float)) else None,
             'ignored_rows':[{'cell':sheet.cell(r,qi).coordinate,'quantity':cached[sheet.title].cell(r,qi).value} for r in range(first,bottom) if norm(str(cached[sheet.title].cell(r,di).value or ''))==norm('هزینه گم شده')],
-            'issues':problems['Tether']}
+            'issues':problems['Tether'],'dust_and_unmapped_tables':inspect_dust_tables(book,cached)}
     finally:book.close();cached.close()
 
 
