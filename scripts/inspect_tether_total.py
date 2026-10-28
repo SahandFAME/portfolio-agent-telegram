@@ -27,12 +27,15 @@ def inspect(content):
         total=sheet.cell(bottom,qi)
         first=top+1
         _,trades,problems,_=reconstruct(content,{})
-        retained=sum(q for _,q in trades['Tether'])
+        retained=sum(cached[sheet.title].cell(r,qi).value for r in range(first,bottom)
+            if isinstance(cached[sheet.title].cell(r,qi).value,(int,float)) and not isinstance(cached[sheet.title].cell(r,qi).value,bool)
+            and norm(str(cached[sheet.title].cell(r,di).value or ''))!=norm('هزینه گم شده'))
         q=cached[sheet.title].cell(first,qi).value
         def value(v):return v.isoformat() if isinstance(v,(date,datetime)) else v
         return {'workbook_sha256':hashlib.sha256(content).hexdigest(),'sheet':sheet.title,'table':table.name,
             'total_cell':total.coordinate,'total_formula':total.value,'total_comment':total.comment.text if total.comment else None,
             'current_total':current['Tether'],'retained_dated_net':retained,
+            'reconstructed_net':sum(q for _,q in trades['Tether']),
             'first_quantity_cell':sheet.cell(first,qi).coordinate,'first_quantity':q,'first_date':value(cached[sheet.title].cell(first,di).value),
             'first_row_text':{sheet.cell(top,c).value:str(cached[sheet.title].cell(first,c).value)[:500] for c in range(left,right+1) if isinstance(cached[sheet.title].cell(first,c).value,str)},
             'residual_after_first_row_exclusion':current['Tether']-(retained-q) if isinstance(q,(int,float)) else None,

@@ -38,6 +38,19 @@ authoritative current total unchanged and reject historical quantities if the
 remaining trades fail to reconcile. This does not assign a date to an undated
 adjustment, change the live holding or waive other date/balance errors.
 
+On 2026-10-28 the owner explained that Tether's total excludes the opening
+trading-capital row and a gas-related deduction documented in the total-cell
+comment. Recognize only the exact verified `SUBTOTAL(109,table[Quantity]) -
+firstQuantityCell - numericFee` shape, with a matching capital/fee comment,
+a valid pre-window opening date and no hidden transaction rows. Never execute
+or broadly evaluate Excel formulas. Exclude the reserved opening capital from
+portfolio history. For current-balance reconciliation only, include the signed
+ignored-note adjustment and subtract the documented fee. Their dates are still
+required for weekly history: a fully explained current total does not establish
+when an expense affected the portfolio. Record unknown timing as explicit
+private exceptions rather than an unexplained quantity mismatch or an invented
+transaction date. Unrecognized formulas, comments or residuals still fail closed.
+
 BlackRock is zero before its recorded first purchase, consistent with the owner's
 confirmed launch/purchase explanation. It needs no fabricated pre-launch price.
 After purchase it requires an evidenced historical price; a current website quote,
@@ -135,6 +148,13 @@ coverage and request dated corrections/verified historical instrument prices
 when needed. Do not claim the requested year is fully reconstructed while gaps
 remain. Public workflow diagnostics are aggregate-only; detailed records belong
 in private Blob and the admin Excel file.
+
+For owner-requested formula/comment inspection, the read-only audit workflow can
+accept an optional public encryption certificate. Its narrow inspection script
+reads the requested total and opening-row information without saving the source;
+only CMS-encrypted diagnostics enter a public check. The requesting Codex session
+keeps the temporary private key outside the checkout and decrypts locally.
+No raw formula, comment, holdings, source file or token belongs in public logs.
 
 ## Owner-selected OneDrive destination (2026-10-25)
 

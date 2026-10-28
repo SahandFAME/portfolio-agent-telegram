@@ -50,9 +50,30 @@ def parse_trade_date(value,*,day_first=False):
     raise ValueError('ambiguous_trade_date')
 
 
+def tether_total_accounting(values,formulas,table,quantity_column,date_column,top,bottom):
+    """Recognize the owner-confirmed formula shape, never evaluate Excel code."""
+    cell=formulas.cell(bottom,quantity_column)
+    formula=re.sub(r'\s+','',str(cell.value or '')).replace('$','')
+    first=top+1;reference=values.cell(first,quantity_column).coordinate
+    pattern=r'=SUBTOTAL\(109,'+re.escape(table.name)+r'\[Quantity\]\)-'+re.escape(reference)+r'-(\d+(?:\.\d+)?)'
+    match=re.fullmatch(pattern,formula,re.I)
+    comment=cell.comment.text if cell.comment else ''
+    if not match or norm('My Trading Capital').lower() not in norm(comment).lower():return None
+    fee=float(match[1]);annotation=re.search(r'~?\s*(\d+(?:\.\d+)?)\s*\$',comment)
+    capital=values.cell(first,quantity_column).value
+    if not annotation or not math.isclose(float(annotation[1]),fee,abs_tol=1e-10) or not math.isfinite(fee):return None
+    if isinstance(capital,bool) or not isinstance(capital,(int,float)) or not math.isfinite(capital) or capital<0:return None
+    try:opening_date=parse_trade_date(values.cell(first,date_column).value,day_first=True)
+    except (ValueError,TypeError,OverflowError):return None
+    if opening_date>=date(2025,10,25):return None
+    if any(values.row_dimensions[row].hidden for row in range(first,bottom)):return None
+    return {'capital_row':first,'capital_quantity':capital,'fee_quantity':fee,'total_cell':cell.coordinate}
+
+
 def reconstruct(content,config):
     current=extract_quantities(content)
     book=load_workbook(BytesIO(content),data_only=True,keep_links=False)
+    formulas=load_workbook(BytesIO(content),data_only=False,keep_links=False)
     try:
         tables={t.name:(s,t) for s in book for t in s.tables.values()}
         trades={};problems={};extras=[]
@@ -60,11 +81,17 @@ def reconstruct(content,config):
             sheet,table=tables[spec['table']];left,top,right,bottom=range_boundaries(table.ref)
             headers=[c.name for c in table.tableColumns];qi=left+headers.index(spec['column'])
             di=left+headers.index('Date' if 'Date' in headers else 'تاریخ')
-            events=[];issues=[];net=0.0
+            accounting=tether_total_accounting(sheet,formulas[sheet.title],table,qi,di,top,bottom) if asset=='Tether' else None
+            events=[];issues=[];net=0.0;ignored_net=0.0
             for row in range(top+1,bottom):
                 # Owner-authorized exclusion, scoped to this exact Tether label.
                 # Reconcile the remaining signed quantities to the untouched total.
-                if asset=='Tether' and norm(str(sheet.cell(row,di).value or ''))==norm('هزینه گم شده'):continue
+                if asset=='Tether' and norm(str(sheet.cell(row,di).value or ''))==norm('هزینه گم شده'):
+                    ignored=sheet.cell(row,qi).value
+                    if isinstance(ignored,(int,float)) and not isinstance(ignored,bool) and math.isfinite(ignored):ignored_net+=ignored
+                    elif ignored is not None:issues.append('invalid_transaction_quantity@'+spec['table']+'#'+str(row))
+                    continue
+                if accounting and row==accounting['capital_row']:continue
                 quantity=sheet.cell(row,qi).value
                 if quantity is None:continue
                 if isinstance(quantity,bool) or not isinstance(quantity,(int,float)) or not math.isfinite(quantity):
@@ -73,8 +100,13 @@ def reconstruct(content,config):
                 if quantity==0:continue
                 try:events.append((parse_trade_date(sheet.cell(row,di).value,day_first=asset in DAY_FIRST_ASSETS),float(quantity)))
                 except (ValueError,TypeError,OverflowError):issues.append('ambiguous_transaction_date@'+spec['table']+'#'+str(row))
-            if not math.isclose(net,current[asset],rel_tol=1e-10,abs_tol=1e-8):
-                detail='@'+spec['table']+'#current_minus_retained_net='+format(current[asset]-net,'.15g') if asset=='Tether' else ''
+            expected=net
+            if accounting:
+                expected+=ignored_net-accounting['fee_quantity']
+                if accounting['fee_quantity']:issues.append('undated_tether_fee@'+accounting['total_cell']+'#quantity='+format(-accounting['fee_quantity'],'.15g'))
+                if ignored_net:issues.append('undated_ignored_tether_adjustment@'+spec['table']+'#quantity='+format(ignored_net,'.15g'))
+            if not math.isclose(expected,current[asset],rel_tol=1e-10,abs_tol=1e-8):
+                detail='@'+spec['table']+'#current_minus_expected_net='+format(current[asset]-expected,'.15g') if asset=='Tether' else ''
                 issues.append('quantity_reconciliation_failed'+detail)
             balance=0.0;daily=defaultdict(float)
             for day,q in events:daily[day]+=q
@@ -101,7 +133,7 @@ def reconstruct(content,config):
                 if (events or ambiguous) and not closed_before_window:
                     extras.append(sheet.title+' / '+name)
         return current,trades,problems,extras
-    finally:book.close()
+    finally:book.close();formulas.close()
 
 
 def week_dates():
@@ -261,6 +293,8 @@ def export_excel(history,groups):
             label,_,location=kind.partition('@')
             labels={'ambiguous_transaction_date':'تاریخ تراکنش نامشخص یا چندپهلو','invalid_transaction_quantity':'تعداد تراکنش معتبر نیست',
                 'quantity_reconciliation_failed':'جمع تغییرات تعداد با ماندهٔ تأییدشده تطبیق ندارد','negative_reconstructed_balance':'ماندهٔ تاریخی منفی می‌شود',
+                'undated_tether_fee':'زمان هزینهٔ درج‌شده در فرمول مانده مشخص نیست',
+                'undated_ignored_tether_adjustment':'زمان اثر هزینهٔ نادیده‌گرفته‌شده بر مانده مشخص نیست',
                 'unmapped_historical_trade_table':'جدول معاملاتی خارج از نگاشت فعلی نیاز به بررسی دارد'}
             description=labels.get(label,label)+(' • '+location if location else '')
             exceptions.append([week,safe_text(description),safe_text(asset)])

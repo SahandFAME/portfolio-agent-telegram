@@ -10,26 +10,32 @@ from xml.etree import ElementTree as ET
 import zipfile
 
 from openpyxl import Workbook,load_workbook
+from openpyxl.comments import Comment
 from openpyxl.worksheet.table import Table,TableColumn
 sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
 import gold_history as history
 from verify_onedrive import MAPPING
 
 
-def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=None):
+def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=None,tether_accounting=False):
     book=Workbook();book.remove(book.active);totals={}
     for i,(asset,spec) in enumerate(MAPPING.items()):
         sheet=book.create_sheet('Fixture'+str(i));sheet.append([spec['column'],'Date' if asset in history.CRYPTO else 'تاریخ'])
-        if asset=='بلک راک':
+        if asset=='Tether' and tether_accounting:
+            sheet.append([7,datetime(2023,1,1)]);sheet.append([20,datetime(2025,11,1)])
+            sheet.append([-2,'هزینه گم شده']);sheet.append([-5,datetime(2026,1,1)]);total=10
+        elif asset=='بلک راک':
             sheet.append([15,datetime(2026,9,28)]);sheet.append([None,None]);total=15
         else:
             sheet.append([10,'01/02/2025' if ambiguous and i==0 else datetime(2025,2,1)])
             sheet.append([-4,datetime(2026,9,26)]);total=6
-        sheet.append(['=SUBTOTAL(109,A2:A3)',None])
+        bottom=sheet.max_row+1
+        sheet.append(['=SUBTOTAL(109,Table13444[Quantity])-A2-3' if asset=='Tether' and tether_accounting else '=SUBTOTAL(109,A2:A3)',None])
+        if asset=='Tether' and tether_accounting:sheet.cell(bottom,1).comment=Comment('Sum minus "My Trading Capital" and ~3$ for gas','Synthetic')
         for row,value in (date_overrides or {}).get(asset,{}).items():sheet.cell(row,2).value=value
         cols=[TableColumn(id=1,name=spec['column'],totalsRowFunction='sum'),TableColumn(id=2,name=sheet.cell(1,2).value)]
-        sheet.add_table(Table(displayName=spec['table'],ref='A1:B4',tableColumns=cols,totalsRowCount=1))
-        totals[f'xl/worksheets/sheet{i+1}.xml']=total+(1 if mismatch and i==0 else 0)
+        sheet.add_table(Table(displayName=spec['table'],ref=f'A1:B{bottom}',tableColumns=cols,totalsRowCount=1))
+        totals[f'xl/worksheets/sheet{i+1}.xml']=(bottom,total+(1 if mismatch and i==0 else 0))
     if extra:
         sheet=book.create_sheet('OldAssetFixture');sheet.append(['Quantity','Date']);sheet.append([1,datetime(2025,1,1)]);sheet.append([0,None]);
         sheet.add_table(Table(displayName='UnknownOldHolding',ref='A1:B3',tableColumns=[TableColumn(id=1,name='Quantity'),TableColumn(id=2,name='Date')],totalsRowCount=1))
@@ -38,12 +44,38 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=
         for name in src.namelist():
             data=src.read(name)
             if name in totals:
-                root=ET.fromstring(data);root.find('.//s:c[@r="A4"]/s:v',ns).text=str(totals[name]);data=ET.tostring(root)
+                row,value=totals[name]
+                root=ET.fromstring(data);root.find(f'.//s:c[@r="A{row}"]/s:v',ns).text=str(value);data=ET.tostring(root)
             dst.writestr(name,data)
     return out.getvalue()
 
 
 class HistoricalQuantityTests(unittest.TestCase):
+    def test_documented_capital_and_fees_explain_current_total_without_inventing_expense_dates(self):
+        content=source_workbook(tether_accounting=True);before=bytes(content)
+        current,trades,problems,_=history.reconstruct(content,{})
+        self.assertEqual(current['Tether'],10)
+        self.assertEqual(sum(q for _,q in trades['Tether']),15)
+        self.assertFalse(any(i.startswith('quantity_reconciliation_failed') for i in problems['Tether']))
+        self.assertEqual(problems['Tether'],['undated_ignored_tether_adjustment@Table13444#quantity=-2','undated_tether_fee@A6#quantity=-3'])
+        self.assertIsNone(history.quantities_at(date(2026,10,23),trades,problems,{})['Tether'])
+        self.assertEqual(content,before)
+
+    def test_total_rule_requires_exact_first_row_formula_matching_comment_and_unfiltered_rows(self):
+        content=source_workbook(tether_accounting=True)
+        formulas=load_workbook(BytesIO(content),data_only=False,keep_links=False)
+        values=load_workbook(BytesIO(content),data_only=True,keep_links=False)
+        try:
+            sheet=next(s for s in formulas if 'Table13444' in s.tables);cached=values[sheet.title];table=sheet.tables['Table13444']
+            self.assertEqual(history.tether_total_accounting(cached,sheet,table,1,2,1,6)['fee_quantity'],3)
+            original=sheet['A6'].value
+            for formula in ['=SUBTOTAL(109,Table13444[Quantity])-A3-3','=UNTRUSTED()-A2-3','=SUBTOTAL(109,Table13444[Quantity])-A2-4']:
+                sheet['A6']=formula
+                self.assertIsNone(history.tether_total_accounting(cached,sheet,table,1,2,1,6))
+            sheet['A6']=original;cached.row_dimensions[3].hidden=True
+            self.assertIsNone(history.tether_total_accounting(cached,sheet,table,1,2,1,6))
+        finally:formulas.close();values.close()
+
     def test_confirmed_day_first_text_has_one_meaning_and_still_rejects_invalid_dates(self):
         for value,expected in [('01/02/2026',date(2026,2,1)),('۰۶/۰۷/۱۴۰۵',date(2026,9,28)),('2026/09/28',date(2026,9,28)),(datetime(2026,9,28),date(2026,9,28))]:
             self.assertEqual(history.parse_trade_date(value,day_first=True),expected)
@@ -68,7 +100,7 @@ class HistoricalQuantityTests(unittest.TestCase):
         current,trades,problems,_=history.reconstruct(content,{})
         self.assertEqual(current['Tether'],6)
         self.assertEqual(sum(q for _,q in trades['Tether']),10)
-        self.assertEqual(problems['Tether'],['quantity_reconciliation_failed@Table13444#current_minus_retained_net=-4'])
+        self.assertEqual(problems['Tether'],['quantity_reconciliation_failed@Table13444#current_minus_expected_net=-4'])
         self.assertIsNone(history.quantities_at(date(2026,10,23),trades,problems,{})['Tether'])
         self.assertTrue(any(i.startswith('ambiguous_transaction_date') for i in problems['BTC']))
         self.assertEqual(content,before)
