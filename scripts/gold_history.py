@@ -30,6 +30,7 @@ ENDPOINT='https://portfolio-agent-telegram.vercel.app/api/telegram'
 DIGITS=str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789')
 CRYPTO={'BTC':'bitcoin','ETH':'ethereum','Tether':'tether','Link':'chainlink','ADA':'cardano','SOL':'solana','ONDO':'ondo-finance'}
 DAY_FIRST_ASSETS=frozenset({'BTC','Link','Tether','ADA'})  # ADA: owner's 2026-10-28 Excel evidence.
+DUST_TOTAL_ASSETS=frozenset({'ADA','SOL','ONDO','Link'})  # Owner-confirmed small-balance totals.
 PREWINDOW_TETHER_SIGNATURE='3a187613376cf0faa691753a09296c65d859d7d91ddbd3b3999fa7293aa7f1df'
 
 
@@ -264,9 +265,9 @@ def historical_weeks(content,modified,checked,config,existing):
             # Silver must match the actual certificate. Never substitute spot silver.
         except Exception:pass
         return asset,[],'Historical quote unavailable'
-    # ADA's dust suppression was inspected with the owner. Other unresolved
+    # These dust totals were confirmed by the owner. Other unresolved
     # balances still need their own source review before accepting a residual.
-    candidates={a for a in ['ADA'] if problems[a]==['quantity_reconciliation_failed'] and hasattr(trades[a],'reconciliation_delta')}
+    candidates={a for a in DUST_TOTAL_ASSETS if problems[a]==['quantity_reconciliation_failed'] and hasattr(trades[a],'reconciliation_delta')}
     targets=[asset for asset in MAPPING if asset!='بلک راک' and (not problems[asset] or asset in candidates)]
     with ThreadPoolExecutor(max_workers=3) as pool:
         for asset,values,label in pool.map(fetch_asset,targets):series[asset]=values;source[asset]=label

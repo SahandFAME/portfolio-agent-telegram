@@ -17,15 +17,15 @@ import gold_history as history
 from verify_onedrive import MAPPING
 
 
-def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=None,tether_accounting=False,dust_ada=False):
+def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=None,tether_accounting=False,dust_ada=False,dust_assets=()):
     book=Workbook();book.remove(book.active);totals={}
     for i,(asset,spec) in enumerate(MAPPING.items()):
         sheet=book.create_sheet('Fixture'+str(i));sheet.append([spec['column'],'Date' if asset in history.CRYPTO else 'تاریخ'])
         if asset=='Tether' and tether_accounting:
             sheet.append([7,datetime(2023,1,1)]);sheet.append([20,datetime(2025,11,1)])
             sheet.append([-2,'هزینه گم شده']);sheet.append([-5,datetime(2026,1,1)]);total=10
-        elif asset=='ADA' and dust_ada:
-            sheet.append([10,'08/02/1404']);sheet.append([-9.75,datetime(2026,9,26)]);total=0
+        elif asset in dust_assets or asset=='ADA' and dust_ada:
+            sheet.append([10,'08/02/1404' if asset=='ADA' else datetime(2025,4,28)]);sheet.append([-9.75,datetime(2026,9,26)]);total=0
         elif asset=='بلک راک':
             sheet.append([15,datetime(2026,9,28)]);sheet.append([None,None]);total=15
         else:
@@ -53,6 +53,18 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=
 
 
 class HistoricalQuantityTests(unittest.TestCase):
+    def test_confirmed_sol_ondo_link_dust_uses_same_weekly_dollar_bound_without_waiving_other_assets(self):
+        dates=[datetime.combine(d,history.time(12),history.TEHRAN) for d in history.week_dates()]
+        content=source_workbook(dust_assets={'ADA','SOL','ONDO','Link','BTC'})
+        with patch.object(history,'tgju_history',return_value=[(d,1000000) for d in dates]),patch.object(history,'listed_history',return_value=[]),patch.object(history,'crypto_history',return_value=[(d,1) for d in dates]):
+            rows,_=history.historical_weeks(content,'2026-10-24T00:00:00Z','2026-10-25T00:00:00Z',{'manual':{}},{})
+        for asset in ['ADA','SOL','ONDO','Link']:
+            self.assertTrue(all(r['quantities'][asset] is not None for r in rows))
+            self.assertEqual(rows[0]['quantities'][asset],10)
+            self.assertEqual(rows[-1]['quantities'][asset],.25)
+            self.assertTrue(all(not any(i.endswith(':'+asset) for i in r['issues']) for r in rows))
+        self.assertTrue(all(r['quantities']['BTC'] is None for r in rows))
+
     def test_ada_dust_is_tolerated_per_week_only_with_valid_dated_usd_evidence(self):
         content=source_workbook(dust_ada=True);before=bytes(content)
         dates=[datetime.combine(d,history.time(12),history.TEHRAN) for d in history.week_dates()]

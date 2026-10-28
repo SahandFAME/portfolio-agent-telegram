@@ -75,8 +75,10 @@ Its fully dated, nonnegative transaction history may be used when the discrepanc
 against the current total itself is independently proven worth less than USD 5
 at that week's historical ADA/USD price. Do not erase earlier material ADA
 holdings, invent a fee/sale date, or ignore date/negative-balance failures. A
-week without this proof remains unknown. This reconciliation exception is scoped
-to inspected ADA; other outstanding balances still require their own review.
+week without this proof remains unknown. The owner subsequently confirmed the same small-balance convention for SOL,
+ONDO and Link. Apply the same strictly-below-USD-5 discrepancy bound to these
+four assets only. Link already reconciles in the inspected source; do not change
+its quantities or formula. Other outstanding balances still require source review.
 ADA's year-last Solar Hijri dates use the day/month/year order shown in the
 owner's Excel evidence. No other asset inherits that date convention.
 
@@ -181,7 +183,9 @@ in private Blob and the admin Excel file.
 For owner-requested formula/comment inspection, the read-only audit workflow can
 accept an optional public encryption certificate. Its narrow inspection script
 reads the requested total and opening-row information without saving the source;
-only CMS-encrypted diagnostics enter a public check. The requesting Codex session
+only CMS-encrypted diagnostics enter a public check. The narrow review also covers confirmed crypto dust totals and nearby labels
+of unmapped trade tables, to identify historical assets without screenshots.
+All such information remains encrypted. The requesting Codex session
 keeps the temporary private key outside the checkout and decrypts locally.
 No raw formula, comment, holdings, source file or token belongs in public logs.
 
