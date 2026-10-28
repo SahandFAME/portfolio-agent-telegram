@@ -2032,7 +2032,8 @@ async function sendTelegramPhoto(chatId,png,caption,{guestSafe=false,audience="r
 
 
 const GOLD_HISTORY_KEY='portfolio/gold-history/latest.json';
-const historyOptions=()=>({assets:ASSETS,groups:Object.fromEntries(ASSETS.map(a=>[a,categoryName(a)])),now:Date.now()});
+const HISTORY_ADDITIONAL_GROUPS={XAUT:'طلا و سکه','اهرم':'سهام و صندوق'};
+const historyOptions=()=>({assets:ASSETS,groups:{...Object.fromEntries(ASSETS.map(a=>[a,categoryName(a)])),...HISTORY_ADDITIONAL_GROUPS},additionalGroups:HISTORY_ADDITIONAL_GROUPS,now:Date.now()});
 async function historyState(){
   const blob=await get(GOLD_HISTORY_KEY,ACCESS_READ_OPTIONS);
   if(!blob)return {data:{version:1,revision:null,weeks:[]},etag:null};
@@ -2058,7 +2059,7 @@ async function historyRead(req,res){
       return res.status(200).json({ok:true,revision:file.revision,content_base64:bytes.toString('base64'),sha256:Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex')});
     }
     if(req.query.data==='gold-history-config')return res.status(200).json({ok:true,assets:ASSETS,manual:(await historyState()).data.manual_baseline||MANUAL,
-      groups:historyOptions().groups,minimum_rial:MIN_REPORT_VALUE_RIAL,manual_unchanged_since:'2025-10-25',manual_unchanged_until:'2026-10-25',
+      groups:historyOptions().groups,additional_assets:Object.keys(HISTORY_ADDITIONAL_GROUPS),minimum_rial:MIN_REPORT_VALUE_RIAL,manual_unchanged_since:'2025-10-25',manual_unchanged_until:'2026-10-25',
       manual_confirmation:'Owner confirmed unchanged over the preceding year on 2026-10-25'});
     return res.status(200).json({ok:true,...(await historyState()).data});
   }catch(_){return res.status(503).json({ok:false});}
@@ -2097,9 +2098,10 @@ async function historyWrite(req,res){
         const price=cryptoAsset(asset)?p.priceUsd*fx:p.priceRial;
         if(Number.isFinite(price)&&price>0)quotes[asset]={price_rial:price,source:cryptoAsset(asset)?p.source+' × '+prices['دلار']?.source:p.source,quoted_at:p.quotedAt||p.retrievedAt||asof};
       }
+      for(const asset of Object.keys(HISTORY_ADDITIONAL_GROUPS))if(body.additional_quotes?.[asset])quotes[asset]=body.additional_quotes[asset];
       const gold=prices['آبشده (طلب)'];
       incoming=[{week_ending:week,mode:body.bootstrap===true?'baseline':'live',as_of:asof,source_checked_at:body.source_checked_at,workbook_updated_at:body.workbook_updated_at,
-        workbook_sha256:body.workbook_sha256,quantities:{...body.assets,...MANUAL},quotes,
+        workbook_sha256:body.workbook_sha256,quantities:{...body.assets,...MANUAL},additional_quantities:body.additional_quantities,quotes,
         gold_quote:gold?{price_rial:gold.priceRial,source:gold.source,quoted_at:gold.quotedAt||gold.retrievedAt||asof}:null,issues:[]}];
     }else{
       if(body.revision!==current.data.revision)return res.status(409).json({ok:false,error:'history_changed'});

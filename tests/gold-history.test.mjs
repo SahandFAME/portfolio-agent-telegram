@@ -47,6 +47,26 @@ test('pre-launch zero fund needs no invented historical price; positive missing/
   }
 });
 
+test('additional historical positions contribute to totals/groups while the core holdings contract stays intact',()=>{
+  const opts={...options,additionalGroups:{XAUT:'gold','اهرم':'stock'}};
+  const value={...input(),additional_quantities:{XAUT:2,'اهرم':10}};
+  value.quotes.XAUT=q(10000000);value.quotes['اهرم']=q(1000000);
+  const record=calculateGoldWeek(value,opts);
+  assert.equal(record.status,'complete');assert.equal(record.total_rial,2130000000);
+  assert.equal(record.gold_grams,10.65);assert.equal(record.allocation.gold,2020000000/2130000000*100);
+  assert.equal(Object.keys(record.quantities).length,4);assert.equal(record.additional_quantities.XAUT,2);
+  for(const change of [x=>{delete x.additional_quantities;},x=>{x.additional_quantities.XAUT=null;},x=>{delete x.quotes.XAUT;},x=>{x.quotes.XAUT.quoted_at='2026-10-01T00:00:00Z';}]){
+    const bad=structuredClone(value);change(bad);const result=calculateGoldWeek(bad,opts);
+    assert.equal(result.status,'incomplete');assert.equal(result.total_rial,null);assert.equal(result.allocation,null);
+  }
+  const unknown=structuredClone(value);unknown.additional_quantities.Other=1;assert.throws(()=>calculateGoldWeek(unknown,opts));
+  const negative=structuredClone(value);negative.additional_quantities.XAUT=-1;assert.throws(()=>calculateGoldWeek(negative,opts));
+  value.minimum_usd=5;value.usd_quote=q(1000000);value.additional_quantities.XAUT=.1;value.quotes.XAUT=q(40000000);
+  assert.equal(calculateGoldWeek(value,opts).included_values.XAUT,undefined);
+  value.quotes.XAUT=q(50000000);assert.equal(calculateGoldWeek(value,opts).included_values.XAUT,5000000);
+  value.additional_quantities['اهرم']=0;delete value.quotes['اهرم'];assert.equal(calculateGoldWeek(value,opts).status,'complete');
+});
+
 test('future/stale quotes do not turn into historical prices and invalid financial/source fields fail closed',()=>{
   for(const stamp of ['2026-10-24T00:00:00Z','2026-10-01T00:00:00Z']){
     const value=input();value.quotes.stock.quoted_at=stamp;assert.equal(calculateGoldWeek(value,options).status,'incomplete');
@@ -75,10 +95,25 @@ const auth={'x-portfolio-sync-secret':'fixture-secondary'},header={'x-telegram-b
 const KEY='portfolio/gold-history/latest.json';
 const request=(a,text,id=1,extra={})=>a.request('POST',{}, {message:{chat:{id,type:'private'},from:{id},text,...extra}},header);
 const messages=a=>a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body));
+
+test('weekly capture includes source-verified additional positions and fails closed for a legacy worker',async()=>{
+  const now=Date.parse('2026-10-25T10:00:00Z');
+  for(const supplied of [true,false]){
+    const a=await app({now:()=>now});
+    const payload={assets:a.assets,workbook_updated_at:'2026-10-24T12:00:00Z',source_checked_at:new Date(now).toISOString(),workbook_sha256:'b'.repeat(64),bootstrap:true,notify:false};
+    if(supplied){payload.additional_quantities={XAUT:2,'اهرم':0};payload.additional_quotes={XAUT:{price_rial:10000000,quoted_at:new Date(now).toISOString(),source:'Synthetic verified IRR'}};}
+    const result=await a.request('POST',{sync:'gold-observation'},payload,auth);assert.equal(result.code,200);
+    const record=a.store.get(KEY).weeks[0];assert.equal(record.status,supplied?'complete':'incomplete');
+    assert.equal(Object.keys(record.quantities).length,29);assert.equal(Object.keys(a.assets).length,23);
+    if(supplied)assert.equal(record.included_values.XAUT,20000000);
+    else assert.equal(record.total_rial,null);
+    assert.equal(a.sends.length,0);
+  }
+});
 async function fixture(opts={}){
   const now=Date.now()+10000,a=await app({...opts,now:()=>now});
   a.store.set('portfolio/access-control.json',{approved:['2','3','4'],delegatedAdmins:['3'],financialAdvisors:['2'],users:{},pending:{},audit:[],accessPolicy:{version:1,activated_at:new Date(now).toISOString()}});
-  const record={...input(),quantities:Object.fromEntries([...a.ns.ASSETS].map(asset=>[asset,asset in a.ns.MANUAL?a.ns.MANUAL[asset]:0])),quotes:{},gold_quote:q(200000000)};
+  const record={...input(),additional_quantities:{XAUT:0,'اهرم':0},quantities:Object.fromEntries([...a.ns.ASSETS].map(asset=>[asset,asset in a.ns.MANUAL?a.ns.MANUAL[asset]:0])),quotes:{},gold_quote:q(200000000)};
   for(const asset of Object.keys(a.ns.MANUAL))record.quotes[asset]=q(100000000);
   return {a,record,now};
 }
@@ -106,7 +141,7 @@ test('only owners/admins/advisors can request a real rendered history image; gue
 test('website-first weekly capture asks admins for missing EcoCoach price and an authenticated reply completes it',async()=>{
   const now=Date.parse('2026-10-24T00:00:00Z'),a=await app({now:()=>now});
   const assets={...a.assets,'بلک راک':15};
-  const payload={assets,workbook_updated_at:'2026-10-23T12:00:00Z',source_checked_at:new Date(now).toISOString(),workbook_sha256:'b'.repeat(64),bootstrap:false,notify:true};
+  const payload={assets,workbook_updated_at:'2026-10-23T12:00:00Z',source_checked_at:new Date(now).toISOString(),workbook_sha256:'b'.repeat(64),additional_quantities:{XAUT:0,'اهرم':0},bootstrap:false,notify:true};
   const result=await a.request('POST',{sync:'gold-observation'},payload,auth);assert.equal(result.code,200);
   const history=a.store.get(KEY),week=history.weeks[0];assert.equal(week.status,'incomplete');assert.equal(week.mode,'live');assert.equal(week.total_rial,null);
   const prompt=messages(a).find(x=>x.reply_markup?.force_reply);assert.ok(prompt);assert.equal(prompt.chat_id,1);
@@ -123,7 +158,7 @@ test('website quote suppresses the manual weekly request and no guest fixed fall
   const now=Date.parse('2026-10-25T10:00:00Z');
   const html=`<h1>صندوق شاخصی بلک راک اکوکوچ</h1><table><caption>صندوق شاخصی بلک راک</caption><tr><th>قیمت هر واحد</th><td>1050000 تومان</td></tr><tr><th>تاریخ به‌روزرسانی قیمت</th><td><time datetime="2026-10-25T09:00:00Z">now</time></td></tr></table>`;
   const a=await app({now:()=>now,ecoCoachHtml:html});
-  const result=await a.request('POST',{sync:'gold-observation'},{assets:{...a.assets,'بلک راک':15},source_checked_at:new Date(now).toISOString(),workbook_updated_at:'2026-10-24T12:00:00Z',workbook_sha256:'b'.repeat(64),bootstrap:true,notify:true},auth);
+  const result=await a.request('POST',{sync:'gold-observation'},{assets:{...a.assets,'بلک راک':15},source_checked_at:new Date(now).toISOString(),workbook_updated_at:'2026-10-24T12:00:00Z',workbook_sha256:'b'.repeat(64),additional_quantities:{XAUT:0,'اهرم':0},bootstrap:true,notify:true},auth);
   assert.equal(result.code,200);assert.equal(a.store.get(KEY).weeks[0].status,'complete');assert.equal(a.sends.length,0);assert.equal(result.data.complete_weeks,0);assert.equal(result.data.complete_observations,1);
   assert.equal(a.store.get(KEY).weeks[0].quotes['بلک راک'].source,'EcoCoach');
 });
@@ -162,6 +197,6 @@ test('demotion while rendering or downloading prevents history delivery beyond t
 test('a provisional bootstrap never broadcasts weekly price requests, even if its caller asks to notify',async()=>{
   const now=Date.parse('2026-10-25T10:00:00Z'),a=await app({now:()=>now});
   const result=await a.request('POST',{sync:'gold-observation'},{assets:{...a.assets,'بلک راک':15},
-    source_checked_at:new Date(now).toISOString(),workbook_updated_at:'2026-10-24T12:00:00Z',workbook_sha256:'b'.repeat(64),bootstrap:true,notify:true},auth);
+    source_checked_at:new Date(now).toISOString(),workbook_updated_at:'2026-10-24T12:00:00Z',workbook_sha256:'b'.repeat(64),additional_quantities:{XAUT:0,'اهرم':0},bootstrap:true,notify:true},auth);
   assert.equal(result.code,200);assert.equal(a.store.get(KEY).weeks[0].mode,'baseline');assert.equal(a.sends.length,0);
 });

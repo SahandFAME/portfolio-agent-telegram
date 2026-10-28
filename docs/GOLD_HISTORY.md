@@ -22,6 +22,26 @@ not zero. Additional unmapped trade tables are flagged unless they are explicitl
 closed, reconciled and entirely before the historical window. Source table and
 row locators appear in the private workbook exceptions sheet.
 
+The read-only source audit identified two additional tables relevant to the
+historical calculation: XAUT (Tether Gold, quoted in USD per token) and اهرم
+(listed fund units, quoted in rial per unit). Their current subtotals reconcile
+with their dated transactions. Historical calculations now retain these in a
+separate `additional_quantities` field rather than limiting past holdings to
+today's configured 29 assets. Validate exact table/sheet/header identity, the
+structured subtotal formula, finite nonnegative current balance, full dated net,
+visibility and nonnegative historical balances. Missing/changed tables remain
+unknown and block complete totals; a current zero does not erase earlier units.
+
+The protected history configuration declares the two required additions. The
+server independently validates them, applies the same cutoff, includes their
+values in totals and gold/share group percentages, and counts their quantity
+changes. Excel lists individually verified additions even if another missing
+price prevents a portfolio total. Weekly source captures reread both subtotals
+and supply independently dated quotes; an old worker omitting them produces an
+incomplete observation. Source values, macro workbook and the existing 23-asset
+sync contract and six manual holdings remain unchanged. Other bot reports retain
+their configured current asset list.
+
 On 2026-10-27 the owner confirmed/corrected BTC and Link dates to day/month/year.
 Interpret year-last text dates as day-first for those two assets only, including
 four-digit Gregorian or Solar Hijri years. Native Excel dates and year-first
