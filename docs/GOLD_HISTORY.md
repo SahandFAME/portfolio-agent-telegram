@@ -50,6 +50,10 @@ required for weekly history: a fully explained current total does not establish
 when an expense affected the portfolio. Record unknown timing as explicit
 private exceptions rather than an unexplained quantity mismatch or an invented
 transaction date. Unrecognized formulas, comments or residuals still fail closed.
+For this reserve-excluded basis, validate the opening balance at the start of the
+requested year and all subsequent daily balances; an earlier out-of-window deficit
+does not establish a deficit within the requested year. Opening or in-window
+negative balances still block history. Other assets retain their existing checks.
 
 BlackRock is zero before its recorded first purchase, consistent with the owner's
 confirmed launch/purchase explanation. It needs no fabricated pre-launch price.

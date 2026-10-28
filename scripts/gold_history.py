@@ -70,6 +70,19 @@ def tether_total_accounting(values,formulas,table,quantity_column,date_column,to
     return {'capital_row':first,'capital_quantity':capital,'fee_quantity':fee,'total_cell':cell.coordinate}
 
 
+def negative_historical_balance(events,current,*,start=None):
+    daily=defaultdict(float)
+    for day,quantity in events:daily[day]+=quantity
+    balance=sum(q for d,q in daily.items() if start is not None and d<start)
+    tolerance=max(1e-8,abs(current)*1e-10)
+    if balance < -tolerance:return True
+    for day in sorted(daily):
+        if start is not None and day<start:continue
+        balance+=daily[day]
+        if balance < -tolerance:return True
+    return False
+
+
 def reconstruct(content,config):
     current=extract_quantities(content)
     book=load_workbook(BytesIO(content),data_only=True,keep_links=False)
@@ -108,11 +121,10 @@ def reconstruct(content,config):
             if not math.isclose(expected,current[asset],rel_tol=1e-10,abs_tol=1e-8):
                 detail='@'+spec['table']+'#current_minus_expected_net='+format(current[asset]-expected,'.15g') if asset=='Tether' else ''
                 issues.append('quantity_reconciliation_failed'+detail)
-            balance=0.0;daily=defaultdict(float)
-            for day,q in events:daily[day]+=q
-            for day in sorted(daily):
-                balance+=daily[day]
-                if balance < -max(1e-8,abs(current[asset])*1e-10):issues.append('negative_reconstructed_balance')
+            # The reserved-capital basis applies to the requested analysis year.
+            # Validate its opening balance and every subsequent daily balance.
+            start=date(2025,10,25) if accounting else None
+            if negative_historical_balance(events,current[asset],start=start):issues.append('negative_reconstructed_balance')
             trades[asset]=events;problems[asset]=sorted(set(issues))
         for name,(sheet,table) in tables.items():
             if name in {v['table'] for v in MAPPING.values()}:continue

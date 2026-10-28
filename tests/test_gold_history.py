@@ -51,6 +51,13 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=
 
 
 class HistoricalQuantityTests(unittest.TestCase):
+    def test_reserved_capital_basis_validates_opening_and_in_window_balances(self):
+        events=[(date(2023,1,1),-5),(date(2024,1,1),20),(date(2026,1,1),-1)]
+        self.assertTrue(history.negative_historical_balance(events,14))
+        self.assertFalse(history.negative_historical_balance(events,14,start=date(2025,10,25)))
+        self.assertTrue(history.negative_historical_balance([(date(2024,1,1),-1),(date(2026,1,1),10)],9,start=date(2025,10,25)))
+        self.assertTrue(history.negative_historical_balance([(date(2024,1,1),5),(date(2026,1,1),-6)],0,start=date(2025,10,25)))
+
     def test_documented_capital_and_fees_explain_current_total_without_inventing_expense_dates(self):
         content=source_workbook(tether_accounting=True);before=bytes(content)
         current,trades,problems,_=history.reconstruct(content,{})
