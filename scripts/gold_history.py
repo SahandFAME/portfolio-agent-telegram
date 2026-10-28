@@ -250,6 +250,25 @@ def last_quote(series,asof,source):
     return {'price_rial':value,'quoted_at':stamp.astimezone(timezone.utc).isoformat(),'source':source}
 
 
+def saved_crypto_series(existing,asset):
+    """Recover dated USD evidence only from verified historical conversions."""
+    result=[]
+    for row in existing.get('weeks',[]):
+        if row.get('mode')!='historical':continue
+        p=row.get('quotes',{}).get(asset);fx=row.get('usd_quote')
+        if not p or not fx or p.get('source')!='CoinGecko USD × TGJU USD/IRR' or fx.get('source')!='TGJU USD/IRR daily close':continue
+        if any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<=0 for v in [p.get('price_rial'),fx.get('price_rial')]):continue
+        try:
+            asof=datetime.fromisoformat(row['as_of'].replace('Z','+00:00'))
+            stamp=datetime.fromisoformat(p['quoted_at'].replace('Z','+00:00'))
+            fxstamp=datetime.fromisoformat(fx['quoted_at'].replace('Z','+00:00'))
+            price=p['price_rial']/fx['price_rial']
+            if not math.isfinite(price) or price<=0 or not 0<= (asof-stamp).total_seconds()<=7*86400 or not 0<= (asof-fxstamp).total_seconds()<=7*86400:continue
+            result.append((stamp,price))
+        except (ValueError,TypeError,KeyError,ZeroDivisionError,OverflowError):continue
+    return result
+
+
 def historical_weeks(content,modified,checked,config,existing):
     current,trades,problems,extras=reconstruct(content,config)
     manual=existing.get('manual_baseline') or config['manual']
@@ -260,7 +279,12 @@ def historical_weeks(content,modified,checked,config,existing):
         except Exception:series[asset]=[]
     def fetch_asset(asset):
         try:
-            if asset in CRYPTO:return asset,crypto_history(asset),'CoinGecko USD × TGJU USD/IRR'
+            if asset in CRYPTO:
+                saved=saved_crypto_series(existing,asset)
+                try:fresh=crypto_history(asset)
+                except Exception:fresh=[]
+                # Equal timestamps prefer the freshly fetched provider value.
+                return asset,sorted(dict(saved+fresh).items()),'CoinGecko USD × TGJU USD/IRR'
             if asset!='شمش نقره 999':return asset,listed_history(asset),'TSETMC official daily market price (IRR)'
             # Silver must match the actual certificate. Never substitute spot silver.
         except Exception:pass
@@ -298,7 +322,8 @@ def historical_weeks(content,modified,checked,config,existing):
         rows.append({'week_ending':day.isoformat(),'as_of':asof.astimezone(timezone.utc).isoformat(),'source_checked_at':checked,
             'workbook_updated_at':modified,'workbook_sha256':digest,'mode':'historical','quantities':quantities,'quotes':quotes,'gold_quote':gold,'issues':issues,
             'minimum_usd':5,'usd_quote':fx})
-    return rows,{'unmapped_trade_tables':len(extras),'unreconciled_assets':sum(bool(p) for p in problems.values())}
+    return rows,{'unmapped_trade_tables':len(extras),'unreconciled_assets':sum(bool(p) for p in problems.values()),
+        'dust_candidate_assets':len(candidates),'dust_accepted_asset_weeks':sum(r['quantities'][a] is not None for r in rows for a in candidates)}
 
 
 def fa_time(stamp):
