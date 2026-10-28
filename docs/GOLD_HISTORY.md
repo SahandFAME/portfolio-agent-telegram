@@ -62,6 +62,24 @@ confirmation to the inspected capital/fee/ignored-adjustment signature; changed
 amounts require new timing confirmation. Include the opening adjustment in
 nonnegative balance validation. Current source totals remain unchanged.
 
+On 2026-10-28 the owner accepted values below USD 5 as immaterial for historical
+valuation. Backfilled weeks exclude each priced asset below USD 5 from rows,
+totals and percentages, using that week's independently dated USD/IRR quote and
+retaining the existing 50,000-toman minimum. Exactly USD 5 remains included.
+Missing, future or stale prices/FX still block a complete valuation; raw quantities
+and the authoritative current source total remain unchanged. Live reports and
+weekly live observations keep their existing cutoff.
+
+The owner showed ADA's total formula suppressing quantities below one unit.
+Its fully dated, nonnegative transaction history may be used when the discrepancy
+against the current total itself is independently proven worth less than USD 5
+at that week's historical ADA/USD price. Do not erase earlier material ADA
+holdings, invent a fee/sale date, or ignore date/negative-balance failures. A
+week without this proof remains unknown. This reconciliation exception is scoped
+to inspected ADA; other outstanding balances still require their own review.
+ADA's year-last Solar Hijri dates use the day/month/year order shown in the
+owner's Excel evidence. No other asset inherits that date convention.
+
 BlackRock is zero before its recorded first purchase, consistent with the owner's
 confirmed launch/purchase explanation. It needs no fabricated pre-launch price.
 After purchase it requires an evidenced historical price; a current website quote,
