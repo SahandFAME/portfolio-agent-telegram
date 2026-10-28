@@ -30,6 +30,16 @@ ENDPOINT='https://portfolio-agent-telegram.vercel.app/api/telegram'
 DIGITS=str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789')
 CRYPTO={'BTC':'bitcoin','ETH':'ethereum','Tether':'tether','Link':'chainlink','ADA':'cardano','SOL':'solana','ONDO':'ondo-finance'}
 DAY_FIRST_ASSETS=frozenset({'BTC','Link','Tether'})  # Owner confirmed 2026-10-27.
+PREWINDOW_TETHER_SIGNATURE='3a187613376cf0faa691753a09296c65d859d7d91ddbd3b3999fa7293aa7f1df'
+
+
+class HistoricalEvents(list):
+    """An opening adjustment is a period boundary, not an invented trade date."""
+    opening_adjustment=0.0
+
+
+def deduction_signature(capital,fee,ignored):
+    return hashlib.sha256(json.dumps([format(v,'.15g') for v in [capital,fee,ignored]],separators=(',',':')).encode()).hexdigest()
 
 
 def parse_trade_date(value,*,day_first=False):
@@ -73,7 +83,7 @@ def tether_total_accounting(values,formulas,table,quantity_column,date_column,to
 def negative_historical_balance(events,current,*,start=None):
     daily=defaultdict(float)
     for day,quantity in events:daily[day]+=quantity
-    balance=sum(q for d,q in daily.items() if start is not None and d<start)
+    balance=sum(q for d,q in daily.items() if start is not None and d<start)+getattr(events,'opening_adjustment',0.0)
     tolerance=max(1e-8,abs(current)*1e-10)
     if balance < -tolerance:return True
     for day in sorted(daily):
@@ -116,8 +126,13 @@ def reconstruct(content,config):
             expected=net
             if accounting:
                 expected+=ignored_net-accounting['fee_quantity']
-                if accounting['fee_quantity']:issues.append('undated_tether_fee@'+accounting['total_cell']+'#quantity='+format(-accounting['fee_quantity'],'.15g'))
-                if ignored_net:issues.append('undated_ignored_tether_adjustment@'+spec['table']+'#quantity='+format(ignored_net,'.15g'))
+                confirmed=deduction_signature(accounting['capital_quantity'],accounting['fee_quantity'],ignored_net)==PREWINDOW_TETHER_SIGNATURE
+                if confirmed:
+                    events=HistoricalEvents(events)
+                    events.opening_adjustment=ignored_net-accounting['fee_quantity']
+                else:
+                    if accounting['fee_quantity']:issues.append('undated_tether_fee@'+accounting['total_cell']+'#quantity='+format(-accounting['fee_quantity'],'.15g'))
+                    if ignored_net:issues.append('undated_ignored_tether_adjustment@'+spec['table']+'#quantity='+format(ignored_net,'.15g'))
             if not math.isclose(expected,current[asset],rel_tol=1e-10,abs_tol=1e-8):
                 detail='@'+spec['table']+'#current_minus_expected_net='+format(current[asset]-expected,'.15g') if asset=='Tether' else ''
                 issues.append('quantity_reconciliation_failed'+detail)
@@ -158,7 +173,8 @@ def week_dates():
 def quantities_at(day,trades,problems,manual):
     result={}
     for asset,events in trades.items():
-        result[asset]=None if problems[asset] else max(0.0,sum(q for d,q in events if d<=day))
+        opening=getattr(events,'opening_adjustment',0.0) if day>=date(2025,10,25) else 0.0
+        result[asset]=None if problems[asset] else max(0.0,sum(q for d,q in events if d<=day)+opening)
     result.update(manual)
     return result
 

@@ -55,6 +55,13 @@ requested year and all subsequent daily balances; an earlier out-of-window defic
 does not establish a deficit within the requested year. Opening or in-window
 negative balances still block history. Other assets retain their existing checks.
 
+The owner subsequently confirmed both documented deductions occurred before
+the analysis period. Apply their combined signed amount to the opening balance
+and every requested weekly quantity, with no invented transaction date. Bind this
+confirmation to the inspected capital/fee/ignored-adjustment signature; changed
+amounts require new timing confirmation. Include the opening adjustment in
+nonnegative balance validation. Current source totals remain unchanged.
+
 BlackRock is zero before its recorded first purchase, consistent with the owner's
 confirmed launch/purchase explanation. It needs no fabricated pre-launch price.
 After purchase it requires an evidenced historical price; a current website quote,

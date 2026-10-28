@@ -51,6 +51,22 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=
 
 
 class HistoricalQuantityTests(unittest.TestCase):
+    def test_owner_confirmed_preperiod_deductions_adjust_every_week_without_a_fake_transaction(self):
+        signature=history.deduction_signature(7,3,-2)
+        with patch.object(history,'PREWINDOW_TETHER_SIGNATURE',signature):
+            _,trades,problems,_=history.reconstruct(source_workbook(tether_accounting=True),{})
+        # This synthetic fixture has no funds at the opening boundary, so the
+        # adjustment correctly fails the nonnegative opening-balance check.
+        self.assertIn('negative_reconstructed_balance',problems['Tether'])
+        self.assertFalse(any(i.startswith('undated_') for i in problems['Tether']))
+        events=history.HistoricalEvents([(date(2024,1,1),20),(date(2026,1,1),-5)])
+        events.opening_adjustment=-5
+        self.assertFalse(history.negative_historical_balance(events,10,start=date(2025,10,25)))
+        self.assertEqual(history.quantities_at(date(2025,10,31),{'Tether':events},{'Tether':[]},{})['Tether'],15)
+        self.assertEqual(history.quantities_at(date(2026,10,23),{'Tether':events},{'Tether':[]},{})['Tether'],10)
+        self.assertEqual(len(events),2)
+        self.assertNotEqual(history.deduction_signature(7,4,-2),signature)
+
     def test_reserved_capital_basis_validates_opening_and_in_window_balances(self):
         events=[(date(2023,1,1),-5),(date(2024,1,1),20),(date(2026,1,1),-1)]
         self.assertTrue(history.negative_historical_balance(events,14))
