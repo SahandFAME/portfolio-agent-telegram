@@ -25,7 +25,7 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=
             sheet.append([7,datetime(2023,1,1)]);sheet.append([20,datetime(2025,11,1)])
             sheet.append([-2,'هزینه گم شده']);sheet.append([-5,datetime(2026,1,1)]);total=10
         elif asset=='ADA' and dust_ada:
-            sheet.append([10,'08/02/1404']);sheet.append([-9.87,datetime(2026,9,26)]);total=0
+            sheet.append([10,'08/02/1404']);sheet.append([-9.75,datetime(2026,9,26)]);total=0
         elif asset=='بلک راک':
             sheet.append([15,datetime(2026,9,28)]);sheet.append([None,None]);total=15
         else:
@@ -62,7 +62,7 @@ class HistoricalQuantityTests(unittest.TestCase):
                 return history.historical_weeks(raw,'2026-10-24T00:00:00Z','2026-10-25T00:00:00Z',{'manual':{}},{})[0]
         rows=run(1)
         self.assertEqual(rows[0]['quantities']['ADA'],10)  # Earlier material holdings survive.
-        self.assertAlmostEqual(rows[-1]['quantities']['ADA'],.13)  # Raw quantity retained.
+        self.assertAlmostEqual(rows[-1]['quantities']['ADA'],.25)  # Raw quantity retained.
         self.assertTrue(all(not any('quantity_reconciliation_failed:ADA'==i for i in r['issues']) for r in rows))
         self.assertTrue(all(r['minimum_usd']==5 and r['usd_quote'] for r in rows))
         # Expensive or missing quotes cannot prove a sub-$5 discrepancy.
@@ -71,7 +71,7 @@ class HistoricalQuantityTests(unittest.TestCase):
         self.assertIsNone(run(1,{'ADA':{2:'not a date'}})[-1]['quantities']['ADA'])
         self.assertIsNone(run(1,{'ADA':{2:'2026/10/01'}})[-1]['quantities']['ADA'])
         # Exactly $5 is outside the owner's strictly-less-than tolerance.
-        self.assertIsNone(run(5/abs(.13-0))[-1]['quantities']['ADA'])
+        self.assertIsNone(run(20)[-1]['quantities']['ADA'])
         self.assertEqual(content,before)
 
     def test_owner_confirmed_preperiod_deductions_adjust_every_week_without_a_fake_transaction(self):
