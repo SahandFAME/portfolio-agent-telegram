@@ -1,5 +1,6 @@
 """Read the requested total formula/comment; publish only encrypted diagnostics."""
 import base64
+from collections import defaultdict
 from datetime import date,datetime
 import hashlib
 from io import BytesIO
@@ -27,6 +28,16 @@ def inspect(content):
         total=sheet.cell(bottom,qi)
         first=top+1
         _,trades,problems,_=reconstruct(content,{})
+        daily=defaultdict(float)
+        for day,amount in trades['Tether']:daily[day]+=amount
+        start=date(2025,10,25);balance=0.0;negative_before=False;negative_within=False
+        for day in sorted(daily):
+            balance+=daily[day]
+            if balance < -max(1e-8,abs(current['Tether'])*1e-10):
+                if day<start:negative_before=True
+                else:negative_within=True
+        opening=sum(q for d,q in trades['Tether'] if d<start)
+        negative_within=negative_within or opening < -max(1e-8,abs(current['Tether'])*1e-10)
         retained=sum(cached[sheet.title].cell(r,qi).value for r in range(first,bottom)
             if isinstance(cached[sheet.title].cell(r,qi).value,(int,float)) and not isinstance(cached[sheet.title].cell(r,qi).value,bool)
             and norm(str(cached[sheet.title].cell(r,di).value or ''))!=norm('هزینه گم شده'))
@@ -36,6 +47,7 @@ def inspect(content):
             'total_cell':total.coordinate,'total_formula':total.value,'total_comment':total.comment.text if total.comment else None,
             'current_total':current['Tether'],'retained_dated_net':retained,
             'reconstructed_net':sum(q for _,q in trades['Tether']),
+            'negative_before_analysis_window':negative_before,'negative_within_analysis_window':negative_within,
             'first_quantity_cell':sheet.cell(first,qi).coordinate,'first_quantity':q,'first_date':value(cached[sheet.title].cell(first,di).value),
             'first_row_text':{sheet.cell(top,c).value:str(cached[sheet.title].cell(first,c).value)[:500] for c in range(left,right+1) if isinstance(cached[sheet.title].cell(first,c).value,str)},
             'residual_after_first_row_exclusion':current['Tether']-(retained-q) if isinstance(q,(int,float)) else None,
