@@ -29,7 +29,7 @@ TEHRAN=ZoneInfo('Asia/Tehran')
 ENDPOINT='https://portfolio-agent-telegram.vercel.app/api/telegram'
 DIGITS=str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789')
 CRYPTO={'BTC':'bitcoin','ETH':'ethereum','Tether':'tether','Link':'chainlink','ADA':'cardano','SOL':'solana','ONDO':'ondo-finance'}
-DAY_FIRST_ASSETS=frozenset({'BTC','Link','Tether'})  # Owner confirmed 2026-10-27.
+DAY_FIRST_ASSETS=frozenset({'BTC','Link','Tether','ADA'})  # ADA: owner's 2026-10-28 Excel evidence.
 PREWINDOW_TETHER_SIGNATURE='3a187613376cf0faa691753a09296c65d859d7d91ddbd3b3999fa7293aa7f1df'
 
 
@@ -136,6 +136,9 @@ def reconstruct(content,config):
             if not math.isclose(expected,current[asset],rel_tol=1e-10,abs_tol=1e-8):
                 detail='@'+spec['table']+'#current_minus_expected_net='+format(current[asset]-expected,'.15g') if asset=='Tether' else ''
                 issues.append('quantity_reconciliation_failed'+detail)
+                if asset in CRYPTO:
+                    if not isinstance(events,HistoricalEvents):events=HistoricalEvents(events)
+                    events.reconciliation_delta=current[asset]-expected
             # The reserved-capital basis applies to the requested analysis year.
             # Validate its opening balance and every subsequent daily balance.
             start=date(2025,10,25) if accounting else None
@@ -239,7 +242,8 @@ def crypto_history(asset):
 
 
 def last_quote(series,asof,source):
-    before=[row for row in series if row[0]<=asof and asof-row[0]<=timedelta(days=7)]
+    before=[row for row in series if row[0]<=asof and asof-row[0]<=timedelta(days=7)
+        and isinstance(row[1],(int,float)) and not isinstance(row[1],bool) and math.isfinite(row[1]) and row[1]>0]
     if not before:return None
     stamp,value=max(before,key=lambda row:row[0])
     return {'price_rial':value,'quoted_at':stamp.astimezone(timezone.utc).isoformat(),'source':source}
@@ -260,13 +264,24 @@ def historical_weeks(content,modified,checked,config,existing):
             # Silver must match the actual certificate. Never substitute spot silver.
         except Exception:pass
         return asset,[],'Historical quote unavailable'
-    targets=[asset for asset in MAPPING if asset!='بلک راک' and not problems[asset]]
+    # ADA's dust suppression was inspected with the owner. Other unresolved
+    # balances still need their own source review before accepting a residual.
+    candidates={a for a in ['ADA'] if problems[a]==['quantity_reconciliation_failed'] and hasattr(trades[a],'reconciliation_delta')}
+    targets=[asset for asset in MAPPING if asset!='بلک راک' and (not problems[asset] or asset in candidates)]
     with ThreadPoolExecutor(max_workers=3) as pool:
         for asset,values,label in pool.map(fetch_asset,targets):series[asset]=values;source[asset]=label
     rows=[];digest=hashlib.sha256(content).hexdigest()
     for day in dates:
         asof=datetime.combine(day,time.max,TEHRAN)
         quantities=quantities_at(day,trades,problems,manual)
+        week_problems={a:list(codes) for a,codes in problems.items()}
+        # The owner accepts sub-$5 discrepancies, not missing/ambiguous trades.
+        # Prove the bound independently for each week using a dated USD quote.
+        for asset in candidates:
+            usd=last_quote(series.get(asset,[]),asof,source[asset])
+            if usd and abs(trades[asset].reconciliation_delta)*usd['price_rial']<5:
+                quantities[asset]=max(0.0,sum(q for d,q in trades[asset] if d<=day)+getattr(trades[asset],'opening_adjustment',0.0))
+                week_problems[asset]=[]
         quotes={};gold=last_quote(series.get('gold',[]),asof,'TGJU 18K gram daily close (IRR)')
         fx=last_quote(series.get('دلار',[]),asof,'TGJU USD/IRR daily close')
         for asset,q in quantities.items():
@@ -278,9 +293,10 @@ def historical_weeks(content,modified,checked,config,existing):
                 p={**p,'price_rial':p['price_rial']*fx['price_rial']} if p and fx else None
             if p:quotes[asset]=p
         issues=['unmapped_historical_trade_table:'+re.sub(r'[<>&\n]','',name) for name in extras]
-        issues.extend(code+':'+asset for asset,codes in problems.items() for code in codes)
+        issues.extend(code+':'+asset for asset,codes in week_problems.items() for code in codes)
         rows.append({'week_ending':day.isoformat(),'as_of':asof.astimezone(timezone.utc).isoformat(),'source_checked_at':checked,
-            'workbook_updated_at':modified,'workbook_sha256':digest,'mode':'historical','quantities':quantities,'quotes':quotes,'gold_quote':gold,'issues':issues})
+            'workbook_updated_at':modified,'workbook_sha256':digest,'mode':'historical','quantities':quantities,'quotes':quotes,'gold_quote':gold,'issues':issues,
+            'minimum_usd':5,'usd_quote':fx})
     return rows,{'unmapped_trade_tables':len(extras),'unreconciled_assets':sum(bool(p) for p in problems.values())}
 
 
@@ -310,7 +326,7 @@ def export_excel(history,groups):
             ('موقت • کامل' if row['status']=='complete' else 'موقت • ناقص') if row['mode']=='baseline' else 'کامل' if row['status']=='complete' else 'ناقص',row.get('quantity_change_count'),fa_time(row['as_of']),fa_time(row['source_checked_at'])])
         for asset,qty in row['quantities'].items():
             p=row.get('quotes',{}).get(asset)
-            if qty==0 or isinstance(qty,(int,float)) and p and qty*p['price_rial']<500000:continue
+            if qty==0 or isinstance(qty,(int,float)) and p and qty*p['price_rial']<(row.get('minimum_rial') or 500000):continue
             value=row.get('included_values',{});value=value.get(asset) if isinstance(value,dict) else None
             if value is None and isinstance(qty,(int,float)) and p:value=qty*p['price_rial']
             holdings.append([week,safe_text(asset),safe_text(groups.get(asset,'')),qty,p['price_rial'] if p else None,math.floor(value/10+.5) if value is not None else None,

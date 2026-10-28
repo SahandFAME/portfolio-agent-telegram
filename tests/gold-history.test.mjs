@@ -18,6 +18,27 @@ test('gold-equivalent wealth uses consistent rial units and exact cutoff without
   const edge=input();edge.quantities.dust=500;assert.equal(calculateGoldWeek(edge,options).included_values.dust,500000);
 });
 
+test('historical $5 cutoff uses dated FX, retains exact boundary and raw quantities, and excludes from all totals',()=>{
+  const value={...input(),minimum_usd:5,usd_quote:q(1000000)};
+  value.quantities.dust=1;value.quotes.dust=q(4999999);
+  const record=calculateGoldWeek(value,options);
+  assert.equal(record.minimum_rial,5000000);assert.equal(record.included_values.dust,undefined);
+  assert.equal(record.quantities.dust,1);assert.equal(record.total_rial,2100000000);
+  assert.equal(record.allocation.crypto,0);
+  value.quotes.dust=q(5000000);
+  assert.equal(calculateGoldWeek(value,options).included_values.dust,5000000);
+  value.usd_quote=q(2000000);
+  assert.equal(calculateGoldWeek(value,options).included_values.dust,undefined);
+  for(const usd of [null,{...q(1),quoted_at:'2026-10-01T00:00:00Z'}, {...q(1),quoted_at:'2026-10-24T00:00:00Z'}]){
+    const result=calculateGoldWeek({...value,usd_quote:usd},options);
+    assert.equal(result.status,'incomplete');assert.equal(result.total_rial,null);
+  }
+  assert.throws(()=>calculateGoldWeek({...value,minimum_usd:6},options));
+  assert.throws(()=>calculateGoldWeek({...value,mode:'live'},options));
+  // A missing asset price is still unknown, never assumed to be dust.
+  delete value.quotes.dust;assert.equal(calculateGoldWeek(value,options).status,'incomplete');
+});
+
 test('pre-launch zero fund needs no invented historical price; positive missing/unknown data blocks all totals and percentages',()=>{
   assert.equal(calculateGoldWeek(input(),options).status,'complete');
   for(const change of [x=>{x.quantities.fund=15;},x=>{x.quantities.stock=null;},x=>{x.gold_quote=null;},x=>{x.issues=['quantity_reconciliation_failed:stock'];}]){

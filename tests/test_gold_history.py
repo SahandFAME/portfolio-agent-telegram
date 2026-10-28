@@ -17,13 +17,15 @@ import gold_history as history
 from verify_onedrive import MAPPING
 
 
-def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=None,tether_accounting=False):
+def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=None,tether_accounting=False,dust_ada=False):
     book=Workbook();book.remove(book.active);totals={}
     for i,(asset,spec) in enumerate(MAPPING.items()):
         sheet=book.create_sheet('Fixture'+str(i));sheet.append([spec['column'],'Date' if asset in history.CRYPTO else 'تاریخ'])
         if asset=='Tether' and tether_accounting:
             sheet.append([7,datetime(2023,1,1)]);sheet.append([20,datetime(2025,11,1)])
             sheet.append([-2,'هزینه گم شده']);sheet.append([-5,datetime(2026,1,1)]);total=10
+        elif asset=='ADA' and dust_ada:
+            sheet.append([10,'08/02/1404']);sheet.append([-9.87,datetime(2026,9,26)]);total=0
         elif asset=='بلک راک':
             sheet.append([15,datetime(2026,9,28)]);sheet.append([None,None]);total=15
         else:
@@ -51,6 +53,27 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=
 
 
 class HistoricalQuantityTests(unittest.TestCase):
+    def test_ada_dust_is_tolerated_per_week_only_with_valid_dated_usd_evidence(self):
+        content=source_workbook(dust_ada=True);before=bytes(content)
+        dates=[datetime.combine(d,history.time(12),history.TEHRAN) for d in history.week_dates()]
+        def run(price,dates_override=None):
+            raw=source_workbook(dust_ada=True,date_overrides=dates_override) if dates_override else content
+            with patch.object(history,'tgju_history',return_value=[(d,1000000) for d in dates]),patch.object(history,'listed_history',return_value=[]),patch.object(history,'crypto_history',return_value=[(d,price) for d in dates]):
+                return history.historical_weeks(raw,'2026-10-24T00:00:00Z','2026-10-25T00:00:00Z',{'manual':{}},{})[0]
+        rows=run(1)
+        self.assertEqual(rows[0]['quantities']['ADA'],10)  # Earlier material holdings survive.
+        self.assertAlmostEqual(rows[-1]['quantities']['ADA'],.13)  # Raw quantity retained.
+        self.assertTrue(all(not any('quantity_reconciliation_failed:ADA'==i for i in r['issues']) for r in rows))
+        self.assertTrue(all(r['minimum_usd']==5 and r['usd_quote'] for r in rows))
+        # Expensive or missing quotes cannot prove a sub-$5 discrepancy.
+        self.assertIsNone(run(40)[-1]['quantities']['ADA'])
+        self.assertIsNone(run(0)[-1]['quantities']['ADA'])
+        self.assertIsNone(run(1,{'ADA':{2:'not a date'}})[-1]['quantities']['ADA'])
+        self.assertIsNone(run(1,{'ADA':{2:'2026/10/01'}})[-1]['quantities']['ADA'])
+        # Exactly $5 is outside the owner's strictly-less-than tolerance.
+        self.assertIsNone(run(5/abs(.13-0))[-1]['quantities']['ADA'])
+        self.assertEqual(content,before)
+
     def test_owner_confirmed_preperiod_deductions_adjust_every_week_without_a_fake_transaction(self):
         signature=history.deduction_signature(7,3,-2)
         with patch.object(history,'PREWINDOW_TETHER_SIGNATURE',signature):
@@ -202,6 +225,13 @@ class HistoryExcelTests(unittest.TestCase):
         self.assertTrue(all(cell.data_type!='f' for sheet in book for rows in sheet for cell in rows))
         with zipfile.ZipFile(BytesIO(data)) as archive:self.assertFalse(any('vba' in name.lower() for name in archive.namelist()))
         book.close()
+
+        filtered=row('2026-10-23',False);filtered['minimum_rial']=100000001
+        book=load_workbook(BytesIO(history.export_excel({'weeks':[filtered]},{})))
+        self.assertEqual(book['دارایی‌ها'].max_row,1);book.close()
+        filtered['minimum_rial']=100000000
+        book=load_workbook(BytesIO(history.export_excel({'weeks':[filtered]},{})))
+        self.assertEqual(book['دارایی‌ها'].max_row,2);book.close()
 
 class BoundedArchiveRequestTests(unittest.TestCase):
     def test_public_archive_request_has_a_hard_timeout_and_never_forwards_credentials(self):
