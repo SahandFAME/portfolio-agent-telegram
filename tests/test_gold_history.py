@@ -17,7 +17,7 @@ import gold_history as history
 from verify_onedrive import MAPPING
 
 
-def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=None,tether_accounting=False,dust_ada=False,dust_assets=(),matic_remainder=False,matic_date=None):
+def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=None,tether_accounting=False,dust_ada=False,dust_assets=(),matic_remainder=False,matic_date=None,additional=False):
     book=Workbook();book.remove(book.active);totals={}
     for i,(asset,spec) in enumerate(MAPPING.items()):
         sheet=book.create_sheet('Fixture'+str(i));sheet.append([spec['column'],'Date' if asset in history.CRYPTO else 'تاریخ'])
@@ -47,6 +47,16 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=
         sheet.append(['=SUBTOTAL(109,Table1312131921[Quantity])-0.5',None])
         sheet.add_table(Table(displayName='Table1312131921',ref='A2:B5',tableColumns=[TableColumn(id=1,name='Quantity'),TableColumn(id=2,name='Date')],totalsRowCount=1))
         totals[f'xl/worksheets/sheet{len(book.worksheets)}.xml']=(5,0)
+    if additional:
+        for asset,spec in history.ADDITIONAL_TABLES.items():
+            sheet=book.create_sheet(spec['sheet']);column='Quantity' if asset=='XAUT' else 'حجم خرید'
+            sheet.append([spec['label']]);sheet.append([column,'Date' if asset=='XAUT' else 'تاریخ'])
+            sheet.append([2 if asset=='XAUT' else 10,datetime(2025,2,1)])
+            sheet.append([-1 if asset=='XAUT' else -10,datetime(2026,9,26) if asset=='XAUT' else datetime(2026,1,1)])
+            sheet.append(['=SUBTOTAL(109,'+spec['table']+'['+column+'])',None])
+            for row,value in (date_overrides or {}).get(asset,{}).items():sheet.cell(row,2).value=value
+            sheet.add_table(Table(displayName=spec['table'],ref='A2:B5',tableColumns=[TableColumn(id=1,name=column),TableColumn(id=2,name=sheet.cell(2,2).value)],totalsRowCount=1))
+            totals[f'xl/worksheets/sheet{len(book.worksheets)}.xml']=(5,1 if asset=='XAUT' else 0)
     raw=BytesIO();book.save(raw);out=BytesIO();ns={'s':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
     with zipfile.ZipFile(raw) as src,zipfile.ZipFile(out,'w') as dst:
         for name in src.namelist():
@@ -59,6 +69,51 @@ def source_workbook(*,ambiguous=False,mismatch=False,extra=False,date_overrides=
 
 
 class HistoricalQuantityTests(unittest.TestCase):
+    def test_audited_additional_assets_reconstruct_old_positions_without_changing_current_mapping(self):
+        content=source_workbook(additional=True);before=bytes(content)
+        config={'additional_assets':['XAUT','اهرم']}
+        current,trades,problems,extra=history.reconstruct(content,config)
+        self.assertEqual(len(current),23);self.assertEqual(len(trades),23);self.assertEqual(extra,[])
+        self.assertTrue(all(not r['issues'] for r in extra.holdings.values()))
+        self.assertEqual(extra.holdings['XAUT']['current'],1);self.assertEqual(extra.holdings['اهرم']['current'],0)
+        dates=[datetime.combine(d,history.time(12),history.TEHRAN) for d in history.week_dates()]
+        with patch.object(history,'tgju_history',return_value=[(d,1000000) for d in dates]),patch.object(history,'crypto_history',return_value=[(d,10) for d in dates]),patch.object(history,'listed_history',return_value=[(d,1000000) for d in dates]):
+            rows,_=history.historical_weeks(content,'2026-10-24T00:00:00Z','2026-10-25T00:00:00Z',{**config,'manual':{}},{})
+        self.assertEqual(rows[0]['additional_quantities'],{'XAUT':2,'اهرم':10})
+        self.assertEqual(rows[-1]['additional_quantities'],{'XAUT':1,'اهرم':0})
+        self.assertEqual(rows[0]['quotes']['XAUT']['price_rial'],10000000)
+        self.assertNotIn('اهرم',rows[-1]['quotes'])
+        self.assertEqual(content,before)
+
+    def test_additional_assets_missing_or_invalid_are_unknown_not_silently_zero(self):
+        config={'additional_assets':['XAUT','اهرم']}
+        _,_,_,extra=history.reconstruct(source_workbook(),config)
+        self.assertTrue(all(r['current'] is None and r['issues'] for r in extra.holdings.values()))
+        _,_,_,extra=history.reconstruct(source_workbook(additional=True,date_overrides={'XAUT':{3:'not a date'}}),config)
+        self.assertTrue(extra.holdings['XAUT']['issues'])
+        self.assertFalse(extra.holdings['اهرم']['issues'])
+
+    def test_additional_source_identity_subtotal_balance_and_visibility_must_match(self):
+        content=source_workbook(additional=True)
+        values=load_workbook(BytesIO(content),data_only=True);formulas=load_workbook(BytesIO(content),data_only=False)
+        s=values['Crypto Investing Portfolio'];f=formulas[s.title];table=s.tables[history.ADDITIONAL_TABLES['XAUT']['table']]
+        events=[(date(2025,2,1),2),(date(2026,9,26),-1)]
+        def inspect():return history.additional_holding(s,f,table,1,2,5,events,False)
+        try:
+            self.assertEqual(inspect()[1]['issues'],[])
+            s['A1']='Other';self.assertIsNone(inspect());s['A1']='XAUT'
+            s['A5']=2;self.assertIsNone(inspect()[1]['current']);s['A5']=1
+            s.row_dimensions[3].hidden=True;self.assertIsNone(inspect()[1]['current']);s.row_dimensions[3].hidden=False
+            f['A5']='=UNTRUSTED()';self.assertIsNone(inspect()[1]['current'])
+        finally:values.close();formulas.close()
+
+    def test_weekly_additional_observation_uses_actual_current_totals_and_dated_rial_conversion(self):
+        stamp=datetime.now(timezone.utc)
+        with patch.object(history,'tgju_history',return_value=[(stamp,1000000)]),patch.object(history,'crypto_history',return_value=[(stamp,10)]),patch.object(history,'listed_history') as listed:
+            quantities,quotes=history.additional_observation(source_workbook(additional=True),{'additional_assets':['XAUT','اهرم']})
+        self.assertEqual(quantities,{'XAUT':1,'اهرم':0});self.assertEqual(quotes['XAUT']['price_rial'],10000000)
+        self.assertNotIn('اهرم',quotes);listed.assert_not_called()
+
     def test_owner_waiver_ignores_only_the_identified_preperiod_matic_remainder(self):
         signature=history.hashlib.sha256(b'0.5').hexdigest()
         content=source_workbook(matic_remainder=True,extra=True);before=bytes(content)
@@ -313,6 +368,12 @@ class HistoryExcelTests(unittest.TestCase):
         filtered['minimum_rial']=100000000
         book=load_workbook(BytesIO(history.export_excel({'weeks':[filtered]},{})))
         self.assertEqual(book['دارایی‌ها'].max_row,2);book.close()
+        extended=row('2026-10-23',False);extended['additional_quantities']={'XAUT':2,'اهرم':0}
+        extended['quotes']['XAUT']={'price_rial':1000000,'source':'Synthetic verified IRR','quoted_at':'2026-10-23T00:00:00Z'}
+        book=load_workbook(BytesIO(history.export_excel({'weeks':[extended]},{'XAUT':'طلا و سکه'})))
+        actual=[r for r in book['دارایی‌ها'].iter_rows(min_row=2) if r[1].value=='XAUT']
+        self.assertEqual(len(actual),1);self.assertEqual(actual[0][5].value,200000)
+        self.assertIsNone(book['ارزش هفتگی']['E2'].value);book.close()
 
 class BoundedArchiveRequestTests(unittest.TestCase):
     def test_public_archive_request_has_a_hard_timeout_and_never_forwards_credentials(self):

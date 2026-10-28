@@ -28,7 +28,11 @@ from verify_onedrive import (MAPPING,SyncError,download_workbook,extract_quantit
 TEHRAN=ZoneInfo('Asia/Tehran')
 ENDPOINT='https://portfolio-agent-telegram.vercel.app/api/telegram'
 DIGITS=str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789')
-CRYPTO={'BTC':'bitcoin','ETH':'ethereum','Tether':'tether','Link':'chainlink','ADA':'cardano','SOL':'solana','ONDO':'ondo-finance'}
+CRYPTO={'BTC':'bitcoin','ETH':'ethereum','Tether':'tether','Link':'chainlink','ADA':'cardano','SOL':'solana','ONDO':'ondo-finance','XAUT':'tether-gold'}
+ADDITIONAL_TABLES={
+    'XAUT':{'table':'Table1312131921202226','sheet':'Crypto Investing Portfolio','label':'XAUT'},
+    'اهرم':{'table':'Table51336','sheet':'پتفوی بورسی','label':'اهرم'},
+}
 DAY_FIRST_ASSETS=frozenset({'BTC','Link','Tether','ADA'})  # ADA: owner's 2026-10-28 Excel evidence.
 DUST_TOTAL_ASSETS=frozenset({'ADA','SOL','ONDO','Link'})  # Owner-confirmed small-balance totals.
 MATIC_WAIVED_REMAINDER_SIGNATURE='16c88b27aacb62e7b845677132ff4d3137527101d572c3a3d0437a5c6fd735e4'
@@ -38,6 +42,30 @@ PREWINDOW_TETHER_SIGNATURE='3a187613376cf0faa691753a09296c65d859d7d91ddbd3b3999f
 class HistoricalEvents(list):
     """An opening adjustment is a period boundary, not an invented trade date."""
     opening_adjustment=0.0
+
+
+class HistoricalExtras(list):
+    def __init__(self,required=()):
+        super().__init__()
+        self.holdings={a:{'events':[],'current':None,'issues':['historical_table_missing']} for a in required}
+
+
+def additional_holding(sheet,formulas,table,qi,top,bottom,events,ambiguous):
+    """Validate audited table identity and current subtotal before reconstructing."""
+    left,_,_,_=range_boundaries(table.ref)
+    asset=next((a for a,s in ADDITIONAL_TABLES.items() if s['table']==table.name and s['sheet']==sheet.title
+        and top>1 and norm(str(sheet.cell(top-1,left).value or '')).lower()==norm(s['label']).lower()),None)
+    if asset is None:return None
+    column='Quantity' if asset=='XAUT' else 'حجم خرید'
+    formula=re.sub(r'\s+','',str(formulas.cell(bottom,qi).value or ''))
+    expected='=SUBTOTAL(109,'+table.name+'['+column+'])'
+    balance=sheet.cell(bottom,qi).value
+    issues=['invalid_historical_transactions'] if ambiguous else []
+    valid=table.totalsRowCount==1 and formula.lower()==re.sub(r'\s+','',expected).lower() and isinstance(balance,(int,float)) and not isinstance(balance,bool) and math.isfinite(balance) and balance>=0 and not any(sheet.row_dimensions[r].hidden for r in range(top+1,bottom))
+    if not valid or not math.isclose(sum(q for _,q in events),balance,abs_tol=1e-8,rel_tol=1e-10):
+        issues.append('quantity_reconciliation_failed');balance=None
+    if negative_historical_balance(events,balance or 0):issues.append('negative_reconstructed_balance')
+    return asset,{'events':events,'current':balance,'issues':issues}
 
 
 def deduction_signature(capital,fee,ignored):
@@ -115,7 +143,7 @@ def reconstruct(content,config):
     formulas=load_workbook(BytesIO(content),data_only=False,keep_links=False)
     try:
         tables={t.name:(s,t) for s in book for t in s.tables.values()}
-        trades={};problems={};extras=[]
+        trades={};problems={};extras=HistoricalExtras(config.get('additional_assets',[]))
         for asset,spec in MAPPING.items():
             sheet,table=tables[spec['table']];left,top,right,bottom=range_boundaries(table.ref)
             headers=[c.name for c in table.tableColumns];qi=left+headers.index(spec['column'])
@@ -174,8 +202,12 @@ def reconstruct(content,config):
                     if isinstance(amount,bool) or not isinstance(amount,(int,float)) or not math.isfinite(amount):ambiguous=True;continue
                     # The owner confirmed day/month/year in Trading Journal.
                     # Scope this additional year-last interpretation to MATIC.
-                    try:events.append((parse_trade_date(sheet.cell(r,di).value,day_first=name=='Table1312131921' and sheet.title=='Crypto Investing Portfolio'),float(amount)))
+                    try:events.append((parse_trade_date(sheet.cell(r,di).value,day_first=name in {'Table1312131921',*(s['table'] for s in ADDITIONAL_TABLES.values())}),float(amount)))
                     except (ValueError,TypeError):ambiguous=True
+                holding=additional_holding(sheet,formulas[sheet.title],table,qi,top,bottom,events,ambiguous)
+                if holding:
+                    asset,record=holding;extras.holdings[asset]=record
+                    continue
                 balance=sheet.cell(bottom,qi).value
                 closed_before_window=table.totalsRowCount==1 and balance==0 and not ambiguous and events and max(d for d,_ in events)<date(2025,10,25) and math.isclose(sum(q for _,q in events),0,abs_tol=1e-8)
                 waived=owner_waived_matic_remainder(sheet,formulas[sheet.title],table,qi,top,bottom,events,ambiguous,balance)
@@ -311,12 +343,14 @@ def historical_weeks(content,modified,checked,config,existing):
     # balances still need their own source review before accepting a residual.
     candidates={a for a in DUST_TOTAL_ASSETS if problems[a]==['quantity_reconciliation_failed'] and hasattr(trades[a],'reconciliation_delta')}
     targets=[asset for asset in MAPPING if asset!='بلک راک' and (not problems[asset] or asset in candidates)]
+    targets.extend(a for a,r in extras.holdings.items() if not r['issues'] and any(q for _,q in r['events']))
     with ThreadPoolExecutor(max_workers=3) as pool:
         for asset,values,label in pool.map(fetch_asset,targets):series[asset]=values;source[asset]=label
     rows=[];digest=hashlib.sha256(content).hexdigest()
     for day in dates:
         asof=datetime.combine(day,time.max,TEHRAN)
         quantities=quantities_at(day,trades,problems,manual)
+        additional={a:None if r['issues'] else max(0,sum(q for d,q in r['events'] if d<=day)) for a,r in extras.holdings.items()}
         week_problems={a:list(codes) for a,codes in problems.items()}
         # The owner accepts sub-$5 discrepancies, not missing/ambiguous trades.
         # Prove the bound independently for each week using a dated USD quote.
@@ -327,7 +361,7 @@ def historical_weeks(content,modified,checked,config,existing):
                 week_problems[asset]=[]
         quotes={};gold=last_quote(series.get('gold',[]),asof,'TGJU 18K gram daily close (IRR)')
         fx=last_quote(series.get('دلار',[]),asof,'TGJU USD/IRR daily close')
-        for asset,q in quantities.items():
+        for asset,q in {**quantities,**additional}.items():
             if q is None or q==0:continue
             if asset in ('آبشده (طلب)','آبشده (شمش زربد)'):p=gold
             elif asset=='ربع سکه غیره':p={**gold,'price_rial':gold['price_rial']*2.03325,'source':'TGJU 18K gram × 2.03325'} if gold else None
@@ -337,9 +371,10 @@ def historical_weeks(content,modified,checked,config,existing):
             if p:quotes[asset]=p
         issues=['unmapped_historical_trade_table:'+re.sub(r'[<>&\n]','',name) for name in extras]
         issues.extend(code+':'+asset for asset,codes in week_problems.items() for code in codes)
+        issues.extend(code+':'+asset for asset,r in extras.holdings.items() for code in r['issues'])
         rows.append({'week_ending':day.isoformat(),'as_of':asof.astimezone(timezone.utc).isoformat(),'source_checked_at':checked,
             'workbook_updated_at':modified,'workbook_sha256':digest,'mode':'historical','quantities':quantities,'quotes':quotes,'gold_quote':gold,'issues':issues,
-            'minimum_usd':5,'usd_quote':fx})
+            'minimum_usd':5,'usd_quote':fx,'additional_quantities':additional})
     return rows,{'unmapped_trade_tables':len(extras),'unreconciled_assets':sum(bool(p) for p in problems.values()),
         'dust_candidate_assets':len(candidates),'dust_accepted_asset_weeks':sum(r['quantities'][a] is not None for r in rows for a in candidates)}
 
@@ -368,7 +403,7 @@ def export_excel(history,groups):
         summary.append([week,row.get('gold_grams'),row.get('change_gold_grams'),row.get('change_percent'),
             math.floor(row['total_rial']/10+.5) if row.get('total_rial') is not None else None,math.floor(gold['price_rial']/10+.5) if gold else None,
             ('موقت • کامل' if row['status']=='complete' else 'موقت • ناقص') if row['mode']=='baseline' else 'کامل' if row['status']=='complete' else 'ناقص',row.get('quantity_change_count'),fa_time(row['as_of']),fa_time(row['source_checked_at'])])
-        for asset,qty in row['quantities'].items():
+        for asset,qty in {**row['quantities'],**row.get('additional_quantities',{})}.items():
             p=row.get('quotes',{}).get(asset)
             if qty==0 or isinstance(qty,(int,float)) and p and qty*p['price_rial']<(row.get('minimum_rial') or 500000):continue
             value=row.get('included_values',{});value=value.get(asset) if isinstance(value,dict) else None
@@ -383,10 +418,12 @@ def export_excel(history,groups):
                 'quantity_reconciliation_failed':'جمع تغییرات تعداد با ماندهٔ تأییدشده تطبیق ندارد','negative_reconstructed_balance':'ماندهٔ تاریخی منفی می‌شود',
                 'undated_tether_fee':'زمان هزینهٔ درج‌شده در فرمول مانده مشخص نیست',
                 'undated_ignored_tether_adjustment':'زمان اثر هزینهٔ نادیده‌گرفته‌شده بر مانده مشخص نیست',
-                'unmapped_historical_trade_table':'جدول معاملاتی خارج از نگاشت فعلی نیاز به بررسی دارد'}
+                'unmapped_historical_trade_table':'جدول معاملاتی خارج از نگاشت فعلی نیاز به بررسی دارد',
+                'historical_table_missing':'جدول دارایی در منبع پیدا نشد',
+                'invalid_historical_transactions':'تعداد یا تاریخ تراکنش تاریخی معتبر نیست'}
             description=labels.get(label,label)+(' • '+location if location else '')
             exceptions.append([week,safe_text(description),safe_text(asset)])
-        for asset in row.get('missing_assets',[]):exceptions.append([week,'تعداد تاریخی تأیید نشده' if row['quantities'].get(asset) is None else 'قیمت تاریخی تأیید نشده',safe_text(asset)])
+        for asset in row.get('missing_assets',[]):exceptions.append([week,'تعداد تاریخی تأیید نشده' if {**row['quantities'],**row.get('additional_quantities',{})}.get(asset) is None else 'قیمت تاریخی تأیید نشده',safe_text(asset)])
         if not gold:exceptions.append([week,'قیمت تاریخی هر گرم طلای ۱۸ عیار تأیید نشده',''])
     analysis=book.create_sheet('خلاصه تحلیل')
     analysis.append(['شاخص','مقدار'])
@@ -427,6 +464,27 @@ def publish_export():
     return {'weeks':sum(w['mode']!='baseline' for w in history['weeks']),'observations':len(history['weeks']),'complete_weeks':sum(w['mode']!='baseline' and w['status']=='complete' for w in history['weeks']),'complete_observations':sum(w['status']=='complete' for w in history['weeks']),'excel_stored':True}
 
 
+def additional_observation(content,config):
+    _,_,_,extra=reconstruct(content,config)
+    quantities={a:r['current'] for a,r in extra.holdings.items()};quotes={}
+    asof=datetime.now(timezone.utc);fx=None
+    if any(q and a in CRYPTO for a,q in quantities.items()):
+        try:fx=last_quote(tgju_history('price_dollar_rl'),asof,'TGJU USD/IRR daily close')
+        except Exception:pass
+    for asset,q in quantities.items():
+        if not q:continue
+        try:
+            if asset in CRYPTO:
+                p=last_quote(crypto_history(asset),asof,'CoinGecko USD')
+                if p and fx:quotes[asset]={'price_rial':p['price_rial']*fx['price_rial'],
+                    'quoted_at':min(p['quoted_at'],fx['quoted_at']),'source':'CoinGecko USD × TGJU USD/IRR'}
+            else:
+                p=last_quote(listed_history(asset),asof,'TSETMC official daily market price (IRR)')
+                if p:quotes[asset]=p
+        except Exception:pass
+    return quantities,quotes
+
+
 def run(action):
     diagnostics={}
     if action!='export':
@@ -438,8 +496,9 @@ def run(action):
             if result.get('ok') is not True:raise SyncError('history_not_stored')
         if action in ('capture','bootstrap'):
             if action=='bootstrap':content,modified=download_workbook(token);checked=utcnow()
+            additional,quotes=additional_observation(content,config)
             result=api('?sync=gold-observation',{'assets':extract_quantities(content),'workbook_updated_at':modified,'source_checked_at':checked,
-                'workbook_sha256':hashlib.sha256(content).hexdigest(),'notify':action=='capture','bootstrap':action=='bootstrap'})
+                'workbook_sha256':hashlib.sha256(content).hexdigest(),'additional_quantities':additional,'additional_quotes':quotes,'notify':action=='capture','bootstrap':action=='bootstrap'})
             if result.get('ok') is not True:raise SyncError('weekly_observation_not_stored')
     return {'ok':True,**diagnostics,**publish_export()}
 
