@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import tempfile
+import gold_history as history
 
 from openpyxl import load_workbook
 from openpyxl.utils.cell import range_boundaries
@@ -84,7 +85,17 @@ def run():
     certificate=base64.b64decode(required('DIAGNOSTIC_CERTIFICATE'),validate=True)
     if len(certificate)>8192 or b'BEGIN CERTIFICATE' not in certificate:raise SyncError('invalid_diagnostic_certificate')
     content,_=download_workbook(graph_token())
-    payload=json.dumps(inspect(content),ensure_ascii=False).encode()
+    diagnostic=inspect(content)
+    if 'dust_and_unmapped_tables' in diagnostic:
+        _,trades,problems,_=reconstruct(content,{})
+        evidence={}
+        for asset in ['SOL','ONDO']:
+            try:series=history.crypto_history(asset)
+            except Exception:series=[]
+            evidence[asset]={'issues':problems[asset],'delta':getattr(trades[asset],'reconciliation_delta',None),
+                'quotes':{d.isoformat():history.last_quote(series,datetime.combine(d,history.time.max,history.TEHRAN),'CoinGecko USD') for d in history.week_dates()}}
+        diagnostic['dust_price_evidence']=evidence
+    payload=json.dumps(diagnostic,ensure_ascii=False).encode()
     if len(payload)>32768:raise SyncError('private_diagnostic_too_large')
     with tempfile.NamedTemporaryFile() as cert:
         cert.write(certificate);cert.flush()
