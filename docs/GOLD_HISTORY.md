@@ -12,7 +12,7 @@ checks remain. The six manual quantities are owner-confirmed unchanged during
 2025-10-25 through 2026-10-25. Persist their original baseline with the history;
 later manual edits must not rewrite the confirmed historical year.
 
-The initial grid contains 52 Fridays, 2025-10-31 through 2026-10-23. Reconstruct
+The owner-selected grid now contains 52 Wednesdays, 2025-10-29 through 2026-10-21. Reconstruct
 only signed, dated trades whose net quantities reconcile to the verified current
 table totals and whose end-of-day running balances are nonnegative. Excel dates,
 full Solar Hijri dates and unambiguous Gregorian strings are supported. Never
@@ -165,7 +165,7 @@ source timestamps, issues, totals and allocations. Conditional writes and revisi
 checks prevent stale workers from overwriting another update. Verified observations
 are immutable to backfill; a provisional current baseline can be replaced by its
 subsequent official weekly observation. Baseline points are labelled provisional,
-not historical Friday closes.
+not historical Wednesday closes.
 
 A newly generated `Portfolio-18K-Gold-History.xlsx` contains weekly values/deltas,
 qualifying asset rows, allocations, source exceptions and an analysis/coverage
@@ -192,9 +192,10 @@ Protected API routes (same sync-secret boundary as existing operations):
 
 ## Weekly operation and Telegram
 
-`gold-history.yml` runs **Saturday 00:30 Asia/Tehran** (Friday 21:00 UTC), after
-Friday's end. The actual observation time is recorded; scheduler delays are never
-presented as an exact midnight close. Capture is restricted to Friday/Saturday;
+`gold-history.yml` runs **Wednesday 23:30 Asia/Tehran** (Wednesday 20:00 UTC).
+The actual observation time is recorded, not presented as an exact midnight close.
+Capture is restricted to Wednesday after 20:00 Tehran; a run delayed into Thursday
+fails rather than relabelling Thursday quantities and quotes as Wednesday;
 a manual initial bootstrap creates a clearly provisional current observation.
 The workflow shares the existing Microsoft consent concurrency group to protect
 refresh-token rotation. Export-only jobs use a separate group and no Graph login.
@@ -298,3 +299,57 @@ uses the separate secret and report-export concurrency group.
 Verification requires an actual configured upload and hash readback, not just
 unit tests, consent completion or workflow deployment. Existing private report
 generation continues when OneDrive upload is awaiting consent or fails.
+
+
+## Wednesday calendar and confirmed wartime closures (owner request, 2026-10-28)
+
+The initial annual reconstruction uses 52 Wednesdays, 2025-10-29 through
+2026-10-21. Each Wednesday's quantities are reconstructed from its own dated
+trades; never relabel the old Friday balances or use later trades/prices.
+2026-10-28 is the next scheduled observation, not a completed historical week
+at the time of this change. The actual late-Wednesday capture time is retained.
+
+The owner explicitly authorized last-open-market closes during verified wartime
+closures. The shared, reviewed allowlist is `lib/iran-market-closures.json`:
+
+- Equity/share funds: closure begins 2026-02-28; general trading resumed
+  2026-05-19. Carry the actual 2026-02-25 closing quote through 2026-05-18 only.
+- The seven configured gold/commodity funds resumed on 2026-03-15 in their
+  published transaction archives. Their allowed interval ends 2026-03-14.
+  Never extend the equity closure across weeks when these funds traded.
+
+Evidence: the public Google News index identifies Reuters' 2026-05-16 report
+“Iran's stock market to reopen on Tuesday, official says”, and independent
+2026-05-19 reports of reopening after an 80-day closure. Its exact indexed
+article URL is retained in the allowlist. Direct Reuters retrieval returned
+401, so this is independently indexed reporting, not a downloaded official
+exchange holiday calendar. Public Shakhesban transaction archives separately
+show the actual last pre-closure session (2026-02-25), equity reopening on
+2026-05-19 and all seven commodity-fund resumptions on 2026-03-15. The public
+2026 Iran war account dates the start to 2026-02-28; a ceasefire date alone is
+not evidence that exchange trading resumed. The June 2025 conflict precedes
+the owner-confirmed annual window and creates no carry interval here.
+
+Both Python selection and the server require the exact allowed asset, valuation
+date interval, last-open date, positive finite price and verified historical
+IRR closing-price source. The server derives closure metadata itself. No future
+quote, differently dated old price, owner price, NAV, crypto, USD/IRR, physical
+gold denominator, coin or EcoCoach quote receives this exception. SilverBar
+reopening coverage is not established by the equity/fund evidence and remains
+unresolved until an exact dated certificate archive is obtained. Individual
+halts after general reopening remain gaps pending their own evidence.
+
+Excel retains the actual price timestamp and adds explicit pricing-basis and
+closure-ID columns. Its analysis sheet explains the Wednesday calendar and
+closure method. Normal seven-day freshness remains outside these intervals.
+All financial arithmetic, quantity reconciliation, historical $5 cutoff and
+incomplete-total safeguards remain intact.
+
+Migration requires an authenticated, revision-matching full 52-Wednesday batch
+with `calendar: wednesday-v1`. The server validates/calculates the entire batch,
+then saves the untouched original Friday state to an immutable private calendar
+archive before its conditional replacement. It preserves existing Wednesday
+observations and their complete-record protection. The archive includes the
+original revision; the prior revision's private Excel remains stored. Failed or
+partial migration must leave the current state intact. The report pointer still
+requires a regenerated matching-revision Excel and downloaded OneDrive hash check.

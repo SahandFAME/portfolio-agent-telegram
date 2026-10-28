@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "closures": [
+    {
+      "id": "iran-equities-2026-war",
+      "start": "2026-02-28",
+      "end": "2026-05-18",
+      "last_open": "2026-02-25",
+      "assets": [
+        "طعام",
+        "استیل",
+        "فلز فارابی",
+        "پتروآگاه",
+        "خودران",
+        "سجام",
+        "فملی",
+        "اهرم"
+      ],
+      "sources": [
+        "https://news.google.com/rss/articles/CBMiowFBVV95cUxNTFgtcktkYW4zS3EwcS1KNnkzeFEybGFOLUtLWi1IQ0NQaWM3TGRvd0ExYVVNaFowQmo5d1JYZk5JQ3hpbWpSQ2xSelhjWWtyeXJJc1plazZjczJpWmFjT1RoUDRjYy1QbU5DNWNXbGFNQXlUMndDLVF5d1hFc0NxWTI3SmJyUHAxQ1NjTzZUUFd4ODJPUUZ5OVh2SXJ4SU92MEkw?oc=5",
+        "https://www.shakhesban.com/markets/fund/اهرم/history"
+      ]
+    },
+    {
+      "id": "iran-commodity-funds-2026-war",
+      "start": "2026-02-28",
+      "end": "2026-03-14",
+      "last_open": "2026-02-25",
+      "assets": [
+        "طلا",
+        "عیار",
+        "گوهر",
+        "آلتون",
+        "امرالد",
+        "زرفام",
+        "نهال"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/2026_Iran_war",
+        "https://www.shakhesban.com/markets/fund/طلا/history",
+        "https://www.shakhesban.com/markets/fund/عیار/history",
+        "https://www.shakhesban.com/markets/fund/گوهر/history",
+        "https://www.shakhesban.com/markets/fund/آلتون/history",
+        "https://www.shakhesban.com/markets/fund/امرالد/history",
+        "https://www.shakhesban.com/markets/fund/زرفام/history",
+        "https://www.shakhesban.com/markets/fund/نهال/history"
+      ]
+    }
+  ]
+}

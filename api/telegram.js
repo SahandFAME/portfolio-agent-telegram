@@ -3,7 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import path from "path";
-import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg} from "../lib/gold-history.js";
+import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg,historyCalendarBase,HISTORY_CALENDAR} from "../lib/gold-history.js";
 
 const ONEDRIVE_CLIENT_ID = '04a73ec3-340a-4cb6-a087-7fdc4dfd93e0';
 const SNAPSHOT = "portfolio/latest.json";
@@ -2036,13 +2036,13 @@ const HISTORY_ADDITIONAL_GROUPS={XAUT:'طلا و سکه','اهرم':'سهام و
 const historyOptions=()=>({assets:ASSETS,groups:{...Object.fromEntries(ASSETS.map(a=>[a,categoryName(a)])),...HISTORY_ADDITIONAL_GROUPS},additionalGroups:HISTORY_ADDITIONAL_GROUPS,now:Date.now()});
 async function historyState(){
   const blob=await get(GOLD_HISTORY_KEY,ACCESS_READ_OPTIONS);
-  if(!blob)return {data:{version:1,revision:null,weeks:[]},etag:null};
+  if(!blob)return {data:{version:1,calendar:HISTORY_CALENDAR,revision:null,weeks:[]},etag:null};
   const data=await streamJson(blob.stream);
   if(data.version!==1||!Array.isArray(data.weeks)||!blob.blob?.etag||blob.blob.etag.startsWith('W/'))throw new Error('history_unavailable');
   return {data,etag:blob.blob.etag};
 }
-async function saveHistory(current,weeks){
-  const data={version:1,manual_baseline:current.data.manual_baseline||{...MANUAL},revision:crypto.randomUUID(),updated_at:new Date().toISOString(),weeks};
+async function saveHistory(current,weeks,archive=current.data.calendar_archive){
+  const data={version:1,calendar:HISTORY_CALENDAR,...(archive?{calendar_archive:archive}:{}),manual_baseline:current.data.manual_baseline||{...MANUAL},revision:crypto.randomUUID(),updated_at:new Date().toISOString(),weeks};
   await put(GOLD_HISTORY_KEY,JSON.stringify(data),{access:'private',addRandomSuffix:false,contentType:'application/json',
     ...(current.etag?{ifMatch:current.etag}:{allowOverwrite:false})});
   return data;
@@ -2059,14 +2059,14 @@ async function historyRead(req,res){
       return res.status(200).json({ok:true,revision:file.revision,content_base64:bytes.toString('base64'),sha256:Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex')});
     }
     if(req.query.data==='gold-history-config')return res.status(200).json({ok:true,assets:ASSETS,manual:(await historyState()).data.manual_baseline||MANUAL,
-      groups:historyOptions().groups,additional_assets:Object.keys(HISTORY_ADDITIONAL_GROUPS),minimum_rial:MIN_REPORT_VALUE_RIAL,manual_unchanged_since:'2025-10-25',manual_unchanged_until:'2026-10-25',
+      groups:historyOptions().groups,calendar:HISTORY_CALENDAR,additional_assets:Object.keys(HISTORY_ADDITIONAL_GROUPS),minimum_rial:MIN_REPORT_VALUE_RIAL,manual_unchanged_since:'2025-10-25',manual_unchanged_until:'2026-10-25',
       manual_confirmation:'Owner confirmed unchanged over the preceding year on 2026-10-25'});
     return res.status(200).json({ok:true,...(await historyState()).data});
   }catch(_){return res.status(503).json({ok:false});}
 }
 function currentHistoryWeek(){
   const local=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tehran',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  const day=new Date(local+'T12:00:00Z');day.setUTCDate(day.getUTCDate()-(day.getUTCDay()+2)%7);
+  const day=new Date(local+'T12:00:00Z');day.setUTCDate(day.getUTCDate()-(day.getUTCDay()+4)%7);
   return day.toISOString().slice(0,10);
 }
 async function historyWrite(req,res){
@@ -2086,12 +2086,14 @@ async function historyWrite(req,res){
     }
     let incoming;
     if(req.query.sync==='gold-observation'){
+      if(current.data.weeks.some(w=>new Date(w.week_ending+'T12:00:00Z').getUTCDay()!==3))return res.status(409).json({ok:false,error:'calendar_migration_required'});
       const journal=ASSETS.filter(a=>!(a in MANUAL));
       if(!body.assets||Object.keys(body.assets).length!==23||journal.some(a=>typeof body.assets[a]!=='number'||!Number.isFinite(body.assets[a])||body.assets[a]<0)||
         !Number.isFinite(Date.parse(body.source_checked_at))||Date.now()-Date.parse(body.source_checked_at)>120000||Date.parse(body.source_checked_at)>Date.now())return res.status(400).json({ok:false});
       let week=currentHistoryWeek();const localDay=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Tehran',weekday:'short'}).format(new Date());
-      if(body.bootstrap===true){const day=new Date(week+'T12:00:00Z');if(localDay!=='Fri')day.setUTCDate(day.getUTCDate()+7);week=day.toISOString().slice(0,10);}
-      if(body.bootstrap!==true&&!['Fri','Sat'].includes(localDay))return res.status(409).json({ok:false,error:'outside_weekly_capture_window'});
+      if(body.bootstrap===true){const day=new Date(week+'T12:00:00Z');if(localDay!=='Wed')day.setUTCDate(day.getUTCDate()+7);week=day.toISOString().slice(0,10);}
+      const localHour=Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Tehran',hour:'2-digit',hourCycle:'h23'}).format(new Date()));
+      if(body.bootstrap!==true&&(localDay!=='Wed'||localHour<20))return res.status(409).json({ok:false,error:'outside_weekly_capture_window'});
       const {prices}=await getPrices(),asof=new Date().toISOString(),fx=prices['دلار']?.priceRial,quotes={};
       for(const asset of ASSETS){
         const p=prices[asset];if(!p)continue;
@@ -2110,9 +2112,15 @@ async function historyWrite(req,res){
       if(body.weeks.some(w=>w.mode!=='historical'||Object.entries(manual).some(([a,q])=>w.quantities?.[a]!==q)))return res.status(400).json({ok:false});
       incoming=body.weeks;
     }
-    const weeks=mergeGoldWeeks(current.data.weeks,incoming,historyOptions());
+    const base=historyCalendarBase(current.data.weeks,incoming,body.calendar);
+    const weeks=mergeGoldWeeks(base,incoming,historyOptions());
     if(weeks.length>1000)return res.status(400).json({ok:false});
-    const data=await saveHistory(current,weeks);
+    let archive=current.data.calendar_archive;
+    if(base.length!==current.data.weeks.length){
+      archive='portfolio/gold-history/calendar-archives/'+current.data.revision+'-'+crypto.randomUUID()+'.json';
+      await put(archive,JSON.stringify(current.data),{access:'private',addRandomSuffix:false,allowOverwrite:false,contentType:'application/json'});
+    }
+    const data=await saveHistory(current,weeks,archive);
     const pending=weeks.find(w=>w.week_ending===incoming.at(-1).week_ending&&w.mode!=='historical'&&w.quantities['بلک راک']>0&&!w.quotes['بلک راک']);
     if(body.notify===true&&pending?.mode==='live')waitUntil(notifyHistoryPrice(pending));
     return res.status(200).json({ok:true,revision:data.revision,weeks:weeks.filter(w=>w.mode!=='baseline').length,observations:weeks.length,complete_weeks:weeks.filter(w=>w.mode!=='baseline'&&w.status==='complete').length,complete_observations:weeks.filter(w=>w.status==='complete').length});

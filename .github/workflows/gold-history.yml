@@ -1,8 +1,8 @@
 name: Weekly 18K gold portfolio history
 on:
   schedule:
-    # Saturday 00:30 Asia/Tehran, after the end of Friday.
-    - cron: '0 21 * * 5'
+    # Wednesday 23:30 Asia/Tehran; the actual observation time is retained.
+    - cron: '0 20 * * 3'
   workflow_dispatch:
     inputs:
       action:

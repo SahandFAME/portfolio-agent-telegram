@@ -1,5 +1,14 @@
 # Portfolio Agent — Complete Codex Project Handoff
 
+> **2026-10-28 owner-selected history calendar:** historical weeks end Wednesday,
+> with the annual grid 2025-10-29 through 2026-10-21. The Wednesday 23:30 Tehran
+> capture keeps its actual observation time. Only the reviewed 2026 wartime
+> exchange closures permit dated last-open closes; gold/commodity funds and
+> equities have separate reopening dates. Original Friday history is privately
+> archived before authenticated full-grid migration. See
+> [Wednesday history and closures](GOLD_HISTORY.md#wednesday-calendar-and-confirmed-wartime-closures-owner-request-2026-10-28).
+
+
 > **2026-10-13 owner-authorized guest exception:** guest charts prefer a verified
 > EcoCoach website quote; otherwise value `بلک راک` at the fixed **1,030,000
 > toman/unit (10,300,000 rial/unit)**. This is recorded as a fixed fallback,

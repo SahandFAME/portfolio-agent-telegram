@@ -62,3 +62,25 @@ class ExchangeHistoryTests(TestCase):
         self.assertIsNone(h.saved_listed_quote({**row,'mode':'live'},'طلا',asof))
         for update in [{'quoted_at':'2026-10-01T00:00:00Z'},{'quoted_at':'2026-10-25T00:00:00Z'},{'source':'NAV USD'},{'price_rial':-1}]:
             self.assertIsNone(h.saved_listed_quote({'mode':'historical','quotes':{'طلا':{**raw,**update}}},'طلا',asof))
+
+    def test_closure_carry_keeps_actual_prewar_close_only_for_covered_assets_and_dates(self):
+        stamp=datetime(2026,2,25,23,59,59,tzinfo=h.TEHRAN)
+        asof=datetime(2026,5,13,23,59,59,tzinfo=h.TEHRAN)
+        source='Shakhesban historical daily close (IRR)'
+        series=[(stamp,10000),(datetime(2026,5,19,tzinfo=h.TEHRAN),8000)]
+        quote=h.last_quote(series,asof,source,'طعام')
+        self.assertEqual(quote['price_rial'],10000);self.assertEqual(quote['closure_id'],'iran-equities-2026-war')
+        self.assertEqual(datetime.fromisoformat(quote['quoted_at']).astimezone(h.TEHRAN).date(),date(2026,2,25))
+        for asset in ['BTC','دلار','شمش نقره 999','بلک راک','طلا',None]:self.assertIsNone(h.last_quote(series,asof,source,asset))
+        self.assertIsNone(h.last_quote(series[:1],datetime(2026,5,20,tzinfo=h.TEHRAN),source,'طعام'))
+        self.assertIsNone(h.last_quote(series,asof,'Unverified NAV','طعام'))
+        self.assertIsNone(h.last_quote([(datetime(2026,2,24,tzinfo=h.TEHRAN),10000)],asof,source,'طعام'))
+        self.assertEqual(h.last_quote(series,datetime(2026,3,11,tzinfo=h.TEHRAN),source,'طلا')['closure_id'],'iran-commodity-funds-2026-war')
+        self.assertIsNone(h.last_quote(series,datetime(2026,3,18,tzinfo=h.TEHRAN),source,'طلا'))
+
+    def test_saved_quote_is_rechecked_against_new_wednesday_not_relabelled_from_friday(self):
+        raw={'price_rial':10000,'quoted_at':'2026-10-22T20:29:59Z','source':'Shakhesban historical daily close (IRR)'}
+        row={'mode':'historical','week_ending':'2026-10-23','quotes':{'طلا':raw}}
+        self.assertIsNone(h.saved_listed_quote(row,'طلا',datetime(2026,10,21,23,59,tzinfo=h.TEHRAN)))
+        row['quotes']['طلا']['quoted_at']='2026-10-21T20:29:00Z'
+        self.assertEqual(h.saved_listed_quote(row,'طلا',datetime(2026,10,21,23,59,tzinfo=h.TEHRAN))['price_rial'],10000)

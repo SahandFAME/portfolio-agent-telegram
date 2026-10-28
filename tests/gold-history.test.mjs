@@ -4,10 +4,10 @@ import sharp from 'sharp';
 import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg} from '../lib/gold-history.js';
 import {app} from './helpers/app-fixture.mjs';
 
-const checked='2026-10-25T09:00:00Z',asof='2026-10-23T20:29:59Z';
+const checked='2026-10-25T09:00:00Z',asof='2026-10-21T20:29:59Z';
 const q=p=>({price_rial:p,source:'Synthetic verified quote',quoted_at:asof});
 const options={assets:['gold','stock','dust','fund'],groups:{gold:'gold',stock:'stock',dust:'crypto',fund:'stock'},now:Date.parse(checked)};
-const input=()=>({week_ending:'2026-10-23',as_of:asof,source_checked_at:checked,workbook_updated_at:'2026-10-24T12:00:00Z',workbook_sha256:'a'.repeat(64),
+const input=()=>({week_ending:'2026-10-21',as_of:asof,source_checked_at:checked,workbook_updated_at:'2026-10-24T12:00:00Z',workbook_sha256:'a'.repeat(64),
   mode:'historical',quantities:{gold:10,stock:1000,dust:.1,fund:0},quotes:{gold:q(200000000),stock:q(100000),dust:q(1000)},gold_quote:q(200000000),issues:[]});
 
 test('gold-equivalent wealth uses consistent rial units and exact cutoff without rounding quantities',()=>{
@@ -77,15 +77,15 @@ test('future/stale quotes do not turn into historical prices and invalid financi
 });
 
 test('weekly changes require adjacent complete weeks and immutable verified observations survive backfill',()=>{
-  const a=input();a.week_ending='2026-10-09';a.as_of='2026-10-09T20:29:59Z';a.quotes=Object.fromEntries(Object.entries(a.quotes).map(([k,v])=>[k,{...v,quoted_at:a.as_of}]));a.gold_quote={...a.gold_quote,quoted_at:a.as_of};
-  const c=input(),b={...a,week_ending:'2026-10-16',as_of:'2026-10-16T20:29:59Z',quantities:{...a.quantities,stock:null}};
+  const a=input();a.week_ending='2026-10-07';a.as_of='2026-10-07T20:29:59Z';a.quotes=Object.fromEntries(Object.entries(a.quotes).map(([k,v])=>[k,{...v,quoted_at:a.as_of}]));a.gold_quote={...a.gold_quote,quoted_at:a.as_of};
+  const c=input(),b={...a,week_ending:'2026-10-14',as_of:'2026-10-14T20:29:59Z',quantities:{...a.quantities,stock:null}};
   const weeks=mergeGoldWeeks([], [c,a,b],options);assert.equal(weeks[2].change_gold_grams,null);
   const updated=mergeGoldWeeks(weeks,[{...c,quantities:{...c.quantities,stock:null}}],options);
   assert.equal(updated[2].status,'complete');assert.equal(updated[2].gold_grams,weeks[2].gold_grams);
 });
 
 test('plot uses real dates, shows isolated points and leaves missing weeks disconnected',()=>{
-  const a=calculateGoldWeek(input(),options),b={...a,week_ending:'2026-10-16',status:'incomplete',gold_grams:null},c={...a,week_ending:'2026-10-09'};
+  const a=calculateGoldWeek(input(),options),b={...a,week_ending:'2026-10-14',status:'incomplete',gold_grams:null},c={...a,week_ending:'2026-10-07'};
   const svg=goldHistorySvg([c,b,a],{formatTime:x=>x,escape:x=>String(x),number:x=>String(x)});
   const path=svg.match(/<path d="([^"]+)"/)[1];assert.equal((path.match(/M/g)||[]).length,2);assert.doesNotMatch(path,/L/);
   assert.match(svg,/Estedad/);assert.doesNotMatch(svg,/NaN|Infinity/);
@@ -139,9 +139,9 @@ test('only owners/admins/advisors can request a real rendered history image; gue
 });
 
 test('website-first weekly capture asks admins for missing EcoCoach price and an authenticated reply completes it',async()=>{
-  const now=Date.parse('2026-10-24T00:00:00Z'),a=await app({now:()=>now});
+  const now=Date.parse('2026-10-21T20:00:00Z'),a=await app({now:()=>now});
   const assets={...a.assets,'بلک راک':15};
-  const payload={assets,workbook_updated_at:'2026-10-23T12:00:00Z',source_checked_at:new Date(now).toISOString(),workbook_sha256:'b'.repeat(64),additional_quantities:{XAUT:0,'اهرم':0},bootstrap:false,notify:true};
+  const payload={assets,workbook_updated_at:'2026-10-21T12:00:00Z',source_checked_at:new Date(now).toISOString(),workbook_sha256:'b'.repeat(64),additional_quantities:{XAUT:0,'اهرم':0},bootstrap:false,notify:true};
   const result=await a.request('POST',{sync:'gold-observation'},payload,auth);assert.equal(result.code,200);
   const history=a.store.get(KEY),week=history.weeks[0];assert.equal(week.status,'incomplete');assert.equal(week.mode,'live');assert.equal(week.total_rial,null);
   const prompt=messages(a).find(x=>x.reply_markup?.force_reply);assert.ok(prompt);assert.equal(prompt.chat_id,1);
@@ -166,7 +166,7 @@ test('website quote suppresses the manual weekly request and no guest fixed fall
 test('history callbacks cannot expose Excel or change prices for financial advisors, guests or other chats',async()=>{
   const {a,record}=await fixture();await a.request('POST',{sync:'gold-history'},{revision:null,weeks:[record]},auth);
   const revision=a.store.get(KEY).revision;
-  for(const uid of [2,4])for(const data of ['history:excel','history:price:2026-10-23'])await a.request('POST',{}, {callback_query:{id:'fixture-history',from:{id:uid},data,message:{chat:{id:uid,type:'private'}}}},header);
+  for(const uid of [2,4])for(const data of ['history:excel','history:price:2026-10-21'])await a.request('POST',{}, {callback_query:{id:'fixture-history',from:{id:uid},data,message:{chat:{id:uid,type:'private'}}}},header);
   assert.equal(a.sends.some(x=>x.url.endsWith('/sendDocument')),false);assert.equal(a.store.get(KEY).revision,revision);
 });
 
@@ -199,4 +199,53 @@ test('a provisional bootstrap never broadcasts weekly price requests, even if it
   const result=await a.request('POST',{sync:'gold-observation'},{assets:{...a.assets,'بلک راک':15},
     source_checked_at:new Date(now).toISOString(),workbook_updated_at:'2026-10-24T12:00:00Z',workbook_sha256:'b'.repeat(64),additional_quantities:{XAUT:0,'اهرم':0},bootstrap:true,notify:true},auth);
   assert.equal(result.code,200);assert.equal(a.store.get(KEY).weeks[0].mode,'baseline');assert.equal(a.sends.length,0);
+});
+
+test('war closure carry is instrument/date/source scoped and cannot price crypto or the gold denominator',()=>{
+  const stamp='2026-05-13T20:29:59Z',old='2026-02-25T20:29:59Z';
+  const opts={assets:['طعام','BTC'],groups:{'طعام':'stock',BTC:'crypto'},now:Date.parse(checked)};
+  const value={...input(),week_ending:'2026-05-13',as_of:stamp,quantities:{'طعام':1000,BTC:0},
+    quotes:{'طعام':{price_rial:100000,quoted_at:old,source:'Shakhesban historical daily close (IRR)'}},gold_quote:{...q(200000000),quoted_at:stamp}};
+  const record=calculateGoldWeek(value,opts);
+  assert.equal(record.status,'complete');assert.equal(record.total_rial,100000000);
+  assert.equal(record.quotes['طعام'].quoted_at,old);assert.equal(record.quotes['طعام'].closure_id,'iran-equities-2026-war');
+  assert.equal(record.quotes['طعام'].pricing_basis,'last_open_before_confirmed_closure');
+  for(const change of [x=>{x.mode='live';},x=>{x.quotes['طعام'].quoted_at='2026-02-24T20:29:59Z';},
+    x=>{x.quotes['طعام'].source='Owner entered price';},x=>{x.quantities.BTC=1;x.quotes.BTC={...x.quotes['طعام']};},
+    x=>{x.gold_quote={...x.quotes['طعام']};},x=>{x.week_ending='2026-05-20';x.as_of='2026-05-20T20:29:59Z';x.gold_quote.quoted_at=x.as_of;}]){
+    const invalid=structuredClone(value);change(invalid);const result=calculateGoldWeek(invalid,opts);
+    assert.equal(result.status,'incomplete');assert.equal(result.total_rial,null);
+  }
+  const goldOpts={...opts,assets:['طلا','BTC'],groups:{'طلا':'gold',BTC:'crypto'}};
+  const goldValue={...value,week_ending:'2026-03-11',as_of:'2026-03-11T20:29:59Z',quantities:{'طلا':1000,BTC:0},quotes:{'طلا':value.quotes['طعام']},gold_quote:{...q(200000000),quoted_at:'2026-03-11T20:29:59Z'}};
+  assert.equal(calculateGoldWeek(goldValue,goldOpts).status,'complete');
+  goldValue.week_ending='2026-03-18';goldValue.as_of='2026-03-18T20:29:59Z';goldValue.gold_quote.quoted_at=goldValue.as_of;
+  assert.equal(calculateGoldWeek(goldValue,goldOpts).status,'incomplete');
+});
+
+test('calendar migration requires a full Wednesday grid and privately archives original Friday observations',async()=>{
+  const {a,record}=await fixture();
+  const legacy={version:1,revision:'legacy-friday',manual_baseline:{...a.ns.MANUAL},weeks:[{...record,week_ending:'2026-10-23',as_of:'2026-10-23T20:29:59Z',status:'complete'}]};
+  a.store.set(KEY,structuredClone(legacy));
+  const rows=Array.from({length:52},(_,i)=>{
+    const week=new Date(Date.parse('2025-10-29T12:00:00Z')+i*7*86400000).toISOString().slice(0,10),stamp=week+'T20:29:59Z';
+    return {...record,week_ending:week,as_of:stamp,gold_quote:{...record.gold_quote,quoted_at:stamp},quotes:Object.fromEntries(Object.entries(record.quotes).map(([k,v])=>[k,{...v,quoted_at:stamp}]))};
+  });
+  for(const payload of [{weeks:rows.slice(1),calendar:'wednesday-v1'},{weeks:rows},{weeks:[rows[0],...rows.slice(1,51),rows[0]],calendar:'wednesday-v1'}]){
+    assert.equal((await a.request('POST',{sync:'gold-history'},{revision:'legacy-friday',...payload},auth)).code,400);
+    assert.equal(a.store.get(KEY).revision,'legacy-friday');assert.equal(a.writes.length,0);
+  }
+  const result=await a.request('POST',{sync:'gold-history'},{revision:'legacy-friday',calendar:'wednesday-v1',weeks:rows},auth);
+  assert.equal(result.code,200);const stored=a.store.get(KEY);assert.equal(stored.calendar,'wednesday-v1');assert.equal(stored.weeks.length,52);
+  assert.ok(stored.weeks.every(w=>new Date(w.week_ending+'T12:00:00Z').getUTCDay()===3));
+  assert.deepEqual(JSON.parse(JSON.stringify(a.store.get(stored.calendar_archive))),legacy);
+  const archive=a.writes.find(w=>w.key===stored.calendar_archive);assert.equal(archive.options.access,'private');assert.equal(archive.options.allowOverwrite,false);
+});
+
+test('live capture rejects other days and an early Wednesday instead of relabelling their prices',async()=>{
+  for(const time of ['2026-10-23T20:00:00Z','2026-10-22T00:00:00Z','2026-10-21T08:00:00Z']){
+    const now=Date.parse(time),a=await app({now:()=>now});
+    const result=await a.request('POST',{sync:'gold-observation'},{assets:a.assets,source_checked_at:time,workbook_updated_at:'2026-10-20T00:00:00Z',workbook_sha256:'b'.repeat(64),additional_quantities:{XAUT:0,'اهرم':0}},auth);
+    assert.equal(result.code,409);assert.equal(a.writes.length,0);assert.equal(a.sends.length,0);
+  }
 });

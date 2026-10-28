@@ -78,3 +78,12 @@ never broaden the source workbook worker's credential or write Trading Journal.
 Require report/folder identity and downloaded hash checks. Microsoft consent is
 still required if the separate write token is absent; do not claim skipped uploads
 are verified. Keep sign-in codes private even though the repository is public.
+
+The owner selected Wednesday weekly gold-history valuations on 2026-10-28.
+Reconstruct Wednesday holdings; never relabel Friday balances. An authenticated
+full-grid migration privately archives the old calendar first. Only reviewed
+wartime closure intervals in lib/iran-market-closures.json permit the exact last
+open-session historical listed close beyond seven days; preserve its real date
+and explicit closure basis. Equity and gold-fund reopenings differ. Crypto, FX,
+physical-gold denominator, silver without its own verified archive, coins and
+EcoCoach do not inherit that exception. See docs/GOLD_HISTORY.md.

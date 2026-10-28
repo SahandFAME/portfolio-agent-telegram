@@ -316,9 +316,9 @@ class HistoricalQuantityTests(unittest.TestCase):
             self.assertIsNone(quantities['طلا']);self.assertTrue(problems['طلا'])
         _,_,_,extras=history.reconstruct(source_workbook(extra=True),{});self.assertEqual(extras,['OldAssetFixture / UnknownOldHolding'])
 
-    def test_week_grid_has_52_actual_fridays_inside_the_confirmed_year(self):
+    def test_week_grid_has_52_actual_wednesdays_inside_the_confirmed_year(self):
         weeks=history.week_dates();self.assertEqual(len(weeks),52);self.assertEqual(len(set(weeks)),52)
-        self.assertTrue(all(d.weekday()==4 for d in weeks));self.assertEqual(weeks[0],date(2025,10,31));self.assertEqual(weeks[-1],date(2026,10,23))
+        self.assertTrue(all(d.weekday()==2 for d in weeks));self.assertEqual(weeks[0],date(2025,10,29));self.assertEqual(weeks[-1],date(2026,10,21))
 
     def test_historical_quote_selection_never_uses_a_future_or_overly_stale_quote(self):
         cutoff=datetime(2026,10,23,23,59,tzinfo=history.TEHRAN)
