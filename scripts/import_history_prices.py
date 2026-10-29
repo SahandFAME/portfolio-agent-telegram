@@ -34,7 +34,7 @@ def parse_price_document(text,currency,*,silver_currency=None,document_sha256=No
         try:
             solar=jdatetime.date(*map(int,fields[0].split('/'))).togregorian();day=date.fromisoformat(fields[1])
         except (TypeError,ValueError):raise SyncError('invalid_price_date') from None
-        if solar!=day or day.weekday()!=2:raise SyncError('price_calendar_mismatch')
+        if solar!=day:raise SyncError('price_calendar_mismatch')
         if len(fields)==2 or fields[2] in {'','ticker was closed'}:continue
         if not re.fullmatch(r'[0-9]+(?:\.[0-9]+)?',fields[2]):raise SyncError('invalid_unit_price')
         amount=float(fields[2]);unit=(silver_currency or currency) if asset=='شمش نقره 999' else currency

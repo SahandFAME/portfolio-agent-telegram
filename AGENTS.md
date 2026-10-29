@@ -95,3 +95,13 @@ carried-price values as estimates in Excel/chart. Owner attachment prices requir
 explicit currency/per-unit confirmation and private storage; never commit them.
 Preserve quantity validation, source workbook read-only access and ordinary bot
 report freshness. Weekly EcoCoach prompts may replace an estimated fund quote.
+
+The owner replaced weekly gold history with Persian-calendar month-end reports
+on 2026-10-29. Reconstruct actual month-end quantities/prices; do not sample or
+relabel Wednesday balances. Archive the prior calendar and retain its dated price
+evidence/owner inputs. Current-month or pre-midnight captures stay provisional
+until historical close reconstruction. Monthly comparison requires adjacent
+Persian months, including Esfand/year rollover; use the same historical $5 cutoff
+for the entire monthly series. The bot sends the approved short summary plus a
+monthly value/change table; recheck report access before text and keep Excel
+admin-only. Existing non-history reports and source workbook stay unchanged.

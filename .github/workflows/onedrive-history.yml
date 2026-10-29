@@ -7,7 +7,7 @@ on:
         required: false
         type: string
   workflow_run:
-    workflows: [Weekly 18K gold portfolio history, Authorize Microsoft access]
+    workflows: [Monthly 18K gold portfolio history, Weekly 18K gold portfolio history, Authorize Microsoft access]
     types: [completed]
 permissions:
   contents: read
@@ -25,29 +25,44 @@ jobs:
       ONEDRIVE_GOLD_HISTORY_REPORT_ID: ${{ secrets.ONEDRIVE_GOLD_HISTORY_REPORT_ID }}
       ONEDRIVE_PREVIOUS_REPORT_FINGERPRINT: ${{ inputs.previous_report_fingerprint || '' }}
     steps:
+      - name: Skip calendar checks without a monthly report update
+        id: calendar
+        run: |
+          node <<'JS'
+          const fs=require('fs'),event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
+          let publish=true;
+          if(event.workflow_run?.event==='schedule'){
+            const stamp=Date.parse(event.workflow_run.run_started_at);
+            const f=new Intl.DateTimeFormat('en-US-u-ca-persian-nu-latn',{timeZone:'Asia/Tehran',month:'numeric',day:'numeric'});
+            const parts=t=>Object.fromEntries(f.formatToParts(t).filter(p=>['month','day'].includes(p.type)).map(p=>[p.type,Number(p.value)]));
+            const now=parts(stamp),next=parts(stamp+86400000);
+            publish=now.day===1||now.month!==next.month;
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,'publish='+publish+'\n');
+          JS
       - name: Await separate Microsoft consent when not configured
-        if: env.MS_GRAPH_EXPORT_REFRESH_TOKEN == ''
+        if: steps.calendar.outputs.publish == 'true' && env.MS_GRAPH_EXPORT_REFRESH_TOKEN == ''
         run: echo 'OneDrive report upload is awaiting Microsoft consent; private report storage remains active.'
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: env.MS_GRAPH_EXPORT_REFRESH_TOKEN != ''
+        if: steps.calendar.outputs.publish == 'true' && env.MS_GRAPH_EXPORT_REFRESH_TOKEN != ''
         with:
           ref: main
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: env.MS_GRAPH_EXPORT_REFRESH_TOKEN != ''
+        if: steps.calendar.outputs.publish == 'true' && env.MS_GRAPH_EXPORT_REFRESH_TOKEN != ''
         with:
           python-version: '3.12'
       - run: pip install -r scripts/requirements-sync.txt
-        if: env.MS_GRAPH_EXPORT_REFRESH_TOKEN != ''
+        if: steps.calendar.outputs.publish == 'true' && env.MS_GRAPH_EXPORT_REFRESH_TOKEN != ''
       - name: Upload only the generated report and verify its downloaded hash
-        if: env.MS_GRAPH_EXPORT_REFRESH_TOKEN != ''
+        if: steps.calendar.outputs.publish == 'true' && env.MS_GRAPH_EXPORT_REFRESH_TOKEN != ''
         env:
           MS_GRAPH_CLIENT_ID: 04a73ec3-340a-4cb6-a087-7fdc4dfd93e0
           GH_TOKEN: ${{ secrets.PORTFOLIO_SECRET_WRITER_TOKEN }}
           PORTFOLIO_SYNC_SECRET_AGENT: ${{ secrets.PORTFOLIO_SYNC_SECRET_AGENT }}
         run: python scripts/upload_gold_history.py > onedrive-report-result.json
       - name: Publish aggregate upload outcome
-        if: always() && env.MS_GRAPH_EXPORT_REFRESH_TOKEN != ''
+        if: always() && steps.calendar.outputs.publish == 'true' && env.MS_GRAPH_EXPORT_REFRESH_TOKEN != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

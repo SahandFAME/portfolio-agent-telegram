@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg,applyHistoryPriceFallbacks} from '../lib/gold-history.js';
+import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg,applyHistoryPriceFallbacks,initialMonthEnds} from '../lib/gold-history.js';
 import {app} from './helpers/app-fixture.mjs';
 
 const checked='2026-10-25T09:00:00Z',asof='2026-10-21T20:29:59Z';
@@ -139,7 +139,7 @@ test('only owners/admins/advisors can request a real rendered history image; gue
 });
 
 test('website-first weekly capture asks admins for missing EcoCoach price and an authenticated reply completes it',async()=>{
-  const now=Date.parse('2026-10-21T20:00:00Z'),a=await app({now:()=>now});
+  const now=Date.parse('2026-10-22T20:00:00Z'),a=await app({now:()=>now});
   const assets={...a.assets,'بلک راک':15};
   const payload={assets,workbook_updated_at:'2026-10-21T12:00:00Z',source_checked_at:new Date(now).toISOString(),workbook_sha256:'b'.repeat(64),additional_quantities:{XAUT:0,'اهرم':0},bootstrap:false,notify:true};
   const result=await a.request('POST',{sync:'gold-observation'},payload,auth);assert.equal(result.code,200);
@@ -223,21 +223,21 @@ test('war closure carry is instrument/date/source scoped and cannot price crypto
   assert.equal(calculateGoldWeek(goldValue,goldOpts).status,'incomplete');
 });
 
-test('calendar migration requires a full Wednesday grid and privately archives original Friday observations',async()=>{
+test('calendar migration requires full month-end reconstruction and archives original observations',async()=>{
   const {a,record}=await fixture();
   const legacy={version:1,revision:'legacy-friday',manual_baseline:{...a.ns.MANUAL},weeks:[{...record,week_ending:'2026-10-23',as_of:'2026-10-23T20:29:59Z',status:'complete'}]};
   a.store.set(KEY,structuredClone(legacy));
-  const rows=Array.from({length:52},(_,i)=>{
-    const week=new Date(Date.parse('2025-10-29T12:00:00Z')+i*7*86400000).toISOString().slice(0,10),stamp=week+'T20:29:59Z';
-    return {...record,week_ending:week,as_of:stamp,gold_quote:{...record.gold_quote,quoted_at:stamp},quotes:Object.fromEntries(Object.entries(record.quotes).map(([k,v])=>[k,{...v,quoted_at:stamp}]))};
+  const rows=initialMonthEnds().map(week=>{
+    const stamp=week+'T20:29:59Z';
+    return {...record,period_kind:'monthly',week_ending:week,as_of:stamp,gold_quote:{...record.gold_quote,quoted_at:stamp},quotes:Object.fromEntries(Object.entries(record.quotes).map(([k,v])=>[k,{...v,quoted_at:stamp}]))};
   });
-  for(const payload of [{weeks:rows.slice(1),calendar:'wednesday-v1'},{weeks:rows},{weeks:[rows[0],...rows.slice(1,51),rows[0]],calendar:'wednesday-v1'}]){
+  for(const payload of [{weeks:rows.slice(1),calendar:'persian-month-end-v1'},{weeks:rows},{weeks:[rows[0],...rows.slice(1,11),rows[0]],calendar:'persian-month-end-v1'}]){
     assert.equal((await a.request('POST',{sync:'gold-history'},{revision:'legacy-friday',...payload},auth)).code,400);
     assert.equal(a.store.get(KEY).revision,'legacy-friday');assert.equal(a.writes.length,0);
   }
-  const result=await a.request('POST',{sync:'gold-history'},{revision:'legacy-friday',calendar:'wednesday-v1',weeks:rows},auth);
-  assert.equal(result.code,200);const stored=a.store.get(KEY);assert.equal(stored.calendar,'wednesday-v1');assert.equal(stored.weeks.length,52);
-  assert.ok(stored.weeks.every(w=>new Date(w.week_ending+'T12:00:00Z').getUTCDay()===3));
+  const result=await a.request('POST',{sync:'gold-history'},{revision:'legacy-friday',calendar:'persian-month-end-v1',weeks:rows},auth);
+  assert.equal(result.code,200);const stored=a.store.get(KEY);assert.equal(stored.calendar,'persian-month-end-v1');assert.equal(stored.weeks.length,12);
+  assert.ok(stored.weeks.every(w=>w.period_kind==='monthly'));
   assert.deepEqual(JSON.parse(JSON.stringify(a.store.get(stored.calendar_archive))),legacy);
   const archive=a.writes.find(w=>w.key===stored.calendar_archive);assert.equal(archive.options.access,'private');assert.equal(archive.options.allowOverwrite,false);
 });
@@ -311,10 +311,10 @@ test('stored weekly fallback never borrows quantities or future prices and keeps
 });
 
 test('weekly EcoCoach request still replaces a last-known estimate when current market providers fail',async()=>{
-  const now=Date.parse('2026-10-21T20:00:00Z'),a=await app({now:()=>now,beforeMarketFetch:()=>{throw new Error('Synthetic provider outage');}});
+  const now=Date.parse('2026-10-22T20:00:00Z'),a=await app({now:()=>now,beforeMarketFetch:()=>{throw new Error('Synthetic provider outage');}});
   const assets=Object.fromEntries(Object.keys(a.assets).map(k=>[k,k==='بلک راک'?15:0]));
-  const past={...input(),week_ending:'2026-10-14',as_of:'2026-10-14T20:00:00Z',source_checked_at:'2026-10-21T19:59:00Z',workbook_updated_at:'2026-10-13T00:00:00Z',
-    quantities:{...assets,...a.ns.MANUAL},additional_quantities:{XAUT:0,'اهرم':0},quotes:{},gold_quote:{...q(200000000),quoted_at:'2026-10-14T20:00:00Z'}};
+  const past={...input(),period_kind:'monthly',week_ending:'2026-09-22',as_of:'2026-09-22T20:00:00Z',source_checked_at:'2026-10-21T19:59:00Z',workbook_updated_at:'2026-10-13T00:00:00Z',
+    quantities:{...assets,...a.ns.MANUAL},additional_quantities:{XAUT:0,'اهرم':0},quotes:{},gold_quote:{...q(200000000),quoted_at:'2026-09-22T20:00:00Z'},minimum_usd:5,usd_quote:{...q(1000000),quoted_at:'2026-09-22T20:00:00Z'}};
   for(const asset of [...Object.keys(a.ns.MANUAL),'بلک راک'])past.quotes[asset]={...q(10000000),quoted_at:past.as_of};
   assert.equal((await a.request('POST',{sync:'gold-history'},{revision:null,weeks:[past]},auth)).code,200);
   const state=a.store.get(KEY);

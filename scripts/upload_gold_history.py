@@ -63,7 +63,7 @@ def validate_report(data,*,require_marker=True):
         book=load_workbook(BytesIO(data),read_only=True,keep_links=False)
         try:
             marker=book.properties.identifier
-            if (marker!=IDENTIFIER if require_marker else marker not in (None,'',IDENTIFIER)) or book.sheetnames!=['ارزش هفتگی','دارایی‌ها','ترکیب دارایی','موارد نیازمند بررسی','خلاصه تحلیل']:
+            if (marker!=IDENTIFIER if require_marker else marker not in (None,'',IDENTIFIER)) or book.sheetnames not in [[title,'دارایی‌ها','ترکیب دارایی','موارد نیازمند بررسی','خلاصه تحلیل'] for title in ['ارزش هفتگی','ارزش ماهانه']]:
                 raise ValueError()
         finally:book.close()
     except Exception:
