@@ -353,3 +353,50 @@ observations and their complete-record protection. The archive includes the
 original revision; the prior revision's private Excel remains stored. Failed or
 partial migration must leave the current state intact. The report pointer still
 requires a regenerated matching-revision Excel and downloaded OneDrive hash check.
+
+## Owner price inputs and temporary last-known policy (2026-10-29)
+
+The owner supplied a private text checklist with dated numeric prices and asked
+that unresolved prices use the latest known price for now. This supersedes the
+closure-only freshness exception for the gold-history report, not normal current
+bot valuations. No actual prices or source document are committed to GitHub.
+
+`scripts/import_history_prices.py` parses only known asset headings and numeric
+rows, verifies matching Gregorian/Persian Wednesday dates, skips blanks and the
+literal closure status, rejects malformed/duplicate rows and requires explicit
+currency. It never executes attachment text. Convert confirmed toman/unit values
+to IRR once, retaining original currency/amount, actual quote date and attachment
+SHA-256. Dry-run output contains aggregate counts only; `--apply` requires the
+existing sync credential and verifies private readback.
+
+The protected `POST ?sync=gold-history-prices` route requires current revision,
+validated asset/unit/date/amount fields and the explicit policy identifier
+`last-known-before-valuation-v1`. It merges dated owner inputs into the private
+history state, creating a separate input revision. All normal history writes
+preserve these fields. Inputs are not part of the public configuration or user
+report download endpoints; the full history endpoint retains sync authentication.
+
+Historical reconstruction always rereads Trading Journal. It selects the latest
+available IRR/unit evidence on or before each valuation. Same-day owner entries
+win over provider quotes; later provider dates supersede earlier owner dates.
+An unknown quantity is still unknown, and absence of any earlier price still
+blocks a total. Gold/FX dates also remain real; no forward price or today's
+quantity may be backdated. Server recomputation derives `owner_authorized_last_known`
+metadata from the saved policy and original timestamps, never from untrusted
+client flags. The reviewed closure label remains separate where applicable.
+
+The server also fills missing quotes in an already source-verified weekly live
+observation from dated earlier history/owner inputs; it keeps that observation's
+own holdings, workbook identity/check time and actual capture time. Regular live
+bot reports retain their freshness rules. Weekly EcoCoach requests still occur
+if only an estimated older fund price is available, and an admin reply can replace
+that estimate. Backfill/import does not send activation messages or price prompts.
+
+`estimated_assets` and `valuation_basis: estimated_last_known` distinguish
+computable estimates from dated prices. Excel marks estimated rows/weeks,
+retains actual price timestamps and uses computed/estimated rather than verified
+labels in analysis. The Telegram chart identifies estimated history. Estimated
+complete weeks can upgrade when actual prices arrive; an incomplete rebuild
+cannot erase a previously computable record. A new private input revision permits
+explicit owner corrections to completed historical prices. Existing immutable
+protection still applies to complete observations outside this controlled path.

@@ -87,3 +87,11 @@ open-session historical listed close beyond seven days; preserve its real date
 and explicit closure basis. Equity and gold-fund reopenings differ. Crypto, FX,
 physical-gold denominator, silver without its own verified archive, coins and
 EcoCoach do not inherit that exception. See docs/GOLD_HISTORY.md.
+
+On 2026-10-29 the owner temporarily authorized last-known prices for unresolved
+weekly-history valuations. Enable only via the protected history-price policy;
+retain actual quote dates, never use later prices for earlier weeks, and label
+carried-price values as estimates in Excel/chart. Owner attachment prices require
+explicit currency/per-unit confirmation and private storage; never commit them.
+Preserve quantity validation, source workbook read-only access and ordinary bot
+report freshness. Weekly EcoCoach prompts may replace an estimated fund quote.

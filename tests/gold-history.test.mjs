@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg} from '../lib/gold-history.js';
+import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg,applyHistoryPriceFallbacks} from '../lib/gold-history.js';
 import {app} from './helpers/app-fixture.mjs';
 
 const checked='2026-10-25T09:00:00Z',asof='2026-10-21T20:29:59Z';
@@ -248,4 +248,84 @@ test('live capture rejects other days and an early Wednesday instead of relabell
     const result=await a.request('POST',{sync:'gold-observation'},{assets:a.assets,source_checked_at:time,workbook_updated_at:'2026-10-20T00:00:00Z',workbook_sha256:'b'.repeat(64),additional_quantities:{XAUT:0,'اهرم':0}},auth);
     assert.equal(result.code,409);assert.equal(a.writes.length,0);assert.equal(a.sends.length,0);
   }
+});
+
+test('last-known policy is explicit for weekly history, retains original dates and marks estimates',()=>{
+  const old='2025-11-01T00:00:00Z',value=input();value.quotes.stock={...q(100000),quoted_at:old};
+  assert.equal(calculateGoldWeek(value,options).status,'incomplete');
+  const opts={...options,historicalPricePolicy:'last-known-before-valuation-v1',priceInputsRevision:'inputs-v1'};
+  const record=calculateGoldWeek(value,opts);assert.equal(record.status,'complete');
+  assert.equal(record.quotes.stock.quoted_at,old);assert.equal(record.quotes.stock.pricing_basis,'owner_authorized_last_known');
+  assert.equal(record.valuation_basis,'estimated_last_known');assert.ok(record.estimated_assets.includes('stock'));
+  assert.equal(record.price_inputs_revision,'inputs-v1');
+  assert.equal(calculateGoldWeek({...value,mode:'live'},options).status,'incomplete');
+  assert.equal(calculateGoldWeek({...value,mode:'live'},opts).valuation_basis,'estimated_last_known');
+  value.quotes.stock.quoted_at='2026-10-22T00:00:00Z';assert.equal(calculateGoldWeek(value,opts).status,'incomplete');
+  const svg=goldHistorySvg([record],{formatTime:x=>x,escape:x=>String(x),number:x=>String(x)});
+  assert.match(svg,/برآورد/);assert.doesNotMatch(svg,/مقدار تأییدشده/);
+});
+
+test('a completed estimate upgrades with newer data but cannot be replaced by an incomplete reconstruction',()=>{
+  const opts={...options,historicalPricePolicy:'last-known-before-valuation-v1',priceInputsRevision:'inputs-v1'};
+  const value=input();value.quotes.stock.quoted_at='2025-11-01T00:00:00Z';
+  const estimated=calculateGoldWeek(value,opts),fresh=input();fresh.quotes.stock.price_rial=200000;
+  const changed=mergeGoldWeeks([estimated],[fresh],opts)[0];assert.equal(changed.total_rial,2200000000);assert.equal(changed.valuation_basis,'dated_prices');
+  const invalid=input();delete invalid.quotes.stock;assert.equal(mergeGoldWeeks([estimated],[invalid],opts)[0].gold_grams,estimated.gold_grams);
+});
+
+test('owner price input endpoint requires auth, currency, dates and revision and stores prices privately',async()=>{
+  const {a,record}=await fixture();await a.request('POST',{sync:'gold-history'},{revision:null,weeks:[record]},auth);
+  const revision=a.store.get(KEY).revision;
+  const p={asset:'بلک راک',price_rial:10000,original_price:1000,original_currency:'TOMAN',quoted_at:asof,document_sha256:'a'.repeat(64)};
+  const body={revision,historical_price_policy:'last-known-before-valuation-v1',price_inputs:[p]};
+  assert.equal((await a.request('POST',{sync:'gold-history-prices'},body)).code,401);
+  for(const change of [x=>{x.revision='stale';},x=>{x.price_inputs[0].original_currency='unknown';},
+    x=>{x.price_inputs[0].price_rial=1000;},x=>{x.price_inputs[0].quoted_at='2030-01-01T00:00:00Z';},
+    x=>{x.price_inputs[0].asset='unknown';},x=>{x.price_inputs.push({...p});}]){
+    const invalid=structuredClone(body);change(invalid);assert.ok([400,409].includes((await a.request('POST',{sync:'gold-history-prices'},invalid,auth)).code));
+    assert.equal(a.store.get(KEY).revision,revision);
+  }
+  const result=await a.request('POST',{sync:'gold-history-prices'},body,auth);assert.equal(result.code,200);
+  const stored=a.store.get(KEY);assert.equal(stored.price_inputs.length,1);assert.equal(stored.price_inputs[0].price_rial,10000);
+  assert.equal(stored.price_inputs[0].source,'Owner supplied dated historical unit price');assert.equal(stored.historical_price_policy,body.historical_price_policy);
+  assert.equal(a.sends.length,0);assert.equal((await a.request('GET',{data:'gold-history'})).code,401);
+  const next={revision:stored.revision,weeks:[record]};await a.request('POST',{sync:'gold-history'},next,auth);
+  assert.equal(a.store.get(KEY).price_inputs.length,1);assert.equal(a.store.get(KEY).price_inputs_revision,stored.price_inputs_revision);
+});
+
+
+test('stored weekly fallback never borrows quantities or future prices and keeps unknown balances incomplete',()=>{
+  const opts={...options,historicalPricePolicy:'last-known-before-valuation-v1',priceInputsRevision:'v1'};
+  const past=input();past.week_ending='2026-10-14';past.as_of='2026-10-14T20:29:59Z';
+  for(const p of Object.values(past.quotes))p.quoted_at=past.as_of;past.gold_quote.quoted_at=past.as_of;
+  const live={...input(),mode:'live',quotes:{},gold_quote:null};live.quantities.stock=2000;
+  const result=applyHistoryPriceFallbacks([calculateGoldWeek(past,options),calculateGoldWeek(live,options)],[],opts);
+  assert.equal(result[1].status,'complete');assert.equal(result[1].quantities.stock,2000);assert.equal(result[1].total_rial,2200000000);
+  assert.equal(result[1].valuation_basis,'estimated_last_known');assert.equal(result[1].quotes.stock.quoted_at,past.as_of);
+  const unknown=structuredClone(live);unknown.quantities.stock=null;
+  assert.equal(applyHistoryPriceFallbacks([result[0],calculateGoldWeek(unknown,options)],[],opts)[1].status,'incomplete');
+  const onlyFuture=applyHistoryPriceFallbacks([calculateGoldWeek(live,options)],[],opts)[0];assert.equal(onlyFuture.status,'incomplete');
+  const override={asset:'stock',price_rial:200000,source:'Owner supplied dated historical unit price',quoted_at:past.as_of};
+  assert.equal(applyHistoryPriceFallbacks([result[0]],[override],opts)[0].total_rial,2200000000);
+  override.quoted_at='2026-10-15T00:00:00Z';assert.equal(applyHistoryPriceFallbacks([result[0]],[override],opts)[0].total_rial,2100000000);
+});
+
+test('weekly EcoCoach request still replaces a last-known estimate when current market providers fail',async()=>{
+  const now=Date.parse('2026-10-21T20:00:00Z'),a=await app({now:()=>now,beforeMarketFetch:()=>{throw new Error('Synthetic provider outage');}});
+  const assets=Object.fromEntries(Object.keys(a.assets).map(k=>[k,k==='بلک راک'?15:0]));
+  const past={...input(),week_ending:'2026-10-14',as_of:'2026-10-14T20:00:00Z',source_checked_at:'2026-10-21T19:59:00Z',workbook_updated_at:'2026-10-13T00:00:00Z',
+    quantities:{...assets,...a.ns.MANUAL},additional_quantities:{XAUT:0,'اهرم':0},quotes:{},gold_quote:{...q(200000000),quoted_at:'2026-10-14T20:00:00Z'}};
+  for(const asset of [...Object.keys(a.ns.MANUAL),'بلک راک'])past.quotes[asset]={...q(10000000),quoted_at:past.as_of};
+  assert.equal((await a.request('POST',{sync:'gold-history'},{revision:null,weeks:[past]},auth)).code,200);
+  const state=a.store.get(KEY);
+  assert.equal((await a.request('POST',{sync:'gold-history-prices'},{revision:state.revision,historical_price_policy:'last-known-before-valuation-v1',price_inputs:[{asset:'بلک راک',price_rial:10000000,original_price:1000000,original_currency:'TOMAN',quoted_at:past.as_of,document_sha256:'b'.repeat(64)}]},auth)).code,200);
+  const result=await a.request('POST',{sync:'gold-observation'},{assets,source_checked_at:new Date(now).toISOString(),workbook_updated_at:'2026-10-20T00:00:00Z',workbook_sha256:'b'.repeat(64),additional_quantities:{XAUT:0,'اهرم':0},notify:true},auth);
+  assert.equal(result.code,200);let current=a.store.get(KEY).weeks.at(-1);
+  assert.equal(current.status,'complete');assert.equal(current.valuation_basis,'estimated_last_known');assert.equal(current.quotes['بلک راک'].pricing_basis,'owner_authorized_last_known');
+  const prompt=messages(a).find(x=>x.reply_markup?.force_reply);assert.ok(prompt);
+  const promptKey=[...a.store.keys()].find(x=>x.startsWith('portfolio/gold-history/prompts/1/'));
+  const id=Number(promptKey.split('/').at(-1).replace('.json',''));
+  await request(a,'1030000',1,{reply_to_message:{message_id:id}});
+  current=a.store.get(KEY).weeks.at(-1);assert.equal(current.quotes['بلک راک'].price_rial,10300000);
+  assert.equal(current.quotes['بلک راک'].pricing_basis,undefined);assert.equal(current.valuation_basis,'estimated_last_known');
 });

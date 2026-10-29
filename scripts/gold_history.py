@@ -40,6 +40,7 @@ DUST_TOTAL_ASSETS=frozenset({'ADA','SOL','ONDO','Link'})  # Owner-confirmed smal
 MATIC_WAIVED_REMAINDER_SIGNATURE='16c88b27aacb62e7b845677132ff4d3137527101d572c3a3d0437a5c6fd735e4'
 PREWINDOW_TETHER_SIGNATURE='3a187613376cf0faa691753a09296c65d859d7d91ddbd3b3999fa7293aa7f1df'
 HISTORY_CALENDAR='wednesday-v1'
+LAST_KNOWN_POLICY='last-known-before-valuation-v1'
 MARKET_CLOSURES=json.loads((Path(__file__).resolve().parents[1]/'lib'/'iran-market-closures.json').read_text())['closures']
 LISTED_QUOTE_SOURCES=frozenset({'Shakhesban historical daily close (IRR)','TSETMC official daily market price (IRR)'})
 
@@ -376,15 +377,35 @@ def closure_for_quote(asset,asof,stamp):
     return next((c for c in MARKET_CLOSURES if asset in c['assets'] and c['start']<=day<=c['end'] and price_day==c['last_open']),None)
 
 
-def last_quote(series,asof,source,asset=None):
+def last_quote(series,asof,source,asset=None,allow_last_known=False):
     before=[row for row in series if row[0]<=asof
         and isinstance(row[1],(int,float)) and not isinstance(row[1],bool) and math.isfinite(row[1]) and row[1]>0]
     if not before:return None
     stamp,value=max(before,key=lambda row:row[0])
     closure=closure_for_quote(asset,asof,stamp) if source in LISTED_QUOTE_SOURCES else None
-    if asof-stamp>timedelta(days=7) and not closure:return None
+    if asof-stamp>timedelta(days=7) and not closure and not allow_last_known:return None
+    carried=allow_last_known and stamp.astimezone(TEHRAN).date()<asof.astimezone(TEHRAN).date()
     return {'price_rial':value,'quoted_at':stamp.astimezone(timezone.utc).isoformat(),'source':source,
-        **({'pricing_basis':'last_open_before_confirmed_closure','closure_id':closure['id']} if closure else {})}
+        **({'pricing_basis':'last_open_before_confirmed_closure','closure_id':closure['id']} if closure else {'pricing_basis':'owner_authorized_last_known'} if carried else {})}
+
+
+def select_history_quote(asset,asof,fresh,existing,allow_last_known=False):
+    """Select dated IRR/unit evidence; never use a quote after the valuation."""
+    candidates=[]
+    def add(raw,owner=False):
+        if not isinstance(raw,dict):return
+        try:
+            stamp=datetime.fromisoformat(raw['quoted_at'].replace('Z','+00:00'))
+            result=last_quote([(stamp,raw['price_rial'])],asof,raw['source'],asset,allow_last_known)
+            if result:candidates.append((stamp.astimezone(TEHRAN).date(),owner,stamp,result))
+        except (KeyError,TypeError,ValueError):return
+    for row in existing.get('weeks',[]):
+        if row.get('mode')!='historical':continue
+        add(row.get('gold_quote') if asset=='gold' else row.get('usd_quote') if asset=='usd_cutoff' else row.get('quotes',{}).get(asset))
+    add(fresh)
+    for raw in existing.get('price_inputs',[]):
+        if raw.get('asset')==asset:add(raw,True)
+    return max(enumerate(candidates),key=lambda p:(*p[1][:3],p[0]))[1][3] if candidates else None
 
 
 def saved_crypto_series(existing,asset):
@@ -400,7 +421,8 @@ def saved_crypto_series(existing,asset):
             stamp=datetime.fromisoformat(p['quoted_at'].replace('Z','+00:00'))
             fxstamp=datetime.fromisoformat(fx['quoted_at'].replace('Z','+00:00'))
             price=p['price_rial']/fx['price_rial']
-            if not math.isfinite(price) or price<=0 or not 0<= (asof-stamp).total_seconds()<=7*86400 or not 0<= (asof-fxstamp).total_seconds()<=7*86400:continue
+            limit=float('inf') if existing.get('historical_price_policy')==LAST_KNOWN_POLICY else 7*86400
+            if not math.isfinite(price) or price<=0 or not 0<= (asof-stamp).total_seconds()<=limit or not 0<= (asof-fxstamp).total_seconds()<=limit:continue
             result.append((stamp,price))
         except (ValueError,TypeError,KeyError,ZeroDivisionError,OverflowError):continue
     return result
@@ -417,6 +439,7 @@ def saved_listed_quote(row,asset,asof):
 def historical_weeks(content,modified,checked,config,existing):
     current,trades,problems,extras=reconstruct(content,config)
     manual=existing.get('manual_baseline') or config['manual']
+    allow_last_known=existing.get('historical_price_policy')==LAST_KNOWN_POLICY
     dates=week_dates();series={};source={}
     previous=[r for r in existing.get('weeks',[]) if r.get('mode')=='historical']
     definitions={'gold':'geram18','دلار':'price_dollar_rl','سکه تمام':'sekee','ربع سکه بانکی':'rob'}
@@ -457,18 +480,21 @@ def historical_weeks(content,modified,checked,config,existing):
             if usd and abs(trades[asset].reconciliation_delta)*usd['price_rial']<5:
                 quantities[asset]=max(0.0,sum(q for d,q in trades[asset] if d<=day)+getattr(trades[asset],'opening_adjustment',0.0))
                 week_problems[asset]=[]
-        quotes={};gold=last_quote(series.get('gold',[]),asof,'TGJU 18K gram daily close (IRR)')
-        fx=last_quote(series.get('دلار',[]),asof,'TGJU USD/IRR daily close')
+        quotes={};gold=last_quote(series.get('gold',[]),asof,'TGJU 18K gram daily close (IRR)',allow_last_known=allow_last_known)
+        gold=select_history_quote('gold',asof,gold,existing,allow_last_known)
+        fx=last_quote(series.get('دلار',[]),asof,'TGJU USD/IRR daily close',allow_last_known=allow_last_known)
+        fx=select_history_quote('usd_cutoff',asof,fx,existing,allow_last_known)
         for asset,q in {**quantities,**additional}.items():
             if q is None or q==0:continue
             if asset in ('آبشده (طلب)','آبشده (شمش زربد)'):p=gold
             elif asset=='ربع سکه غیره':p={**gold,'price_rial':gold['price_rial']*2.03325,'source':'TGJU 18K gram × 2.03325'} if gold else None
-            else:p=last_quote(series.get(asset,[]),asof,source.get(asset,'Historical quote'),asset)
+            else:p=last_quote(series.get(asset,[]),asof,source.get(asset,'Historical quote'),asset,allow_last_known)
             if asset in CRYPTO:
                 p={**p,'price_rial':p['price_rial']*fx['price_rial']} if p and fx else None
             elif not p and (asset in MAPPING or asset=='اهرم') and asset not in {'بلک راک','شمش نقره 999'}:
                 saved=[p for r in previous if (p:=saved_listed_quote(r,asset,asof))]
                 p=max(saved,key=lambda p:p['quoted_at']) if saved else None
+            p=select_history_quote(asset,asof,p,existing,allow_last_known)
             if p:quotes[asset]=p
         issues=['unmapped_historical_trade_table:'+re.sub(r'[<>&\n]','',name) for name in extras]
         issues.extend(code+':'+asset for asset,codes in week_problems.items() for code in codes)
@@ -503,7 +529,7 @@ def export_excel(history,groups):
         gold=row.get('gold_quote')
         summary.append([week,row.get('gold_grams'),row.get('change_gold_grams'),row.get('change_percent'),
             math.floor(row['total_rial']/10+.5) if row.get('total_rial') is not None else None,math.floor(gold['price_rial']/10+.5) if gold else None,
-            ('موقت • کامل' if row['status']=='complete' else 'موقت • ناقص') if row['mode']=='baseline' else 'کامل' if row['status']=='complete' else 'ناقص',row.get('quantity_change_count'),fa_time(row['as_of']),fa_time(row['source_checked_at'])])
+            ('موقت • کامل' if row['status']=='complete' else 'موقت • ناقص') if row['mode']=='baseline' else ('برآورد با آخرین قیمت موجود' if row.get('valuation_basis')=='estimated_last_known' else 'کامل') if row['status']=='complete' else 'ناقص',row.get('quantity_change_count'),fa_time(row['as_of']),fa_time(row['source_checked_at'])])
         for asset,qty in {**row['quantities'],**row.get('additional_quantities',{})}.items():
             p=row.get('quotes',{}).get(asset)
             if qty==0 or isinstance(qty,(int,float)) and p and qty*p['price_rial']<(row.get('minimum_rial') or 500000):continue
@@ -511,7 +537,7 @@ def export_excel(history,groups):
             if value is None and isinstance(qty,(int,float)) and p:value=qty*p['price_rial']
             holdings.append([week,safe_text(asset),safe_text(groups.get(asset,'')),qty,p['price_rial'] if p else None,math.floor(value/10+.5) if value is not None else None,
                 safe_text(p['source']) if p else None,fa_time(p['quoted_at']) if p else None,
-                'آخرین قیمت پایانی پیش از تعطیلی تأییدشده بازار' if p and p.get('pricing_basis')=='last_open_before_confirmed_closure' else None,
+                ('آخرین قیمت پایانی پیش از تعطیلی تأییدشده بازار' if p.get('pricing_basis')=='last_open_before_confirmed_closure' else 'برآورد با آخرین قیمت موجود؛ به درخواست مالک' if p.get('pricing_basis')=='owner_authorized_last_known' else 'قیمت تاریخی اعلام‌شده توسط مالک' if p.get('source')=='Owner supplied dated historical unit price' else None) if p else None,
                 safe_text(p['closure_id']) if p and p.get('closure_id') else None])
         for group,pct in (row.get('allocation') or {}).items():allocations.append([week,safe_text(group),pct])
         for issue in row.get('issues',[]):
@@ -535,12 +561,14 @@ def export_excel(history,groups):
     final=[r for r in history['weeks'] if r['mode']!='baseline']
     valid=[r for r in final if r['status']=='complete']
     analysis.append(['هفته‌های ثبت‌شده',len(final)])
-    analysis.append(['هفته‌های کامل و تأییدشده',len(valid)])
+    analysis.append(['هفته‌های دارای ارزش محاسبه‌شده',len(valid)])
+    analysis.append(['هفته‌های برآوردی با آخرین قیمت موجود',sum(r.get('valuation_basis')=='estimated_last_known' for r in valid)])
+    if history.get('historical_price_policy')==LAST_KNOWN_POLICY:analysis.append(['روش قیمت‌های ناموجود','آخرین قیمت موجود در تاریخ ارزش‌گذاری یا پیش از آن؛ بدون استفاده از قیمت آینده'])
     analysis.append(['هفته‌های نیازمند بررسی',len(final)-len(valid)])
     endpoints=len(final)>1 and final[0]['status']=='complete' and final[-1]['status']=='complete'
     analysis.append(['تغییر ارزش در بازه (گرم طلای ۱۸ عیار)',final[-1]['gold_grams']-final[0]['gold_grams'] if endpoints else None])
-    analysis.append(['کمترین ارزش تأییدشده (گرم)',min(r['gold_grams'] for r in valid) if valid else None])
-    analysis.append(['بیشترین ارزش تأییدشده (گرم)',max(r['gold_grams'] for r in valid) if valid else None])
+    analysis.append(['کمترین ارزش محاسبه‌شده (گرم)',min(r['gold_grams'] for r in valid) if valid else None])
+    analysis.append(['بیشترین ارزش محاسبه‌شده (گرم)',max(r['gold_grams'] for r in valid) if valid else None])
     for row in summary.iter_rows(min_row=2):
         for col in [1,2]:row[col].number_format='0.000000'
         for col in [4,5]:row[col].number_format='#,##0'

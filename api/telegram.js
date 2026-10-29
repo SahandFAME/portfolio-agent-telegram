@@ -3,7 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import path from "path";
-import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg,historyCalendarBase,HISTORY_CALENDAR} from "../lib/gold-history.js";
+import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg,historyCalendarBase,HISTORY_CALENDAR,LAST_KNOWN_POLICY,validateHistoryPriceInputs,applyHistoryPriceFallbacks} from "../lib/gold-history.js";
 
 const ONEDRIVE_CLIENT_ID = '04a73ec3-340a-4cb6-a087-7fdc4dfd93e0';
 const SNAPSHOT = "portfolio/latest.json";
@@ -95,7 +95,7 @@ export default async function handler(req,res){
       return res.status(200).json({ok:true,...accessExpirySummary(state)});
     }catch(_){return res.status(503).json({ok:false});}
   }
-  if(req.method==="POST" && ["gold-history","gold-observation","gold-history-file"].includes(req.query?.sync))return historyWrite(req,res);
+  if(req.method==="POST" && ["gold-history","gold-observation","gold-history-file","gold-history-prices"].includes(req.query?.sync))return historyWrite(req,res);
   if(req.method==="POST" && req.query?.verify==="access-storage"){
     if(!syncAuth(req))return res.status(401).json({ok:false});
     const result=await verifyAccessStorage();return res.status(result.ok?200:503).json(result);
@@ -2033,7 +2033,7 @@ async function sendTelegramPhoto(chatId,png,caption,{guestSafe=false,audience="r
 
 const GOLD_HISTORY_KEY='portfolio/gold-history/latest.json';
 const HISTORY_ADDITIONAL_GROUPS={XAUT:'طلا و سکه','اهرم':'سهام و صندوق'};
-const historyOptions=()=>({assets:ASSETS,groups:{...Object.fromEntries(ASSETS.map(a=>[a,categoryName(a)])),...HISTORY_ADDITIONAL_GROUPS},additionalGroups:HISTORY_ADDITIONAL_GROUPS,now:Date.now()});
+const historyOptions=(state={})=>({assets:ASSETS,groups:{...Object.fromEntries(ASSETS.map(a=>[a,categoryName(a)])),...HISTORY_ADDITIONAL_GROUPS},additionalGroups:HISTORY_ADDITIONAL_GROUPS,now:Date.now(),historicalPricePolicy:state.historical_price_policy,priceInputsRevision:state.price_inputs_revision});
 async function historyState(){
   const blob=await get(GOLD_HISTORY_KEY,ACCESS_READ_OPTIONS);
   if(!blob)return {data:{version:1,calendar:HISTORY_CALENDAR,revision:null,weeks:[]},etag:null};
@@ -2042,7 +2042,9 @@ async function historyState(){
   return {data,etag:blob.blob.etag};
 }
 async function saveHistory(current,weeks,archive=current.data.calendar_archive){
-  const data={version:1,calendar:HISTORY_CALENDAR,...(archive?{calendar_archive:archive}:{}),manual_baseline:current.data.manual_baseline||{...MANUAL},revision:crypto.randomUUID(),updated_at:new Date().toISOString(),weeks};
+  const data={version:1,calendar:HISTORY_CALENDAR,...(archive?{calendar_archive:archive}:{}),
+    ...(current.data.historical_price_policy?{historical_price_policy:current.data.historical_price_policy,price_inputs:current.data.price_inputs||[],price_inputs_revision:current.data.price_inputs_revision}:{}),
+    manual_baseline:current.data.manual_baseline||{...MANUAL},revision:crypto.randomUUID(),updated_at:new Date().toISOString(),weeks};
   await put(GOLD_HISTORY_KEY,JSON.stringify(data),{access:'private',addRandomSuffix:false,contentType:'application/json',
     ...(current.etag?{ifMatch:current.etag}:{allowOverwrite:false})});
   return data;
@@ -2073,6 +2075,16 @@ async function historyWrite(req,res){
   if(!syncAuth(req))return res.status(401).json({ok:false});
   try{
     const current=await historyState(),body=req.body||{};
+    if(req.query.sync==='gold-history-prices'){
+      if(body.revision!==current.data.revision)return res.status(409).json({ok:false,error:'history_changed'});
+      if(body.historical_price_policy!==LAST_KNOWN_POLICY)return res.status(400).json({ok:false});
+      const inputs=validateHistoryPriceInputs(body.price_inputs,[...ASSETS,...Object.keys(HISTORY_ADDITIONAL_GROUPS)]);
+      const merged=new Map((current.data.price_inputs||[]).map(p=>[p.asset+'|'+p.quoted_at,p]));
+      for(const p of inputs)merged.set(p.asset+'|'+p.quoted_at,p);
+      const next={...current,data:{...current.data,historical_price_policy:LAST_KNOWN_POLICY,price_inputs:[...merged.values()],price_inputs_revision:crypto.randomUUID()}};
+      const data=await saveHistory(next,current.data.weeks);
+      return res.status(200).json({ok:true,revision:data.revision,price_inputs:data.price_inputs.length});
+    }
     if(req.query.sync==='gold-history-file'){
       if(body.revision!==current.data.revision)return res.status(409).json({ok:false,error:'history_changed'});
       if(typeof body.content_base64!=='string'||body.content_base64.length>3000000)return res.status(400).json({ok:false});
@@ -2113,7 +2125,7 @@ async function historyWrite(req,res){
       incoming=body.weeks;
     }
     const base=historyCalendarBase(current.data.weeks,incoming,body.calendar);
-    const weeks=mergeGoldWeeks(base,incoming,historyOptions());
+    const weeks=applyHistoryPriceFallbacks(mergeGoldWeeks(base,incoming,historyOptions(current.data)),current.data.price_inputs,historyOptions(current.data));
     if(weeks.length>1000)return res.status(400).json({ok:false});
     let archive=current.data.calendar_archive;
     if(base.length!==current.data.weeks.length){
@@ -2121,7 +2133,7 @@ async function historyWrite(req,res){
       await put(archive,JSON.stringify(current.data),{access:'private',addRandomSuffix:false,allowOverwrite:false,contentType:'application/json'});
     }
     const data=await saveHistory(current,weeks,archive);
-    const pending=weeks.find(w=>w.week_ending===incoming.at(-1).week_ending&&w.mode!=='historical'&&w.quantities['بلک راک']>0&&!w.quotes['بلک راک']);
+    const pending=weeks.find(w=>w.week_ending===incoming.at(-1).week_ending&&w.mode!=='historical'&&w.quantities['بلک راک']>0&&(!w.quotes['بلک راک']||w.quotes['بلک راک'].pricing_basis==='owner_authorized_last_known'));
     if(body.notify===true&&pending?.mode==='live')waitUntil(notifyHistoryPrice(pending));
     return res.status(200).json({ok:true,revision:data.revision,weeks:weeks.filter(w=>w.mode!=='baseline').length,observations:weeks.length,complete_weeks:weeks.filter(w=>w.mode!=='baseline'&&w.status==='complete').length,complete_observations:weeks.filter(w=>w.status==='complete').length});
   }catch(error){return res.status(error instanceof BlobPreconditionFailedError?409:error.message==='invalid_gold_history_record'?400:503).json({ok:false,error:'history_write_failed'});}
@@ -2133,7 +2145,7 @@ async function notifyHistoryPrice(week){
 async function historyPricePrompt(uid,weekEnding){
   if(!isBotAdmin(uid,await loadAccessState({strict:true})))return false;
   const week=(await historyState()).data.weeks.find(w=>w.week_ending===weekEnding);
-  if(!week||!(week.quantities['بلک راک']>0)||week.quotes['بلک راک'])return false;
+  if(!week||!(week.quantities['بلک راک']>0)||week.quotes['بلک راک']&&week.quotes['بلک راک'].pricing_basis!=='owner_authorized_last_known')return false;
   const response=await fetch('https://api.telegram.org/bot'+process.env.TELEGRAM_BOT_TOKEN+'/sendMessage',{
     method:'POST',signal:AbortSignal.timeout(8000),headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:Number(uid),parse_mode:'HTML',
       text:'برای ثبت ارزش هفتگی پرتفوی، قیمت هر واحد صندوق بلک راک (اکوکوچ) در زمان زیر را به تومان پاسخ دهید.\n\nزمان ثبت: '+boldPortfolioTime(week.as_of),
@@ -2150,10 +2162,10 @@ async function acceptHistoryPrice(chatId,uid,weekEnding,text){
   const price=parseUserPrice(text);
   if(!Number.isFinite(price)||price<=0||price>Number.MAX_SAFE_INTEGER){await sendTelegram(chatId,'قیمت معتبر هر واحد را به تومان پاسخ دهید.',{menu:true,audience:'admin'});return;}
   const current=await historyState(),week=current.data.weeks.find(w=>w.week_ending===weekEnding);
-  if(!week||week.quotes['بلک راک']){await sendTelegram(chatId,'قیمت این هفته قبلاً ثبت شده است.',{menu:true,audience:'admin'});return;}
+  if(!week||week.quotes['بلک راک']&&week.quotes['بلک راک'].pricing_basis!=='owner_authorized_last_known'){await sendTelegram(chatId,'قیمت این هفته قبلاً ثبت شده است.',{menu:true,audience:'admin'});return;}
   const input={...week,quotes:{...week.quotes,'بلک راک':{price_rial:price,source:'Admin confirmed for recorded week',quoted_at:week.as_of}}};
-  const replacement=calculateGoldWeek(input,historyOptions());
-  const weeks=mergeGoldWeeks(current.data.weeks.filter(w=>w.week_ending!==weekEnding),[replacement],historyOptions());
+  const replacement=calculateGoldWeek(input,historyOptions(current.data));
+  const weeks=mergeGoldWeeks(current.data.weeks.filter(w=>w.week_ending!==weekEnding),[replacement],historyOptions(current.data));
   await saveHistory(current,weeks);
   const queued=await dispatchHistoryExport();
   await sendTelegram(chatId,replacement.status==='complete'?'قیمت ثبت شد؛ ارزش هفتگی محاسبه شد.'+(queued?' فایل Excel در حال به‌روزرسانی است.':''):
