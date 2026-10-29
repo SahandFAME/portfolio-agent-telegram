@@ -60,3 +60,12 @@ test('monthly text accompanies the chart only for current report readers and Exc
     assert.equal(texts.some(m=>m.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='history:excel')),[1,3].includes(uid));
   }
 });
+
+
+test('archived evidence cannot override a freshly fetched closing price at the same timestamp',()=>{
+  const fresh=calculateGoldWeek(input('2026-10-22',120),opts);
+  const stale={asset:'stock',price_rial:100000000,quoted_at:fresh.quotes.stock.quoted_at,source:'Synthetic IRR/unit'};
+  const row=applyHistoryPriceFallbacks([fresh],[],{...opts,priceEvidence:[stale]})[0];assert.equal(row.gold_grams,120);
+  const owner={...stale,source:'Owner supplied dated historical unit price',price_rial:130000000};
+  assert.equal(applyHistoryPriceFallbacks([fresh],[owner],{...opts,priceEvidence:[stale]})[0].gold_grams,130);
+});
