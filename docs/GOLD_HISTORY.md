@@ -400,3 +400,65 @@ complete weeks can upgrade when actual prices arrive; an incomplete rebuild
 cannot erase a previously computable record. A new private input revision permits
 explicit owner corrections to completed historical prices. Existing immutable
 protection still applies to complete observations outside this controlled path.
+
+## Persian monthly history and text summary (owner request, 2026-10-29)
+
+This supersedes the weekly calendar and weekly presentation above. The initial
+completed grid is 12 Persian month ends inside the confirmed manual-holdings
+window: 1404/08 through 1405/07 (2025-11-21 through 2026-10-22). Do not extend
+the manual baseline to the preceding Mehr close, which predates the owner's
+confirmed interval. The first month has no prior-month comparison. Subsequent
+completed months are appended; a current-month observation uses fresh verified
+current source totals, its real observation timestamp and a provisional label.
+
+Historical quantities come from dated transactions at each actual month end;
+prices use independent daily archives and the saved owner/last-known policy.
+This is not a sampled or averaged weekly chart. The denominator is the 18K-gram
+quote for the same valuation, with original timestamps and estimate labels.
+The $5 historical cutoff, dated FX and known-quantity validation apply consistently
+to closed and provisional monthly observations. Normal live bot reports retain
+their existing cutoff/freshness behavior.
+
+The active calendar is `persian-month-end-v1`. For compatibility, private route,
+function and storage field identifiers such as `weeks`/`week_ending` remain; each
+active record explicitly carries `period_kind: monthly`, a validated `month_key`
+and actual Persian month-end Gregorian key. Initial migration requires the full
+12 reconstructed dates, archives the original weekly state privately, preserves
+all owner inputs, and retains deduplicated dated price evidence. This includes
+later admin quotes that would otherwise disappear when their weekly rows are
+archived. Only evidence at or before each target date can be selected. Existing
+monthly history cannot be rolled back to weekly input batches.
+
+Monthly deltas and percentages compare adjacent Persian months, not fixed 7/30
+days. Missing/incomplete intervening months break comparisons and chart lines.
+A provisional point may compare with the previous closed month, but is explicitly
+labelled provisional in Excel, chart and text. Repeated provisional observations
+can update. A month-end live capture remains provisional until a fresh historical
+reconstruction finalizes its actual closing date; complete finalized records keep
+financial integrity protections and can upgrade estimated prices.
+
+The scheduler checks the Persian calendar at 22:00 Tehran daily. It reads Graph
+and captures only on the last Persian day; on day 1 it reconstructs the now-ended
+month using complete daily prices/transaction history. Other days return an
+explicit skip before Graph access or export. The OneDrive workflow skips these
+non-report schedule checks. Manual bootstrap/backfill/export operations remain
+available. Month-end delays into a different day cannot relabel current quotes.
+EcoCoach requests refer to the recorded monthly observation and can replace a
+last-known estimate; bootstrap/backfill does not broadcast test/activation prompts.
+
+The managed report keeps its filename, document identifier, folder and five-sheet
+structure. The first sheet is now `ارزش ماهانه`, with value in grams of 18K gold,
+month-over-month gram and percentage changes, whole-toman valuation and original
+observation/source-check times. The exporter accepts the old weekly sheet identity
+only to verify and safely replace the existing managed workbook during migration.
+It never edits Trading Journal or creates an unrelated OneDrive file.
+
+The Telegram `/gold_history` menu/help/report are monthly. Each response sends
+the chart and a short Persian text preserving the approved start/latest/net,
+minimum/maximum and direction summary, followed by rows for every month with
+value, signed change in grams and signed percentage change. The first or
+non-adjacent month displays a dash; no invented comparison. Dates/month keys are
+bold in Tehran/Persian calendar, current observations and last-known estimates
+are marked, and the message stays within Telegram limits for the annual report.
+Report readers are rechecked after image rendering and before text. Only current
+admins receive Excel/price controls; guests receive no history data.

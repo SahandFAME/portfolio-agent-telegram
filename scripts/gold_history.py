@@ -39,7 +39,7 @@ DAY_FIRST_ASSETS=frozenset({'BTC','Link','Tether','ADA'})  # ADA: owner's 2026-1
 DUST_TOTAL_ASSETS=frozenset({'ADA','SOL','ONDO','Link'})  # Owner-confirmed small-balance totals.
 MATIC_WAIVED_REMAINDER_SIGNATURE='16c88b27aacb62e7b845677132ff4d3137527101d572c3a3d0437a5c6fd735e4'
 PREWINDOW_TETHER_SIGNATURE='3a187613376cf0faa691753a09296c65d859d7d91ddbd3b3999fa7293aa7f1df'
-HISTORY_CALENDAR='wednesday-v1'
+HISTORY_CALENDAR='persian-month-end-v1'
 LAST_KNOWN_POLICY='last-known-before-valuation-v1'
 MARKET_CLOSURES=json.loads((Path(__file__).resolve().parents[1]/'lib'/'iran-market-closures.json').read_text())['closures']
 LISTED_QUOTE_SOURCES=frozenset({'Shakhesban historical daily close (IRR)','TSETMC official daily market price (IRR)'})
@@ -230,6 +230,17 @@ def week_dates():
     return [end-timedelta(weeks=i) for i in reversed(range(52))]
 
 
+def month_dates(today=None):
+    today=today or datetime.now(TEHRAN).date()
+    cursor=jdatetime.date(1404,8,1);result=[]
+    while True:
+        following=jdatetime.date(cursor.year+1,1,1) if cursor.month==12 else jdatetime.date(cursor.year,cursor.month+1,1)
+        end=following.togregorian()-timedelta(days=1)
+        if end>=today:break
+        result.append(end);cursor=following
+    return result
+
+
 def quantities_at(day,trades,problems,manual):
     result={}
     for asset,events in trades.items():
@@ -402,6 +413,9 @@ def select_history_quote(asset,asof,fresh,existing,allow_last_known=False):
     for row in existing.get('weeks',[]):
         if row.get('mode')!='historical':continue
         add(row.get('gold_quote') if asset=='gold' else row.get('usd_quote') if asset=='usd_cutoff' else row.get('quotes',{}).get(asset))
+    evidence_asset={'gold':'gold_18k_denominator','usd_cutoff':'historical_usd_quote'}.get(asset,asset)
+    for raw in existing.get('price_evidence',[]):
+        if raw.get('asset')==evidence_asset:add(raw)
     add(fresh)
     for raw in existing.get('price_inputs',[]):
         if raw.get('asset')==asset:add(raw,True)
@@ -440,7 +454,8 @@ def historical_weeks(content,modified,checked,config,existing):
     current,trades,problems,extras=reconstruct(content,config)
     manual=existing.get('manual_baseline') or config['manual']
     allow_last_known=existing.get('historical_price_policy')==LAST_KNOWN_POLICY
-    dates=week_dates();series={};source={}
+    monthly=config.get('calendar')==HISTORY_CALENDAR
+    dates=month_dates() if monthly else week_dates();series={};source={}
     previous=[r for r in existing.get('weeks',[]) if r.get('mode')=='historical']
     definitions={'gold':'geram18','دلار':'price_dollar_rl','سکه تمام':'sekee','ربع سکه بانکی':'rob'}
     for asset,slug in definitions.items():
@@ -499,7 +514,7 @@ def historical_weeks(content,modified,checked,config,existing):
         issues=['unmapped_historical_trade_table:'+re.sub(r'[<>&\n]','',name) for name in extras]
         issues.extend(code+':'+asset for asset,codes in week_problems.items() for code in codes)
         issues.extend(code+':'+asset for asset,r in extras.holdings.items() for code in r['issues'])
-        rows.append({'week_ending':day.isoformat(),'as_of':asof.astimezone(timezone.utc).isoformat(),'source_checked_at':checked,
+        rows.append({'week_ending':day.isoformat(),**({'period_kind':'monthly'} if monthly else {}),'as_of':asof.astimezone(timezone.utc).isoformat(),'source_checked_at':checked,
             'workbook_updated_at':modified,'workbook_sha256':digest,'mode':'historical','quantities':quantities,'quotes':quotes,'gold_quote':gold,'issues':issues,
             'minimum_usd':5,'usd_quote':fx,'additional_quantities':additional})
     return rows,{'unmapped_trade_tables':len(extras),'unreconciled_assets':sum(bool(p) for p in problems.values()),
@@ -517,19 +532,22 @@ def safe_text(value):
 
 
 def export_excel(history,groups):
-    book=Workbook();summary=book.active;summary.title='ارزش هفتگی'
+    monthly=history.get('calendar')==HISTORY_CALENDAR or any(r.get('period_kind')=='monthly' for r in history['weeks'])
+    book=Workbook();summary=book.active;summary.title='ارزش ماهانه' if monthly else 'ارزش هفتگی'
     book.properties.identifier='portfolio-agent:18k-gold-history:v1'
-    summary.append(['هفته منتهی به','طلای ۱۸ عیار (گرم)','تغییر هفتگی (گرم)','تغییر هفتگی (درصد)','ارزش (تومان)','قیمت هر گرم (تومان)','وضعیت','تغییر تعداد دارایی‌ها','زمان مشاهده (تهران)','زمان بررسی منبع (تهران)'])
+    summary.append(['ماه' if monthly else 'هفته منتهی به','طلای ۱۸ عیار (گرم)','تغییر ماهانه (گرم)' if monthly else 'تغییر هفتگی (گرم)','تغییر ماهانه (درصد)' if monthly else 'تغییر هفتگی (درصد)','ارزش (تومان)','قیمت هر گرم (تومان)','وضعیت','تغییر تعداد دارایی‌ها','زمان مشاهده (تهران)','زمان بررسی منبع (تهران)'])
     holdings=book.create_sheet('دارایی‌ها');holdings.append(['هفته','دارایی','گروه','تعداد','قیمت واحد (ریال)','ارزش دارایی (تومان)','منبع قیمت','زمان قیمت (تهران)','مبنای قیمت','شناسه تعطیلی بازار'])
     allocations=book.create_sheet('ترکیب دارایی');allocations.append(['هفته','گروه','درصد'])
     exceptions=book.create_sheet('موارد نیازمند بررسی');exceptions.append(['هفته','نوع مسئله','دارایی'])
+    if monthly:
+        for sheet in (holdings,allocations,exceptions):sheet['A1']='ماه'
     for row in history['weeks']:
         label_day=datetime.fromisoformat(row['as_of'].replace('Z','+00:00')).astimezone(TEHRAN).date() if row['mode']=='baseline' else date.fromisoformat(row['week_ending'])
-        week=jdatetime.date.fromgregorian(date=label_day).strftime('%Y/%m/%d').translate(str.maketrans('0123456789','۰۱۲۳۴۵۶۷۸۹'))
+        week=jdatetime.date.fromgregorian(date=label_day).strftime('%Y/%m' if monthly else '%Y/%m/%d').translate(str.maketrans('0123456789','۰۱۲۳۴۵۶۷۸۹'))+(' (موقت)' if monthly and (row.get('provisional') or row['mode']=='baseline') else '')
         gold=row.get('gold_quote')
         summary.append([week,row.get('gold_grams'),row.get('change_gold_grams'),row.get('change_percent'),
             math.floor(row['total_rial']/10+.5) if row.get('total_rial') is not None else None,math.floor(gold['price_rial']/10+.5) if gold else None,
-            ('موقت • کامل' if row['status']=='complete' else 'موقت • ناقص') if row['mode']=='baseline' else ('برآورد با آخرین قیمت موجود' if row.get('valuation_basis')=='estimated_last_known' else 'کامل') if row['status']=='complete' else 'ناقص',row.get('quantity_change_count'),fa_time(row['as_of']),fa_time(row['source_checked_at'])])
+            ('موقت • برآوردی' if row.get('valuation_basis')=='estimated_last_known' else 'موقت • کامل' if row['status']=='complete' else 'موقت • ناقص') if row['mode']=='baseline' or monthly and row.get('provisional') else ('برآورد با آخرین قیمت موجود' if row.get('valuation_basis')=='estimated_last_known' else 'کامل') if row['status']=='complete' else 'ناقص',row.get('quantity_change_count'),fa_time(row['as_of']),fa_time(row['source_checked_at'])])
         for asset,qty in {**row['quantities'],**row.get('additional_quantities',{})}.items():
             p=row.get('quotes',{}).get(asset)
             if qty==0 or isinstance(qty,(int,float)) and p and qty*p['price_rial']<(row.get('minimum_rial') or 500000):continue
@@ -556,9 +574,9 @@ def export_excel(history,groups):
         if not gold:exceptions.append([week,'قیمت تاریخی هر گرم طلای ۱۸ عیار تأیید نشده',''])
     analysis=book.create_sheet('خلاصه تحلیل')
     analysis.append(['شاخص','مقدار'])
-    analysis.append(['پایان هفته','چهارشنبه، به وقت تهران'])
+    analysis.append(['پایان ماه' if monthly else 'پایان هفته','آخرین روز ماه شمسی، به وقت تهران' if monthly else 'چهارشنبه، به وقت تهران'])
     analysis.append(['قیمت در تعطیلی جنگی تأییدشده','آخرین قیمت پایانی روز باز بازار، با حفظ تاریخ واقعی قیمت'])
-    final=[r for r in history['weeks'] if r['mode']!='baseline']
+    final=[r for r in history['weeks'] if r['mode']!='baseline' and not (monthly and r.get('provisional'))]
     valid=[r for r in final if r['status']=='complete']
     analysis.append(['هفته‌های ثبت‌شده',len(final)])
     analysis.append(['هفته‌های دارای ارزش محاسبه‌شده',len(valid)])
@@ -572,7 +590,11 @@ def export_excel(history,groups):
     for row in summary.iter_rows(min_row=2):
         for col in [1,2]:row[col].number_format='0.000000'
         for col in [4,5]:row[col].number_format='#,##0'
-    chart=LineChart();chart.title='ارزش پرتفوی بر حسب طلای ۱۸ عیار';chart.y_axis.title='گرم';chart.x_axis.title='هفته';chart.display_blanks='gap'
+    if monthly:
+        for cells in analysis.iter_rows():
+            for cell in cells:
+                if isinstance(cell.value,str):cell.value=cell.value.replace('هفته','ماه')
+    chart=LineChart();chart.title='ارزش ماهانه پرتفوی بر حسب طلای ۱۸ عیار' if monthly else 'ارزش پرتفوی بر حسب طلای ۱۸ عیار';chart.y_axis.title='گرم';chart.x_axis.title='ماه' if monthly else 'هفته';chart.display_blanks='gap'
     chart.add_data(Reference(summary,min_col=2,min_row=1,max_row=summary.max_row),titles_from_data=True)
     chart.set_categories(Reference(summary,min_col=1,min_row=2,max_row=summary.max_row));chart.width=25;chart.height=13;summary.add_chart(chart,'L2')
     for sheet in book:
@@ -620,6 +642,11 @@ def additional_observation(content,config):
 
 def run(action):
     diagnostics={}
+    if action=='capture':
+        local=datetime.now(TEHRAN).date();solar=jdatetime.date.fromgregorian(date=local)
+        if solar.day==1:action='backfill'
+        elif jdatetime.date.fromgregorian(date=local+timedelta(days=1)).month==solar.month:
+            return {'ok':True,'skipped':True,'reason':'not_persian_month_end'}
     if action!='export':
         token=graph_token();content,modified=download_workbook(token);checked=utcnow()
         config=api('?data=gold-history-config');existing=api('?data=gold-history')

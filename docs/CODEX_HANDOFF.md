@@ -1,5 +1,12 @@
 # Portfolio Agent — Complete Codex Project Handoff
 
+> **2026-10-29 monthly history:** owner replaced weekly assessment with actual
+> Persian month-end valuations, monthly Excel/chart/scheduling and a short bot
+> summary plus month-over-month gram/percentage table. Preserve archived weekly
+> evidence and private owner prices; current-month values remain provisional.
+> See [monthly history](GOLD_HISTORY.md#persian-monthly-history-and-text-summary-owner-request-2026-10-29).
+
+
 > **2026-10-29 temporary history pricing:** owner-supplied dated prices are
 > imported privately with explicit currency/per-unit confirmation. Remaining
 > weekly-history prices may use the latest known quote on or before that date,
