@@ -1,5 +1,12 @@
 # Portfolio Agent — Complete Codex Project Handoff
 
+> **2026-10-29 temporary history pricing:** owner-supplied dated prices are
+> imported privately with explicit currency/per-unit confirmation. Remaining
+> weekly-history prices may use the latest known quote on or before that date,
+> visibly marked as estimates. Normal bot report freshness and quantity checks
+> remain. See [owner history inputs](GOLD_HISTORY.md#owner-price-inputs-and-temporary-last-known-policy-2026-10-29).
+
+
 > **2026-10-28 owner-selected history calendar:** historical weeks end Wednesday,
 > with the annual grid 2025-10-29 through 2026-10-21. The Wednesday 23:30 Tehran
 > capture keeps its actual observation time. Only the reviewed 2026 wartime
