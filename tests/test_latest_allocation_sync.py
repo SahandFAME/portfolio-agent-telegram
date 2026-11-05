@@ -16,8 +16,8 @@ class SynchronizationTests(unittest.TestCase):
         self.stamp = '2026-01-02T00:00:00Z'
         self.snapshot = {'assets':self.assets,'updated_at':self.stamp,'workbook_updated_at':self.stamp}
 
-    def execute(self, *, readback=None, source='2026-01-02T00:00:00Z', previous=None):
-        with patch.dict(os.environ, {'PORTFOLIO_ONDEMAND_ENABLED':'true','PORTFOLIO_SYNC_SECRET_AGENT':'fixture'}, clear=True), \
+    def execute(self, *, readback=None, source='2026-01-02T00:00:00Z', previous=None, report_type='standard'):
+        with patch.dict(os.environ, {'PORTFOLIO_ONDEMAND_ENABLED':'true','PORTFOLIO_SYNC_SECRET_AGENT':'fixture','PORTFOLIO_REPORT_TYPE':report_type}, clear=True), \
              patch.object(sync,'read_snapshot',side_effect=[previous or self.snapshot,readback or self.snapshot]), \
              patch.object(sync,'graph_token',return_value='fixture'), \
              patch.object(sync,'download_workbook',return_value=(b'fixture',source)), \
@@ -31,6 +31,33 @@ class SynchronizationTests(unittest.TestCase):
         self.assertTrue(result['readback_verified'])
         self.assertEqual(write.call_args.kwargs['retries'],0)
         self.assertEqual(json.loads(write.call_args.kwargs['body'])['assets'],self.assets)
+
+    def test_history_refresh_uses_same_verified_workbook_and_exports_before_success(self):
+        import gold_history
+        with patch.object(gold_history, 'api', side_effect=[{'groups':{}}, {'ok':True,'revision':'fresh'}, {'revision':'fresh'}]) as api, \
+             patch.object(gold_history, 'additional_observation', return_value=({'XAUT':0,'اهرم':0},{})) as extra, \
+             patch.object(gold_history, 'publish_export', return_value={'excel_stored':True}) as export:
+            result, _ = self.execute(report_type='history')
+            self.assertEqual(result['history_revision'],'fresh')
+            extra.assert_called_once_with(b'fixture',{'groups':{}})
+            body=api.call_args_list[1].args[1]
+            self.assertEqual(body['assets'],self.assets)
+            self.assertEqual(body['source_checked_at'],self.stamp)
+            self.assertTrue(body['bootstrap']);self.assertFalse(body['notify'])
+            self.assertEqual(len(body['workbook_sha256']),64)
+            export.assert_called_once()
+
+    def test_history_failure_or_changed_revision_cannot_claim_success(self):
+        import gold_history
+        for observation, revision, export_error, code in [
+            ({'ok':False},'fresh',None,'history_observation_not_stored'),
+            ({'ok':True,'revision':'fresh'},'changed',None,'history_refresh_changed'),
+            ({'ok':True,'revision':'fresh'},'fresh',sync.SyncError('export_failed'),'export_failed')]:
+            with self.subTest(code=code), \
+                 patch.object(gold_history,'api',side_effect=[{},observation,{'revision':revision}]), \
+                 patch.object(gold_history,'additional_observation',return_value=({},{})), \
+                 patch.object(gold_history,'publish_export',side_effect=export_error):
+                with self.assertRaisesRegex(sync.SyncError,code):self.execute(report_type='history')
 
     def test_mismatched_readback_is_not_success(self):
         with self.assertRaisesRegex(sync.SyncError,'production_readback_mismatch'):

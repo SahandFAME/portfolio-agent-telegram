@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {app} from './helpers/app-fixture.mjs';
+import {app,completeFreshReport} from './helpers/app-fixture.mjs';
 
 const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
 
@@ -10,7 +10,7 @@ const crypto=['BTC','ETH','Tether','Link','ADA','SOL','ONDO'];
 const money=value=>Math.round(Number(value)).toLocaleString('fa-IR',{maximumFractionDigits:0}).replace(/٬/g,'،');
 const number=value=>Number(value).toLocaleString('fa-IR',{maximumFractionDigits:8});
 const messages=a=>a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body));
-const request=(a,text,id=1)=>a.request('POST',{}, {message:{chat:{id,type:'private'},from:{id},text}},headers);
+const request=async(a,text,id=1)=>{await a.request('POST',{}, {message:{chat:{id,type:'private'},from:{id},text}},headers);await completeFreshReport(a,{id});};
 const q=a=>({...Object.fromEntries(Object.keys(a.assets).map(asset=>[asset,1])),...a.ns.MANUAL,BTC:.00519153,ETH:.40602,Tether:2617.574383,'طلا':386,'شمش نقره 999':256});
 
 for(const [command,names,title] of [['/crypto',crypto,'رمزارز'],['/gold_and_other_precious_metals',gold,'طلا و فلزات گرانبها'],['/cash_dollar',['دلار'],'دلار نقدی']]){
@@ -53,7 +53,7 @@ for(const [command,names,title] of [['/crypto',crypto,'رمزارز'],['/gold_an
     }
     const footer=text.indexOf('<b>یادداشت دارایی‌ها');
     if(footer>=0)assert.ok(footer>text.indexOf(rows.at(-1)[0]));
-    assert.equal(JSON.stringify(a.store.get('portfolio/latest.json')),before);assert.equal(a.dispatches.length,0);
+    assert.deepEqual(a.store.get('portfolio/latest.json').assets,snapshot.assets);assert.equal(a.dispatches.length,1);
   });
 }
 

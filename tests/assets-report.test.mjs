@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {app} from './helpers/app-fixture.mjs';
+import {app,completeFreshReport} from './helpers/app-fixture.mjs';
 
 const headers={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 async function report(a,text='/assets',id=1){
   await a.request('POST',{}, {message:{chat:{id,type:'private'},from:{id},text}},headers);
+  await completeFreshReport(a,{id});
   return a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body)).at(-1);
 }
 const names=text=>[...text.matchAll(/^\d+\. (.*?): /gm)].map(x=>x[1].replace(/\*$/,''));
@@ -30,30 +31,30 @@ test('assets report groups all 29 holdings exactly once using allocation categor
   assert.deepEqual(names(group('رمزارزها')),['BTC','ETH','Link','ADA','SOL','ONDO']);
   assert.deepEqual(names(group('تتر')),['Tether']);
   assert.deepEqual(names(group('دلار')),['دلار']);
-  assert.ok(text.includes('Snapshot: '+a.ns.boldPortfolioTime(a.payload.updated_at)));
+  assert.ok(text.includes('Snapshot: '+a.ns.boldPortfolioTime(a.store.get('portfolio/latest.json').updated_at)));
   for(const [asset,quantity] of Object.entries({...a.assets,...a.ns.MANUAL})){
     assert.ok(text.includes(a.ns.assetLabel(asset,{includePrivateNotes:true})+': '+Number(quantity).toLocaleString('en-US',{maximumFractionDigits:8})),asset);
   }
-  assert.equal(JSON.stringify(a.store.get('portfolio/latest.json')),before);
-  assert.ok(a.marketCalls.length>0);assert.equal(a.dispatches.length,0);
+  assert.deepEqual(a.store.get('portfolio/latest.json').assets,a.assets);
+  assert.ok(a.marketCalls.length>0);assert.equal(a.dispatches.length,1);
   assert.ok(reply_markup.keyboard);
 });
 
-test('missing snapshot keeps categories and manual quantities without turning missing holdings into zeros',async()=>{
-  const a=await app();const {text}=await report(a);
-  assert.equal(names(text).length,29);
-  assert.equal((text.match(/همگام‌سازی نشده/g)||[]).length,23);
-  assert.ok(text.includes('سکه تمام: 3'));assert.ok(text.includes('آبشده (طلب)*: 1.37'));
-  assert.equal(text.includes('Snapshot:'),false);
+test('missing source refresh never displays a cached or manual-only asset report',async()=>{
+  const a=await app();
+  await a.request('POST',{}, {message:{chat:{id:1,type:'private'},from:{id:1},text:'/assets'}},headers);
+  await completeFreshReport(a,{ok:false});
+  const text=JSON.parse(a.sends.filter(x=>x.url.endsWith('/sendMessage')).at(-1).options.body).text;
+  assert.match(text,/دریافت تازه ناموفق/);assert.equal(names(text).length,0);assert.equal(a.marketCalls.length,0);
 });
 
 test('assets button gives the same report and preserves precise cached quantities and dated snapshot',async()=>{
-  const a=await app();a.payload.assets.BTC=0.01234567;a.payload.assets.ETH=0.123456;
+  const a=await app({cryptoPriceUsd:200});a.payload.assets.BTC=0.01234567;a.payload.assets.ETH=0.123456;
   a.payload.updated_at='2026-01-01T00:00:00Z';a.store.set('portfolio/latest.json',a.payload);
   const slash=await report(a);const button=await report(a,'دارایی‌ها');
-  assert.equal(button.text,slash.text);
+  assert.equal(button.text.replace(/Snapshot:.*/,''),slash.text.replace(/Snapshot:.*/,''));
   assert.ok(button.text.includes('BTC: 0.01234567'));assert.ok(button.text.includes('ETH: 0.123456'));
-  assert.ok(button.text.includes('Snapshot: <b>۱۴۰۴/۱۰/۱۱ • ۰۳:۳۰:۰۰ (تهران)</b>'));
+  assert.ok(button.text.includes('Snapshot: '+a.ns.boldPortfolioTime(a.store.get('portfolio/latest.json').updated_at)));assert.doesNotMatch(button.text,/۱۴۰۴\/۱۰\/۱۱/);
   assert.equal(button.text.includes('به‌روز'),false);
 });
 

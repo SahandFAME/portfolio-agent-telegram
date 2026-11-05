@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {calculateGoldWeek,mergeGoldWeeks,initialMonthEnds,solarMonthKey,isSolarMonthEnd,solarMonthEnd,goldHistorySummary,goldHistorySvg,collectHistoryPriceEvidence,applyHistoryPriceFallbacks,LAST_KNOWN_POLICY} from '../lib/gold-history.js';
-import {app} from './helpers/app-fixture.mjs';
+import {app,completeFreshReport} from './helpers/app-fixture.mjs';
 const now=Date.parse('2026-11-23T12:00:00Z');
 const opts={assets:['stock'],groups:{stock:'stock'},now,historicalPricePolicy:LAST_KNOWN_POLICY,priceInputsRevision:'test'};
 const input=(end,value=100,mode='historical',observed=end)=>({period_kind:'monthly',week_ending:end,mode,as_of:observed+'T20:00:00Z',source_checked_at:'2026-11-23T10:00:00Z',workbook_updated_at:'2026-10-20T00:00:00Z',workbook_sha256:'a'.repeat(64),quantities:{stock:10},quotes:{stock:{price_rial:value*1000000,source:'Synthetic IRR/unit',quoted_at:observed+'T20:00:00Z'}},gold_quote:{price_rial:10000000,source:'Synthetic 18K gram',quoted_at:observed+'T20:00:00Z'},issues:[]});
@@ -55,6 +55,7 @@ test('monthly text accompanies the chart only for current report readers and Exc
     const rows=mergeGoldWeeks([],[input('2026-09-22',100),input('2026-10-22',110)],opts);
     a.store.set('portfolio/gold-history/latest.json',{version:1,calendar:'persian-month-end-v1',revision:'monthly-fixture',weeks:rows});
     await a.request('POST',{}, {message:{chat:{id:uid,type:'private'},from:{id:uid},text:'/gold_history'}},{'x-telegram-bot-api-secret-token':'fixture-webhook'});
+    await completeFreshReport(a,{id:uid});
     const texts=a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body));
     assert.equal(texts.some(m=>m.text.includes('خلاصه روند ماهانه')),[1,2,3].includes(uid));
     assert.equal(texts.some(m=>m.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='history:excel')),[1,3].includes(uid));

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {app,startLatest} from './helpers/app-fixture.mjs';
+import {app,startLatest,completeFreshReport} from './helpers/app-fixture.mjs';
 
 const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
 
@@ -55,7 +55,7 @@ test('advisor has report buttons and report commands only; all admin actions, st
   assert.equal(labels.includes('پنل مدیریت'),false);assert.equal(labels.includes('وضعیت'),false);
   assert.doesNotMatch(messages(a).at(-1).text,/\/status/);
   for(const command of ['/assets','/crypto','/gold_and_other_precious_metals','/cash_dollar']){
-    await request(a,command);assert.doesNotMatch(messages(a).at(-1).text,/فقط نمودار درصد/);
+    await request(a,command);await completeFreshReport(a,{id:2});assert.doesNotMatch(messages(a).at(-1).text,/فقط نمودار درصد/);
     assert.match(messages(a).at(-1).text,command==='/assets'?/دارایی‌های پرتفوی/:/گزارش تفصیلی/);
   }
   const before=JSON.stringify(a.store.get(KEY)),markets=a.marketCalls.length;
@@ -63,7 +63,7 @@ test('advisor has report buttons and report commands only; all admin actions, st
     await request(a,command);assert.doesNotMatch(messages(a).at(-1).text,/ذخیره‌سازی دسترسی:|کاربران مجاز:|آخرین Snapshot/);
   }
   for(const callback of ['admin:status','admin:users:0','admin:pending:0','admin:storage_check','admin:approve_advisor:5','admin:advisor:4','admin:grant:2'])await click(a,callback,2);
-  assert.equal(JSON.stringify(a.store.get(KEY)),before);assert.equal(a.marketCalls.length,markets);assert.equal(a.dispatches.length,0);
+  assert.equal(JSON.stringify(a.store.get(KEY)),before);assert.equal(a.marketCalls.length,markets);assert.equal(a.dispatches.length,4);
 });
 
 test('advisors receive all fresh report formats with normal manual EcoCoach pricing, never the guest constant',async()=>{

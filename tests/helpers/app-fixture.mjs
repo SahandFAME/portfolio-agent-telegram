@@ -111,3 +111,27 @@ export async function startLatest(a,{command='/latest_allocation',id=1,format='i
     .find(x=>x.callback_data?.startsWith('allocation:pick:')&&x.callback_data.endsWith(':'+format));
   if(button)await a.request('POST',{}, {callback_query:{id:'fixture-format-choice',data:button.callback_data,from:{id},message:{chat:{id,type:'private'}}}},headers);
 }
+
+// Emulate the independently verified worker only in report presentation tests.
+// Freshness/dispatch tests deliberately invoke the handler without this helper.
+export async function completeFreshReport(a,{id=1,ok=true,assets=null,keepWaiting=false}={}){
+  const active=a.store.get('portfolio/latest-allocation/active/'+id+'.json');
+  const record=a.store.get('portfolio/latest-allocation/requests/'+active?.request_id+'.json');
+  if(!record||record.status!=='queued')return;
+  if(!keepWaiting)for(let i=a.sends.length-1;i>=0;i--){
+    const send=a.sends[i];
+    if(send.url.endsWith('/sendMessage')&&/^(در حال دریافت تازه‌ترین|درخواست دریافت تازه از OneDrive)/.test(JSON.parse(send.options.body).text))a.sends.splice(i,1);
+  }
+  const snapshot={...(a.store.get('portfolio/latest.json')||a.payload),updated_at:record.requested_at};
+  if(assets)snapshot.assets=assets;
+  a.store.set('portfolio/latest.json',snapshot);
+  const history=a.store.get('portfolio/gold-history/latest.json');
+  if(record.report_format==='history'&&history?.weeks.length){
+    history.weeks.at(-1).source_checked_at=snapshot.updated_at;
+    history.weeks.at(-1).workbook_updated_at=snapshot.workbook_updated_at;
+  }
+  return a.request('POST',{complete:'latest-allocation'},{request_id:record.request_id,ok,
+    snapshot_updated_at:snapshot.updated_at,workbook_updated_at:snapshot.workbook_updated_at,
+    ...(record.report_format==='history'?{history_revision:history?.revision}:{})},
+    {'x-portfolio-sync-secret':'fixture-secondary'});
+}

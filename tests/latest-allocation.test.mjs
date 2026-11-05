@@ -183,5 +183,5 @@ test('an older EcoCoach prompt cannot render cached holdings during the fresh sy
   await startLatest(a);
   await a.request('POST',{},message('850000'),header);
   assert.equal(a.marketCalls.length,0);assert.equal(a.dispatches.length,1);
-  assert.match(JSON.parse(a.sends.at(-1).options.body).text,/منتظر درخواست قیمت/);
+  assert.match(JSON.parse(a.sends.at(-1).options.body).text,/منتظر پاسخ/);
 });

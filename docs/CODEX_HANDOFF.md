@@ -1,5 +1,12 @@
 # Portfolio Agent — Complete Codex Project Handoff
 
+> **2026-11-05 fresh quantities for every report:** asset lists, category reports
+> and legacy EcoCoach price replies now use the existing on-demand read-only
+> OneDrive worker before current-price retrieval. History requests also refresh
+> the current provisional month and verified Excel, preserving completed months.
+> Refresh failure never substitutes cached output. See
+> [universal report refresh](LATEST_ALLOCATION.md#every-assetreport-request-refreshes-quantities-2026-11-05).
+
 > **2026-10-29 monthly history:** owner replaced weekly assessment with actual
 > Persian month-end valuations, monthly Excel/chart/scheduling and a short bot
 > summary plus month-over-month gram/percentage table. Preserve archived weekly

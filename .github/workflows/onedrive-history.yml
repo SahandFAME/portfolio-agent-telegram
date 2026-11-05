@@ -7,7 +7,7 @@ on:
         required: false
         type: string
   workflow_run:
-    workflows: [Monthly 18K gold portfolio history, Weekly 18K gold portfolio history, Authorize Microsoft access]
+    workflows: [Monthly 18K gold portfolio history, Weekly 18K gold portfolio history, Authorize Microsoft access, Latest Allocation OneDrive synchronization]
     types: [completed]
 permissions:
   contents: read
@@ -31,6 +31,9 @@ jobs:
           node <<'JS'
           const fs=require('fs'),event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
           let publish=true;
+          if(event.workflow_run?.name==='Latest Allocation OneDrive synchronization'){
+            publish=event.workflow_run.display_title?.startsWith('History report ')===true;
+          }
           if(event.workflow_run?.event==='schedule'){
             const stamp=Date.parse(event.workflow_run.run_started_at);
             const f=new Intl.DateTimeFormat('en-US-u-ca-persian-nu-latn',{timeZone:'Asia/Tehran',month:'numeric',day:'numeric'});

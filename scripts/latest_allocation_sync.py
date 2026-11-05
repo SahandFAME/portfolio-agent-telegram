@@ -1,5 +1,6 @@
 """Authorized on-demand sync; no scheduling, financial logs or workbook writes."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import uuid
@@ -16,6 +17,9 @@ def synchronize():
     if os.environ.get('PORTFOLIO_ONDEMAND_ENABLED') != 'true':
         raise SyncError('on_demand_sync_disabled')
     secret = required('PORTFOLIO_SYNC_SECRET_AGENT')
+    report_type = os.environ.get('PORTFOLIO_REPORT_TYPE', 'standard')
+    if report_type not in ('standard', 'history'):
+        raise SyncError('invalid_report_type')
     previous = read_snapshot(ENDPOINT, secret)  # Unreadable prior state blocks writes.
     content, modified = download_workbook(graph_token())
     assets = extract_quantities(content)
@@ -35,8 +39,26 @@ def synchronize():
     for key in ('assets', 'updated_at', 'workbook_updated_at'):
         if readback.get(key) != payload[key]:
             raise SyncError('production_readback_mismatch')
-    return {'ok': True, 'verified_assets': 23, 'readback_verified': True,
-            'snapshot_updated_at': payload['updated_at'], 'workbook_updated_at': modified}
+    result = {'ok': True, 'verified_assets': 23, 'readback_verified': True,
+              'snapshot_updated_at': payload['updated_at'], 'workbook_updated_at': modified}
+    if report_type == 'history':
+        from gold_history import api, additional_observation, publish_export
+        config = api('?data=gold-history-config')
+        additional, quotes = additional_observation(content, config)
+        observation = api('?sync=gold-observation', {
+            'assets': assets, 'workbook_updated_at': modified,
+            'source_checked_at': payload['updated_at'],
+            'workbook_sha256': hashlib.sha256(content).hexdigest(),
+            'additional_quantities': additional, 'additional_quotes': quotes,
+            'bootstrap': True, 'notify': False})
+        if observation.get('ok') is not True:
+            raise SyncError('history_observation_not_stored')
+        publish_export()
+        history = api('?data=gold-history')
+        if history.get('revision') != observation.get('revision'):
+            raise SyncError('history_refresh_changed')
+        result['history_revision'] = history['revision']
+    return result
 
 
 def notify(request_id, result):
