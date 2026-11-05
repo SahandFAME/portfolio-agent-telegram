@@ -215,3 +215,10 @@ Persian PNG rendering, and 3D chart angles/labels/zero groups. Run the full Node
 and Python suites documented in [BOT_MENU.md](BOT_MENU.md) and the repository CI.
 Automated renderer/handler checks and production deployment/API readback remain
 distinct from a user's actual Telegram interaction.
+
+Current-month history refreshes resolve permitted dated price fallbacks before
+merging with a complete provisional record. This prevents the completeness guard
+from keeping old quantities merely because EcoCoach has no current website
+quote. The worker additionally requires the stored observation to match its
+fresh source-check timestamp and all 23 verified balances before exporting or
+claiming success. Completed historical months remain protected.

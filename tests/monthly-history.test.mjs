@@ -70,3 +70,28 @@ test('archived evidence cannot override a freshly fetched closing price at the s
   const owner={...stale,source:'Owner supplied dated historical unit price',price_rial:130000000};
   assert.equal(applyHistoryPriceFallbacks([fresh],[owner],{...opts,priceEvidence:[stale]})[0].gold_grams,130);
 });
+
+test('fresh provisional quantities replace a complete estimate after applying authorized price evidence',async()=>{
+  let clock=Date.parse('2026-11-05T12:00:00Z');
+  const a=await app({now:()=>clock}),key='portfolio/gold-history/latest.json';
+  a.store.set(key,{version:1,revision:'initial',weeks:[],historical_price_policy:LAST_KNOWN_POLICY,
+    price_inputs:[{asset:'بلک راک',price_rial:10000000,source:'Owner supplied dated historical unit price',quoted_at:'2026-10-28T10:00:00Z'}]});
+  const body=()=>({assets:{...a.assets,'بلک راک':15,BTC:1},source_checked_at:new Date(clock).toISOString(),workbook_updated_at:'2026-11-05T10:00:00Z',workbook_sha256:'a'.repeat(64),additional_quantities:{XAUT:0,'اهرم':0},bootstrap:true,notify:false});
+  const auth={'x-portfolio-sync-secret':'fixture-secondary'};
+  assert.equal((await a.request('POST',{sync:'gold-observation'},body(),auth)).code,200);
+  const old=structuredClone(a.store.get(key).weeks[0]);assert.equal(old.status,'complete');
+  clock+=3600000;const fresh=body();fresh.assets.BTC=12;
+  assert.equal((await a.request('POST',{sync:'gold-observation'},fresh,auth)).code,200);
+  const updated=a.store.get(key).weeks[0];
+  assert.equal(updated.status,'complete');assert.equal(updated.source_checked_at,fresh.source_checked_at);
+  assert.equal(updated.quantities.BTC,12);assert.ok(updated.gold_grams>old.gold_grams);
+  assert.equal(updated.quotes['بلک راک'].quoted_at,'2026-10-28T10:00:00Z');
+  assert.equal(updated.valuation_basis,'estimated_last_known');assert.equal(a.sends.length,0);
+});
+
+test('later provisional captures update live month-end observations while completed historical months remain protected',()=>{
+  const first=input('2026-10-22',100,'live'),next=input('2026-10-22',120,'baseline');next.as_of='2026-10-22T20:01:00Z';
+  assert.equal(mergeGoldWeeks([calculateGoldWeek(first,opts)],[next],opts)[0].gold_grams,120);
+  const closed=calculateGoldWeek(input('2026-10-22',130),opts);
+  assert.equal(mergeGoldWeeks([closed],[next],opts)[0].gold_grams,130);
+});

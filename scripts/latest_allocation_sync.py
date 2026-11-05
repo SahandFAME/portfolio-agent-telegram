@@ -53,10 +53,15 @@ def synchronize():
             'bootstrap': True, 'notify': False})
         if observation.get('ok') is not True:
             raise SyncError('history_observation_not_stored')
-        publish_export()
         history = api('?data=gold-history')
-        if history.get('revision') != observation.get('revision'):
+        if not history.get('revision') or history.get('revision') != observation.get('revision'):
             raise SyncError('history_refresh_changed')
+        if not any(row.get('source_checked_at') == payload['updated_at'] and
+                   row.get('workbook_updated_at') == modified and
+                   all(row.get('quantities', {}).get(a) == q for a, q in assets.items())
+                   for row in history.get('weeks', [])):
+            raise SyncError('history_observation_not_refreshed')
+        publish_export()
         result['history_revision'] = history['revision']
     return result
 
