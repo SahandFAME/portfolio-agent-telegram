@@ -2134,6 +2134,11 @@ async function historyWrite(req,res){
     if(current.data.weeks.some(w=>w.period_kind==='monthly')&&incoming.some(w=>w.period_kind!=='monthly'))return res.status(400).json({ok:false,error:'monthly_calendar_required'});
     const base=historyCalendarBase(current.data.weeks,incoming,body.calendar);
     const basis=base.length!==current.data.weeks.length?{...current.data,price_evidence:collectHistoryPriceEvidence(current.data)}:current.data;
+    // Price the new observation before protecting an existing complete record.
+    // Only dated price evidence is carried; freshly read quantities stay intact.
+    if(req.query.sync==='gold-observation')incoming=applyHistoryPriceFallbacks(
+      incoming.map(w=>calculateGoldWeek(w,historyOptions(basis))),basis.price_inputs,
+      {...historyOptions(basis),priceEvidence:collectHistoryPriceEvidence(basis)});
     const weeks=applyHistoryPriceFallbacks(mergeGoldWeeks(base,incoming,historyOptions(basis)),basis.price_inputs,historyOptions(basis));
     if(weeks.length>1000)return res.status(400).json({ok:false});
     let archive=current.data.calendar_archive;

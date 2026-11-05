@@ -34,7 +34,7 @@ class SynchronizationTests(unittest.TestCase):
 
     def test_history_refresh_uses_same_verified_workbook_and_exports_before_success(self):
         import gold_history
-        with patch.object(gold_history, 'api', side_effect=[{'groups':{}}, {'ok':True,'revision':'fresh'}, {'revision':'fresh'}]) as api, \
+        with patch.object(gold_history, 'api', side_effect=[{'groups':{}}, {'ok':True,'revision':'fresh'}, {'revision':'fresh','weeks':[{'source_checked_at':self.stamp,'workbook_updated_at':self.stamp,'quantities':self.assets}]}]) as api, \
              patch.object(gold_history, 'additional_observation', return_value=({'XAUT':0,'اهرم':0},{})) as extra, \
              patch.object(gold_history, 'publish_export', return_value={'excel_stored':True}) as export:
             result, _ = self.execute(report_type='history')
@@ -52,9 +52,10 @@ class SynchronizationTests(unittest.TestCase):
         for observation, revision, export_error, code in [
             ({'ok':False},'fresh',None,'history_observation_not_stored'),
             ({'ok':True,'revision':'fresh'},'changed',None,'history_refresh_changed'),
-            ({'ok':True,'revision':'fresh'},'fresh',sync.SyncError('export_failed'),'export_failed')]:
+            ({'ok':True,'revision':'fresh'},'fresh',sync.SyncError('export_failed'),'export_failed'),
+            ({'ok':True,'revision':'fresh'},'fresh',None,'history_observation_not_refreshed')]:
             with self.subTest(code=code), \
-                 patch.object(gold_history,'api',side_effect=[{},observation,{'revision':revision}]), \
+                 patch.object(gold_history,'api',side_effect=[{},observation,{'revision':revision,'weeks':[] if code=='history_observation_not_refreshed' else [{'source_checked_at':self.stamp,'workbook_updated_at':self.stamp,'quantities':self.assets}]}]), \
                  patch.object(gold_history,'additional_observation',return_value=({},{})), \
                  patch.object(gold_history,'publish_export',side_effect=export_error):
                 with self.assertRaisesRegex(sync.SyncError,code):self.execute(report_type='history')
