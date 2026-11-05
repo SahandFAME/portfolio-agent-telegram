@@ -105,7 +105,7 @@ def extract_quantities(content):
         cached.close()
 
 
-def http(url, *, method='GET', headers=None, body=None, retries=3, redirect=True):
+def http(url, *, method='GET', headers=None, body=None, retries=3, redirect=True, timeout=30):
     """Bounded retries for safe/idempotent reads and OAuth requests only.
 
     Production POST callers set retries=0 because a timed-out write is ambiguous.
@@ -119,7 +119,7 @@ def http(url, *, method='GET', headers=None, body=None, retries=3, redirect=True
     for attempt in range(retries + 1):
         try:
             req = request.Request(url, method=method, headers=headers or {}, data=body)
-            with opener.open(req, timeout=30) as response:
+            with opener.open(req, timeout=timeout) as response:
                 content = response.read(MAX_BYTES + 1)
                 if len(content) > MAX_BYTES:
                     raise SyncError('response_too_large')

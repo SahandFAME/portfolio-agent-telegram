@@ -253,7 +253,8 @@ def quantities_at(day,trades,problems,manual):
 def api(query,body=None):
     return json_request(ENDPOINT+query,method='POST' if body is not None else 'GET',
         headers={'x-portfolio-sync-secret':required('PORTFOLIO_SYNC_SECRET_AGENT'),'Content-Type':'application/json'},
-        body=json.dumps(body,allow_nan=False).encode() if body is not None else None,retries=0,redirect=False)
+        body=json.dumps(body,allow_nan=False).encode() if body is not None else None,retries=0,redirect=False,
+        **({'timeout':90} if query=='?sync=gold-observation' else {}))
 
 
 def norm(text):return re.sub(r'[\s\u200c\u200d]','',text.translate(str.maketrans('كيى','کیی')))
