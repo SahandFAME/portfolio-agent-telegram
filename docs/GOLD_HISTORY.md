@@ -1,5 +1,12 @@
 # Weekly portfolio wealth in 18K gold
 
+> **2026-11-05:** every `/gold_history` request now refreshes the current month's
+> provisional quantities from the read-only source and fetches prices before
+> sending its chart/text. The separate Excel is generated and hash-verified by
+> the worker, and published to OneDrive by the existing exporter. Completed
+> historical months and estimate labels remain intact. See
+> [report refresh](LATEST_ALLOCATION.md#every-assetreport-request-refreshes-quantities-2026-11-05).
+
 The portfolio's **reported total rial value / rial price of one gram of 18K gold**
 is a wealth measure in grams, not a deposit-adjusted investment return. The
 owner requested the preceding year and ongoing weekly observations on 2026-10-25.

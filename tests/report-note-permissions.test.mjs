@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {app,startLatest} from './helpers/app-fixture.mjs';
+import {app,startLatest,completeFreshReport} from './helpers/app-fixture.mjs';
 
 const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
 
@@ -35,7 +35,7 @@ function noHistorical(a,text){
 test('owners and delegated admins retain related comments; advisors see only the BlackRock note',async()=>{
   for(const uid of [1,3,2]){
     for(const command of ['/assets','/gold','/cash_dollar']){
-      const a=await fixture();await request(a,command,uid);
+      const a=await fixture();await request(a,command,uid);await completeFreshReport(a,{id:uid});
       const text=messages(a).map(x=>x.text).join('\n');
       assert.ok(text.includes('دارایی'));
       if(uid===2){
@@ -98,7 +98,7 @@ test('admin demotion to advisor during price retrieval blocks private category, 
     const a=await fixture({beforeMarketFetch:(_url,store)=>{
       const access=store.get(KEY);access.delegatedAdmins=[];access.financialAdvisors=['2','3'];
     }});
-    if(format.startsWith('/'))await request(a,format,3);
+    if(format.startsWith('/')){await request(a,format,3);await completeFreshReport(a,{id:3});}
     else{
       if(format==='chart')await request(a,'/allocation_chart',3);else await startLatest(a,{id:3,format});
       a.sends.length=0;await complete(a);
@@ -138,7 +138,7 @@ test('admin demotion between text chunks stops the remaining private report and 
 test('pending legacy EcoCoach image replies also hide historical notes from advisors',async()=>{
   const a=await fixture();
   a.store.set('portfolio/pending-blackrock/2.json',{type:'blackrock_price',updatedAt:new Date().toISOString()});
-  await request(a,'1000000',2);
+  await request(a,'1000000',2);await completeFreshReport(a,{id:2});
   assert.ok(a.sends.some(x=>x.url.endsWith('/sendPhoto')));
   noHistorical(a,a.renderedSvgs.at(-1));assert.match(a.renderedSvgs.at(-1),/بلک راک\*: صندوق خصوصی اکوکوچ/);
 });

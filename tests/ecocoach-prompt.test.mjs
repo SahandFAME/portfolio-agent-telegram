@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {app as freshApp,completeFreshReport} from './helpers/app-fixture.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
@@ -101,13 +102,14 @@ test('missing quantities still prevent valuation rather than prompting for a pri
   assert.equal(report.png,undefined);
 });
 
-test('valid EcoCoach input still completes the existing image flow', async()=>{
-  const a=await app();a.payload.assets['بلک راک']=15;
+test('legacy EcoCoach input refreshes quantities before completing its image flow', async()=>{
+  const a=await freshApp();a.payload.assets['بلک راک']=15;
   a.store.set('portfolio/latest.json',a.payload);
   const message=text=>({message:{chat:{id:1,type:'private'},from:{id:1},text}});
   const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
   a.store.set('portfolio/pending-blackrock/1.json',{type:'blackrock_price'});
   await a.request('POST',{},message('۸۵۰٬۰۰۰ تومان'),header);
+  assert.equal(a.marketCalls.length,0);assert.equal(a.dispatches.length,1);await completeFreshReport(a);
   assert.ok(a.sends.some(x=>x.url.endsWith('/sendPhoto')));
   assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'none');
 });

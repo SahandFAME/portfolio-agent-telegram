@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {app} from './helpers/app-fixture.mjs';
+import {app,completeFreshReport} from './helpers/app-fixture.mjs';
 
 const ACCESS_POLICY_STARTED_AT=new Date().toISOString();
 
@@ -8,6 +8,7 @@ const headers={'x-telegram-bot-api-secret-token':'fixture-webhook'};
 const messages=a=>a.sends.filter(x=>x.url.endsWith('/sendMessage')).map(x=>JSON.parse(x.options.body));
 async function command(a,text){
   await a.request('POST',{}, {message:{chat:{id:1,type:'private'},from:{id:1},text}},headers);
+  await completeFreshReport(a);
   return messages(a).at(-1);
 }
 async function click(a,data){
@@ -46,7 +47,7 @@ test('status, assets and stale warnings display bold Persian times without chang
   assert.doesNotMatch(status.text+assets.text,/2026-10|T03:00/);
   const stale=a.ns.quantitySnapshotStatus({...snapshot,updated_at:'2026-01-01T00:00:00Z'});
   assert.equal(stale.stale,true);assert.ok(stale.message.includes('<b>۱۴۰۴/۱۰/۱۱ • ۰۳:۳۰:۰۰ (تهران)</b>'));
-  assert.equal(JSON.stringify(a.store.get('portfolio/latest.json')),before);
+  assert.deepEqual(a.store.get('portfolio/latest.json').assets,snapshot.assets);
 });
 
 test('gold, crypto and dollar price retrieval timestamps are bold Persian Tehran times',async()=>{

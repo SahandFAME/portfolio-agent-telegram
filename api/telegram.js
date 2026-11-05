@@ -248,7 +248,6 @@ async function telegram(req,res){
   const uid=String(userId);
   const state=await loadAccessState({purgeExpired:true});
   const isAdmin=isBotAdmin(uid,state);
-  const noteOptions={includePrivateNotes:isAdmin};
   waitUntil(notifyCommandActivity(req.body,message,command,state));
   if(isExpiredMember(uid,state)&&!/^\/(start|request)(?:@\w+)?$/.test(command))return res.status(200).json({ok:true});
   if(/^\/admin(?:@\w+)?$/.test(command)||(isAdmin&&(/^\/users(?:@\w+)?$/.test(command)||/^\/revoke(?:@\w+)?\s+\d+$/.test(command)||/^\/approve(?:@\w+)?\s+\d+$/.test(command)))){
@@ -267,7 +266,8 @@ async function telegram(req,res){
     return res.status(200).json({ok:true});
   }
   if(canReadReports(uid,state)&&command==="/gold_history"){
-    waitUntil(sendGoldHistory(message.chat.id).catch(()=>sendTelegram(message.chat.id,'دریافت تاریخچه فعلاً ممکن نیست؛ دوباره تلاش کنید.',{menu:true}))); return res.status(200).json({ok:true});
+    waitUntil((async()=>{try{await sendTelegram(message.chat.id,await requestLatestAllocation(message.chat.id,uid,null,"history"),{menu:true,temporary:true});}
+      catch(_){await sendTelegram(message.chat.id,'دریافت تاریخچه فعلاً ممکن نیست؛ دوباره تلاش کنید.',{menu:true});}})()); return res.status(200).json({ok:true});
   }
   if(isAdmin&&message.reply_to_message?.message_id&&!command.startsWith("/")){
     const prompt=await readPrivateJson("portfolio/gold-history/prompts/"+uid+"/"+message.reply_to_message.message_id+".json");
@@ -303,11 +303,15 @@ async function telegram(req,res){
       if(command==="/allocation_chart"){
         await sendTelegram(message.chat.id,await requestLatestAllocation(message.chat.id,userId,null,"chart"),{menu:true,temporary:true});return;
       }
+      const freshFormat=Object.hasOwn(FRESH_REPORT_FORMATS,command)?FRESH_REPORT_FORMATS[command]:null;
+      if(freshFormat){
+        await sendTelegram(message.chat.id,await requestLatestAllocation(message.chat.id,userId,null,freshFormat),{menu:true,temporary:true});return;
+      }
       if(pending?.type==="allocation_format_selection"&&!command.startsWith("/")){
         await showAllocationMenu(message.chat.id);return;
       }
       if(pending?.type==="latest_sync_pending"&&!command.startsWith("/")){
-        await sendTelegram(message.chat.id,withAssetFootnotes("دریافت و تأیید مقادیر تازه در حال انجام است. لطفاً منتظر درخواست قیمت "+assetLabel("بلک راک")+" بمانید.",["بلک راک"]),{menu:true,temporary:true});return;
+        await sendTelegram(message.chat.id,"دریافت و تأیید مقادیر تازه در حال انجام است. لطفاً منتظر پاسخ بمانید.",{menu:true,temporary:true});return;
       }
       if(pending?.type==="latest_blackrock_price"&&!command.startsWith("/")){
         const priceRial=parseUserPrice(command);
@@ -315,40 +319,20 @@ async function telegram(req,res){
           await requestLatestAllocation(message.chat.id,userId,priceRial,pending.report_format||"image");
         await sendTelegram(message.chat.id,reply,{menu:true,temporary:true});return;
       }
-      const snapshot=await safeSnapshot();
-      const quantities={...(snapshot?.assets||{}),...MANUAL};
-      let reply=null;
-      const valuationCommands=["/allocation","/refresh","/gold","/gold_and_other_precious_metals","/crypto","/cash_dollar"];
-      const quantityStatus=quantitySnapshotStatus(snapshot);
-      if((valuationCommands.includes(command)||(pending?.type==="blackrock_price"&&!command.startsWith("/")))&&quantityStatus.stale){
-        reply=isAdmin?quantityStatus.message:quantityStatus.message.replace("/status","/latest_allocation");
-      }else if(pending?.type==="blackrock_price"&&!command.startsWith("/")){
+      if(pending?.type==="blackrock_price"&&!command.startsWith("/")){
         const priceRial=parseUserPrice(command);
-        if(priceRial===null){
-          reply=withAssetFootnotes("لطفاً قیمت فعلی هر واحد "+assetLabel("بلک راک")+" (EcoCoach) را به تومان وارد کنید.",["بلک راک"]);
-        }else{
-          const report=await allocationImageReply(quantities,priceRial,noteOptions);
-          if(report.text)reply=report.text;
-          else await sendTelegramPhoto(message.chat.id,report.png,"گزارش ارزش‌گذاری پرتفوی • قیمت‌های زنده",{audience:isAdmin?"admin":"report"});
-          await savePendingBlackRock(message.chat.id,{type:"none",updatedAt:new Date().toISOString()});
-        }
-      }else if(command==="/start"||command==="/help"||command==="/menu")reply=help({reportsOnly:!isAdmin});
+        await sendTelegram(message.chat.id,priceRial===null?"لطفاً قیمت فعلی هر واحد بلک راک را به تومان وارد کنید.":
+          await requestLatestAllocation(message.chat.id,userId,priceRial,"image"),{menu:true,temporary:true});return;
+      }
+      const snapshot=await safeSnapshot();
+      let reply=null;
+      if(command==="/start"||command==="/help"||command==="/menu")reply=help({reportsOnly:!isAdmin});
       else if(command==="/status"){
         const status=quantitySnapshotStatus(snapshot);
         reply=snapshot?("پورتفولیو متصل است.\n\nآخرین Snapshot معاملات: "+boldPortfolioTime(snapshot.updated_at)+(snapshot.workbook_updated_at?"\nآخرین به‌روزرسانی فایل: "+boldPortfolioTime(snapshot.workbook_updated_at):"")+(status.stale?"\n\n⚠️ "+status.message:"\n\nوضعیت Snapshot: به‌روز")):"پورتفولیو متصل است، اما Snapshot معاملات هنوز همگام‌سازی نشده است.";
       }
-      else if(command==="/assets")reply=await filteredAssetsReply(quantities,snapshot,noteOptions);
-      else if(command==="/gold_and_other_precious_metals"||command==="/gold")reply=await valuationReply(quantities,["طلا","عیار","گوهر","آلتون","امرالد","زرفام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],"طلا و فلزات گرانبها",snapshot,noteOptions);
-      else if(command==="/crypto")reply=await valuationReply(quantities,["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],"رمزارز",snapshot,noteOptions);
-      else if(command==="/cash_dollar")reply=await valuationReply(quantities,["دلار"],"دلار نقدی",snapshot,noteOptions);
       else reply=help({reportsOnly:!isAdmin});
-      if(reply){
-        const categoryReport=["/gold","/gold_and_other_precious_metals","/crypto","/cash_dollar"].includes(command);
-        const chunks=categoryReport?splitAssetReportParagraphs(reply):[reply];
-        for(const chunk of chunks){
-          if(!await sendTelegram(message.chat.id,chunk,{menu:true,audience:isAdmin?"admin":"report",temporary:chunk.includes("قیمت فعلی هر واحد بلک راک")}))break;
-        }
-      }
+      if(reply)await sendTelegram(message.chat.id,reply,{menu:true,audience:isAdmin?"admin":"report"});
     }catch(e){console.error("Telegram handler error:",e);try{await sendTelegram(message.chat.id,"خطا در تهیه گزارش. لطفاً دوباره تلاش کنید.",{menu:true});}catch(_){}}
   })());
   return res.status(200).json({ok:true});
@@ -357,6 +341,12 @@ const ALLOCATION_REQUEST_PREFIX="portfolio/latest-allocation/requests/";
 const ALLOCATION_ACTIVE_PREFIX="portfolio/latest-allocation/active/";
 const ALLOCATION_SELECTION_PREFIX="portfolio/latest-allocation/selections/";
 const ALLOCATION_DEADLINE_MS=10*60*1000;
+const FRESH_REPORT_FORMATS={"/assets":"assets","/gold":"metals","/gold_and_other_precious_metals":"metals","/crypto":"crypto","/cash_dollar":"cash"};
+const CATEGORY_REPORTS={
+  metals:{names:["طلا","عیار","گوهر","آلتون","امرالد","زرفام","سکه تمام","ربع سکه غیره","ربع سکه بانکی","آبشده (طلب)","آبشده (شمش زربد)","شمش نقره 999"],title:"طلا و فلزات گرانبها"},
+  crypto:{names:["BTC","ETH","Tether","Link","ADA","SOL","ONDO"],title:"رمزارز"},
+  cash:{names:["دلار"],title:"دلار نقدی"}
+};
 async function showAllocationMenu(chatId){
   if(!canReadReports(String(chatId),await loadAccessState({strict:true})))return;
   const selection={selection_id:crypto.randomUUID(),created_at:new Date().toISOString(),used:false};
@@ -426,7 +416,7 @@ async function requestLatestAllocation(chatId,userId,blackRockPriceRial=null,rep
     const response=await fetch("https://api.github.com/repos/SahandFAME/portfolio-agent-telegram/actions/workflows/latest-allocation-sync.yml/dispatches",{
       method:"POST",redirect:"error",signal:AbortSignal.timeout(12000),
       headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2022-11-28"},
-      body:JSON.stringify({ref:"main",inputs:{client_id:ONEDRIVE_CLIENT_ID,request_id:id}})
+      body:JSON.stringify({ref:"main",inputs:{client_id:ONEDRIVE_CLIENT_ID,request_id:id,...(reportFormat==="history"?{report_type:"history"}:{})}})
     });
     if(response.status!==204)throw new Error("dispatch_failed");
   }catch(_){
@@ -470,7 +460,24 @@ async function completeLatestAllocation(req,res){
          !Number.isFinite(stamp)||stamp<Date.parse(record.requested_at)||stamp>now||now-stamp>120000)
         throw new Error("verified_snapshot_changed");
       const quantities={...assets,...MANUAL};
-      const report=await latestAllocationReport(quantities,guest?null:record.blackRockPriceRial,guest?"chart":record.report_format||"image",snapshot,{guest,includePrivateNotes});
+      const format=record.report_format||"image";
+      if(format==="history"){
+        const latest=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json");
+        if(guest||latest?.request_id!==id)return;
+        const history=(await historyState()).data;
+        if(body.history_revision!==history.revision||!history.weeks.some(w=>w.source_checked_at===snapshot.updated_at&&w.workbook_updated_at===snapshot.workbook_updated_at))throw new Error("history_refresh_not_verified");
+        await sendGoldHistory(record.chat_id,async()=>{
+          const active=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json");
+          return active?.request_id===id&&(await historyState()).data.revision===body.history_revision;
+        });return;
+      }
+      let report;
+      if(!guest&&(format==="assets"||CATEGORY_REPORTS[format])){
+        const category=CATEGORY_REPORTS[format];
+        const text=format==="assets"?await filteredAssetsReply(quantities,snapshot,{includePrivateNotes}):
+          await valuationReply(quantities,category.names,category.title,snapshot,{includePrivateNotes});
+        report={messages:splitAssetReportParagraphs(text)};
+      }else report=await latestAllocationReport(quantities,guest?null:record.blackRockPriceRial,guest?"chart":format,snapshot,{guest,includePrivateNotes});
       const latest=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json");
       if(latest?.request_id!==id)return;
       if(report.text){
@@ -482,7 +489,7 @@ async function completeLatestAllocation(req,res){
         await sendTelegram(record.chat_id,report.text,{menu:true,audience,temporary:report.text.includes("قیمت فعلی هر واحد صندوق بلک")});
       }else if(report.messages){
         await savePendingBlackRock(record.chat_id,{type:"none",updatedAt:new Date().toISOString()});
-        for(const text of [...report.messages,report.percentages]){
+        for(const text of [...report.messages,...(report.percentages?[report.percentages]:[])]){
           const current=await readPrivateJson(ALLOCATION_ACTIVE_PREFIX+record.chat_id+".json");
           if(current?.request_id!==id||!await sendTelegram(record.chat_id,text,{menu:true,audience}))return;
         }
@@ -2181,15 +2188,16 @@ async function dispatchHistoryExport(){
     return r.status===204;
   }catch(_){return false;}
 }
-async function sendGoldHistory(chatId){
-  if(!canReadReports(String(chatId),await loadAccessState({strict:true})))return;
+async function sendGoldHistory(chatId,isCurrent=async()=>true){
+  if(!await isCurrent()||!canReadReports(String(chatId),await loadAccessState({strict:true})))return;
   const data=(await historyState()).data;
   if(!data.weeks.length){await sendTelegram(chatId,'تاریخچهٔ ماهانه هنوز ثبت نشده است.',{menu:true});return;}
   const svg=goldHistorySvg(data.weeks,{formatTime:portfolioTime,escape:escXml,number:n=>Number(n).toLocaleString('fa-IR',{maximumFractionDigits:3})});
+  if(!await isCurrent())return;
   await sendTelegramPhoto(chatId,renderAllocationSvg(svg),'ارزش ماهانه پرتفوی بر حسب گرم طلای ۱۸ عیار');
-  if(!canReadReports(String(chatId),await loadAccessState({strict:true})))return;
+  if(!await isCurrent()||!canReadReports(String(chatId),await loadAccessState({strict:true})))return;
   await sendTelegram(chatId,goldHistorySummary(data.weeks,{formatTime:portfolioTime}),{menu:true});
-  if(isBotAdmin(String(chatId),await loadAccessState({strict:true}))){
+  if(await isCurrent()&&isBotAdmin(String(chatId),await loadAccessState({strict:true}))){
     const buttons=[[{text:'دریافت فایل Excel',callback_data:'history:excel'}]];
     const pending=data.weeks.filter(w=>w.mode!=='historical'&&w.quantities['بلک راک']>0&&(!w.quotes['بلک راک']||w.quotes['بلک راک'].pricing_basis==='owner_authorized_last_known')).at(-1);
     if(pending)buttons.unshift([{text:'ثبت قیمت بلک راک ماه',callback_data:'history:price:'+pending.week_ending}]);

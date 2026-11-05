@@ -1,80 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
-import vm from 'node:vm';
-import path from 'node:path';
-import sharp from 'sharp';
-import { Resvg } from '@resvg/resvg-js';
-import { BlobPreconditionFailedError } from '@vercel/blob';
-import * as goldHistory from '../lib/gold-history.js';
-
-const source = await fs.readFile(new URL('../api/telegram.js', import.meta.url), 'utf8');
-// Evaluate the actual unmodified handler, injecting only external dependencies.
-// Named exports below exist only inside the test VM, not in application code.
-async function app({readError=false, env={}}={}) {
-  const store = new Map(), writes = [], sends = [], background = [];
-  const tokenEnv = {PORTFOLIO_SYNC_SECRET:'fixture-primary',PORTFOLIO_SYNC_SECRET_AGENT:'fixture-secondary',
-    TELEGRAM_WEBHOOK_SECRET:'fixture-webhook',TELEGRAM_BOT_TOKEN:'fixture-bot',TELEGRAM_ADMIN_USER_IDS:'1',...env};
-  const quotes = async url => {
-    url = String(url);
-    if(url.startsWith('https://api.telegram.org/')) {
-      return {ok:true, json:async()=>({ok:true}), text:async()=>''};
-    }
-    if(url.includes('coingecko')) return {ok:true,json:async()=>Object.fromEntries(
-      ['bitcoin','ethereum','tether','chainlink','cardano','solana','ondo-finance'].map(k=>[k,{usd:2}]))};
-    let text = 'آخرین قیمت 1,200,000';
-    if(url.includes('/ime/')) text = 'SilverBar 999.9 1,200,000';
-    if(url.includes('/profile/')) {
-      const price = url.includes('price_dollar_rl') ? 1000000 : url.includes('geram18') ? 200000000 :
-        url.includes('/rob') ? 1000000000 : url.includes('gold_futures') ? 1000000000 : 2000000000;
-      text = 'نرخ فعلی ' + price;
-    }
-    return {ok:true,text:async()=>text};
-  };
-  const context = vm.createContext({console:{info(){},warn(){},error(){}},Buffer,Date,Number,
-    URL,FormData,Blob,TextEncoder,ReadableStream,process:{env:tokenEnv,cwd:()=>process.cwd()},
-    fetch:async(url,options)=>{
-      if(String(url).startsWith('https://api.telegram.org/')) sends.push({url:String(url),options});
-      return quotes(url,options);
-    }});
-  const dependencies = {
-    '../lib/gold-history.js':goldHistory,
-    '@vercel/blob':{
-      BlobPreconditionFailedError,
-      head:async key=>({etag:JSON.stringify(store.get(key)),size:Buffer.byteLength(JSON.stringify(store.get(key)))}),
-      get:async key => {
-        if(readError) throw new Error('fixture storage unavailable');
-        if(!store.has(key)) return null;
-        return {stream:new ReadableStream({start(c){c.enqueue(Buffer.from(JSON.stringify(store.get(key))));c.close();}})};
-      },
-      put:async(key,value)=>{writes.push({key,value:JSON.parse(value)});store.set(key,JSON.parse(value));}
-    },
-    '@vercel/functions':{waitUntil:promise=>background.push(promise)},
-    sharp:{default:sharp},'@resvg/resvg-js':{Resvg},path:{default:path}
-  };
-  const module = new vm.SourceTextModule(source + '\nexport {ASSETS,MANUAL,parseUserPrice,valueRial,quantitySnapshotStatus,getPrices,buildPortfolioSvg,allocationImageReply,sendTelegram};', {context});
-  await module.link(async specifier => {
-    const exports = dependencies[specifier];
-    assert.ok(exports, `unexpected dependency ${specifier}`);
-    return new vm.SyntheticModule(Object.keys(exports),function(){
-      for(const [key,value] of Object.entries(exports)) this.setExport(key,value);
-    },{context});
-  });
-  await module.evaluate();
-  const ns = module.namespace;
-  const assets = Object.fromEntries([...ns.ASSETS].filter(x=>!(x in ns.MANUAL)).map(x=>[x,0]));
-  const payload = {version:'synthetic fixture',updated_at:new Date().toISOString(),
-    workbook_updated_at:'2026-01-01T00:00:00Z',assets};
-  async function request(method, query={}, body={}, headers={}) {
-    const res = {status(code){this.code=code;return this;},json(data){this.data=data;},send(data){this.data=data;}};
-    await ns.default({method,query,body,headers},res);
-    await Promise.all(background.splice(0));
-    return res;
-  }
-  return {ns,store,writes,sends,request,payload,assets};
-}
-
-
+import {app as sharedApp,completeFreshReport} from './helpers/app-fixture.mjs';
+async function app(){const a=await sharedApp();return a;}
 
 const buttons=[['آخرین ترکیب دارایی','/latest_allocation'],['وضعیت','/status'],['دارایی‌ها','/assets'],['طلا و سایر فلزات گرانبها','/gold_and_other_precious_metals'],['رمزارز','/crypto'],['دلار نقدی','/cash_dollar'],['نمودار ترکیب دارایی','/allocation_chart'],['روند ارزش بر حسب طلا','/gold_history'],['راهنما','/help']];
 const header={'x-telegram-bot-api-secret-token':'fixture-webhook'};
@@ -83,14 +10,14 @@ const message=(text,id=1,type='private')=>({message:{chat:{id,type},from:{id},te
 for(const [label,command] of buttons) test(`button ${label} runs ${command} with the same output`,async()=>{
   const a=await app();a.payload.assets['بلک راک']=15;a.store.set('portfolio/latest.json',a.payload);
   await a.request('POST',{},message(command),header);
-  const expected=a.sends.map(x=>JSON.parse(x.options.body).text).join('\n');a.sends.length=0;
+  const expected=a.sends.map(x=>JSON.parse(x.options.body).text).join('\n');a.sends.length=0;a.store.delete('portfolio/latest-allocation/active/1.json');
   await a.request('POST',{},message(label),header);
   const actual=a.sends.map(x=>JSON.parse(x.options.body).text).join('\n');
   const withoutRetrievalTime=text=>text.replace(/Prices retrieved: [^\n]+/g,'Prices retrieved: <fresh timestamp>');
   assert.equal(withoutRetrievalTime(actual),withoutRetrievalTime(expected));
   assert.ok(a.sends.length);
   for(const sent of a.sends){
-    const keyboard=JSON.parse(sent.options.body).reply_markup;
+    const keyboard=JSON.parse(sent.options.body).reply_markup;if(!keyboard?.keyboard)continue;
     assert.equal(keyboard.is_persistent,false);assert.equal(keyboard.one_time_keyboard,false);assert.equal(keyboard.resize_keyboard,true);
     assert.deepEqual(keyboard.keyboard.flat().map(x=>x.text),[...buttons.map(x=>x[0]),'پنل مدیریت']);
   }
@@ -124,20 +51,17 @@ test('valuation buttons retain stale quantity protection',async()=>{
   for(const label of ['طلا و سایر فلزات گرانبها','رمزارز','دلار نقدی']){
     const a=await app();a.store.set('portfolio/latest.json',{...a.payload,updated_at:'2020-01-01T00:00:00Z'});
     await a.request('POST',{},message(label),header);
-    assert.match(JSON.parse(a.sends[0].options.body).text,/Snapshot/);
+    assert.match(JSON.parse(a.sends[0].options.body).text,/در حال دریافت تازه‌ترین/);assert.equal(a.marketCalls.length,0);
   }
 });
 
-test('buttons work while waiting for EcoCoach and numeric input still sends a photo with a menu',async()=>{
-  const a=await app();a.payload.assets['بلک راک']=15;a.store.set('portfolio/latest.json',a.payload);
+test('asset button replaces an old EcoCoach prompt with a fresh quantity request',async()=>{
+  const a=await app();a.store.set('portfolio/latest.json',a.payload);
   a.store.set('portfolio/pending-blackrock/1.json',{type:'blackrock_price'});
-  assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'blackrock_price');
   await a.request('POST',{},message('دارایی‌ها'),header);
-  assert.match(JSON.parse(a.sends.at(-1).options.body).text,/۷ مورد/);
-  assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'blackrock_price');
-  await a.request('POST',{},message('۸۵۰٬۰۰۰ تومان'),header);
-  const photo=a.sends.find(x=>x.url.endsWith('/sendPhoto'));
-  assert.ok(photo);
-  assert.equal(JSON.parse(photo.options.body.get('reply_markup')).is_persistent,false);
-  assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'none');
+  assert.equal(a.store.get('portfolio/pending-blackrock/1.json').type,'latest_sync_pending');
+  await a.request('POST',{},message('850000'),header);
+  assert.equal(a.marketCalls.length,0);assert.equal(a.dispatches.length,1);
+  await completeFreshReport(a);
+  assert.match(JSON.parse(a.sends.filter(x=>x.url.endsWith('/sendMessage')).at(-1).options.body).text,/دارایی‌های پرتفوی/);
 });

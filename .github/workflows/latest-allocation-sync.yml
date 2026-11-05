@@ -1,5 +1,5 @@
 name: Latest Allocation OneDrive synchronization
-run-name: Latest Allocation ${{ inputs.request_id || 'verification trial' }}
+run-name: ${{ inputs.report_type == 'history' && 'History report' || 'Latest Allocation' }} ${{ inputs.request_id || 'verification trial' }}
 on:
   workflow_dispatch:
     inputs:
@@ -11,6 +11,11 @@ on:
         description: Bot request UUID; leave empty for an authorized sync trial without Telegram messages
         type: string
         default: ''
+      report_type:
+        description: Refresh the current provisional month for a history request
+        type: choice
+        options: [standard, history]
+        default: standard
 permissions:
   contents: read
   statuses: write
@@ -45,6 +50,7 @@ jobs:
           PORTFOLIO_SYNC_SECRET_AGENT: ${{ secrets.PORTFOLIO_SYNC_SECRET_AGENT }}
           PORTFOLIO_ONDEMAND_ENABLED: 'true'
           ALLOCATION_REQUEST_ID: ${{ inputs.request_id }}
+          PORTFOLIO_REPORT_TYPE: ${{ inputs.report_type || 'standard' }}
         run: python scripts/latest_allocation_sync.py
       - name: Notify bot if setup failed before the sync worker could start
         if: ${{ always() && inputs.request_id != '' }}

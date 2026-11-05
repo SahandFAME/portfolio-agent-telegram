@@ -1,5 +1,30 @@
 # Latest Allocation: fresh quantities and prices
 
+## Every asset/report request refreshes quantities (2026-11-05)
+
+Asset lists and category reports now share the verified on-demand worker:
+`/assets`, `/gold` and `/gold_and_other_precious_metals`, `/crypto`,
+`/cash_dollar` and their menu/legacy aliases, plus allocation formats and guest
+charts. Even a recently updated cache requires a new read-only OneDrive read.
+All 23 table totals are checked, synchronized and read back before fetching
+current prices. The six manual holdings remain separate. Refresh failure never
+substitutes cached output. Repeated taps for the same queued report reuse its
+job; a different report supersedes it. Delivery rechecks current-request identity,
+access, expiry and private-note permission for each text chunk. Legacy EcoCoach
+price replies now repeat the source refresh too.
+
+`/gold_history` refreshes the current provisional month from the same downloaded
+workbook, including the two history-only holdings, then fetches prices and
+generates/verifies the separate Excel before completion. Its callback verifies
+the history revision and source timestamp before rendering. Completed historical
+months remain intact; the existing history policy still marks carried quotes as
+estimates. Successful history jobs trigger the separate verified OneDrive report
+publisher; category jobs do not rewrite the history report.
+
+Help, navigation and administrative status screens do not calculate an asset
+report. `/status` remains a diagnostic of the stored snapshot with its actual
+timestamp. No scheduler or credential migration is involved.
+
 The owner authorized on-demand OneDrive synchronization on 2026-10-10. This
 does not authorize a recurring replacement or retirement of the ChatGPT schedule.
 

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg,applyHistoryPriceFallbacks,initialMonthEnds} from '../lib/gold-history.js';
-import {app} from './helpers/app-fixture.mjs';
+import {app,completeFreshReport} from './helpers/app-fixture.mjs';
 
 const checked='2026-10-25T09:00:00Z',asof='2026-10-21T20:29:59Z';
 const q=p=>({price_rial:p,source:'Synthetic verified quote',quoted_at:asof});
@@ -131,7 +131,7 @@ test('history upload and configuration are authenticated, recomputed and protect
 test('only owners/admins/advisors can request a real rendered history image; guests see no history data',async()=>{
   for(const uid of [1,2,3,4,5]){
     const {a,record}=await fixture();await a.request('POST',{sync:'gold-history'},{revision:null,weeks:[record]},auth);
-    await request(a,'روند ارزش بر حسب طلا',uid);
+    await request(a,'روند ارزش بر حسب طلا',uid);await completeFreshReport(a,{id:uid});
     const photo=a.sends.find(x=>x.url.endsWith('/sendPhoto'));assert.equal(!!photo,[1,2,3].includes(uid));
     if(photo){const metadata=await sharp(Buffer.from(await photo.options.body.get('photo').arrayBuffer())).metadata();assert.equal(metadata.width,1600);}
     if(uid===2)assert.equal(messages(a).some(x=>x.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data?.startsWith('history:'))),false);
