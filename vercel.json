@@ -2,6 +2,7 @@
   "version": 2,
   "functions": {
     "api/telegram.js": {
+      "maxDuration": 120,
       "includeFiles": "assets/fonts/**"
     }
   }

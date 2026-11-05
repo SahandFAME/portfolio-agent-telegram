@@ -391,3 +391,16 @@ class BoundedArchiveRequestTests(unittest.TestCase):
             rows,_=history.historical_weeks(source_workbook(),'2026-10-24T00:00:00Z','2026-10-25T00:00:00Z',{'manual':{'دلار':100}}, {})
         self.assertEqual(len(rows),52);self.assertEqual(rows[-1]['quantities']['طلا'],6)
         self.assertIsNone(rows[-1]['gold_quote']);self.assertEqual(rows[-1]['quotes'],{})
+
+
+class ObservationRequestTimeoutTests(unittest.TestCase):
+    def test_only_market_priced_observation_has_extended_timeout_without_write_retries(self):
+        with patch.object(history,'required',return_value='fixture'), patch.object(history,'json_request',return_value={'ok':True}) as request:
+            history.api('?sync=gold-observation',{'bootstrap':True})
+            self.assertEqual(request.call_args.kwargs['timeout'],90)
+            self.assertEqual(request.call_args.kwargs['retries'],0)
+            history.api('?sync=gold-history',{'weeks':[]})
+            self.assertNotIn('timeout',request.call_args.kwargs)
+            self.assertEqual(request.call_args.kwargs['retries'],0)
+            history.api('?data=gold-history')
+            self.assertNotIn('timeout',request.call_args.kwargs)

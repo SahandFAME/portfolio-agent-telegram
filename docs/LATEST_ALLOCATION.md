@@ -222,3 +222,8 @@ from keeping old quantities merely because EcoCoach has no current website
 quote. The worker additionally requires the stored observation to match its
 fresh source-check timestamp and all 23 verified balances before exporting or
 claiming success. Completed historical months remain protected.
+
+History observation HTTP calls allow 90 seconds for live-price retrieval and
+private persistence, within an explicit 120-second Vercel function limit.
+Other HTTP calls keep their existing 30-second limit. Writes still have zero
+blind retries; worker observation and Excel readbacks remain mandatory.
