@@ -2,6 +2,12 @@
 
 Read [docs/CODEX_HANDOFF.md](docs/CODEX_HANDOFF.md) **before changing this project**. It contains the design history, source-of-truth rules, 29-asset mapping, deployment/integration status and backlog.
 
+When resuming in a new chat or environment, also read
+[docs/CODEX_RECOVERY.md](docs/CODEX_RECOVERY.md). Preserve durable decisions and
+access dependencies in the repository; credentials and private runtime data stay
+in their protected stores. Never assume chat history transfers authorization or
+that a copied source repository includes private Blob state.
+
 ## Non-negotiable controls
 
 1. **OneDrive `Trading Journal.xlsm` is authoritative for 23 assets**; the bot's private Vercel Blob snapshot is only a cache. Retrieve a fresh OneDrive version before calling holdings current. Workbook is **read-only**: never change/save/re-upload it.

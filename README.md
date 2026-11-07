@@ -5,6 +5,7 @@ This is the Vercel-hosted Telegram presentation service for the user's 29-asset 
 **For Codex and maintainers, start with:**
 - [AGENTS.md](AGENTS.md) — mandatory data-integrity and security rules
 - [docs/CODEX_HANDOFF.md](docs/CODEX_HANDOFF.md) — historical setup, full asset/table mapping, architecture, sync, deployment, latest verification and outstanding tasks
+- [docs/CODEX_RECOVERY.md](docs/CODEX_RECOVERY.md) — resume in a new chat/environment, restore access, preserve private state and use the ready-to-paste starter prompt
 
 ## Main integration points
 
