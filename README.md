@@ -7,6 +7,10 @@ This is the Vercel-hosted Telegram presentation service for the user's 29-asset 
 - [docs/CODEX_HANDOFF.md](docs/CODEX_HANDOFF.md) — historical setup, full asset/table mapping, architecture, sync, deployment, latest verification and outstanding tasks
 - [docs/CODEX_RECOVERY.md](docs/CODEX_RECOVERY.md) — resume in a new chat/environment, restore access, preserve private state and use the ready-to-paste starter prompt
 
+For Codex, Claude Code or another AI, start with [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md).
+Build an offline handoff with `python3 scripts/build_ai_handoff.py --output-dir /path/outside/repository`.
+The package includes historical financial documentation: keep it private.
+
 ## Main integration points
 
 - Production: `https://portfolio-agent-telegram.vercel.app/api/telegram`
