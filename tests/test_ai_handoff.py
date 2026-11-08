@@ -19,6 +19,7 @@ class HandoffTests(unittest.TestCase):
             for name in module.DOCS+['scripts/asset-tables.json']:
                 path=root/name;path.parent.mkdir(parents=True,exist_ok=True)
                 path.write_text('{}' if name.endswith('.json') else '# Synthetic project document\n')
+            (root/'.env.example').write_text('SYNTHETIC_TOKEN=\n')
             subprocess.run(['git','-C',str(root),'add','.'],check=True)
             subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-m','Synthetic initial state'],check=True,capture_output=True)
             (root/'.env').write_text('SECRET=synthetic-private-value')
@@ -28,7 +29,7 @@ class HandoffTests(unittest.TestCase):
                 result=module.build(Path(temp)/'out')
             finally:module.ROOT=previous
             with zipfile.ZipFile(Path(temp)/'out/Portfolio-Agent-Handoff.zip') as z:
-                self.assertIsNone(z.testzip());self.assertNotIn('source/.env',z.namelist())
+                self.assertIsNone(z.testzip());self.assertNotIn('source/.env',z.namelist());self.assertIn('source/.env.example',z.namelist())
                 z.extractall(Path(temp)/'restore')
             restored=Path(temp)/'restore'
             subprocess.run(['python3',str(restored/'VERIFY_PACKAGE.py')],check=True,capture_output=True)

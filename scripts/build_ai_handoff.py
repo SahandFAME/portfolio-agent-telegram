@@ -57,9 +57,12 @@ def build(output, ref='HEAD', records=None):
         path = Path(name)
         if path.is_absolute() or '..' in path.parts:
             raise ValueError('unsafe_tracked_path')
-        if path.name.startswith('.env') or path.suffix.lower() in ('.xlsm', '.xlsx'):
+        if (path.name.startswith('.env') and path.name!='.env.example') or path.suffix.lower() in ('.xlsm', '.xlsx'):
             raise ValueError('sensitive_tracked_file_requires_review')
-        files['source/'+name] = git('show', commit+':'+name)
+        data = git('show', commit+':'+name)
+        if path.name=='.env.example' and any(line.strip() and not line.lstrip().startswith('#') and ('=' not in line or line.split('=',1)[1].strip()) for line in data.decode().splitlines()):
+            raise ValueError('nonempty_environment_template_requires_review')
+        files['source/'+name] = data
     assembled = ['# Portfolio Agent — complete portable handoff\n\n'
                  '**PRIVATE COPY: contains historical financial documentation.**\n\n'
                  'Source commit: `'+commit+'`. This is a knowledge/source snapshot, '
