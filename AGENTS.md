@@ -1,4 +1,4 @@
-# Codex instructions — Portfolio Agent
+# Development assistant instructions — Portfolio Agent
 
 Read [docs/CODEX_HANDOFF.md](docs/CODEX_HANDOFF.md) **before changing this project**. It contains the design history, source-of-truth rules, 29-asset mapping, deployment/integration status and backlog.
 
@@ -7,6 +7,10 @@ When resuming in a new chat or environment, also read
 access dependencies in the repository; credentials and private runtime data stay
 in their protected stores. Never assume chat history transfers authorization or
 that a copied source repository includes private Blob state.
+
+For model-independent takeover, read [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md).
+It summarizes the current state and takes precedence over superseded historical
+sections; preserve newer owner instructions and verify current code.
 
 ## Non-negotiable controls
 
