@@ -133,6 +133,9 @@ documents linked from the README.
 ## Monitoring, automation and recovery
 
 - GitHub Actions runs Node and Python regression tests for pull requests and main.
+- GitHub protects `main` with required pull requests, the up-to-date `test` check,
+  resolved conversations and linear history. The rule applies to administrators;
+  force pushes and branch deletion are disabled.
 - Separate workflows provide on-demand source sync, daily Persian-calendar history
   checking, hourly access-expiry cleanup, source audits, Microsoft reauthorization
   and verified OneDrive report publication.

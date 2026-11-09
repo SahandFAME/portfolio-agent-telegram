@@ -132,6 +132,9 @@ See [docs/ADMIN_DASHBOARD.md](docs/ADMIN_DASHBOARD.md).
 - GitHub Actions runs regression tests, on-demand OneDrive synchronization,
   monthly history processing, OneDrive report publication, source audits,
   Microsoft reauthorization and hourly expired-access maintenance.
+- The production `main` branch is protected: changes require a pull request, an
+  up-to-date passing `test` check, resolved conversations and linear history.
+  Administrators cannot bypass the rule; force pushes and deletion are blocked.
 - The source workbook credential is read-only. Report publication uses a separate
   write credential and is restricted to the managed report.
 - Production writes require authenticated callbacks and exact protected readback.

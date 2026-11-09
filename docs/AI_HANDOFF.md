@@ -60,6 +60,9 @@ maintenance follows branch/PR, tests, CI, merge and production checks. Preserve
 work already done; do not re-create apps/tokens/schedulers just because this is a
 new session. Keep project decisions in versioned documentation after each change.
 The starter prompt lets the owner restate authorization for the new assistant.
+GitHub protects `main`: use a pull request, keep it current with `main`, pass the
+required `test` check and resolve review conversations. Linear history is required;
+administrator bypass, force pushes and deletion are disabled.
 
 Feature documentation is part of implementation. Every new feature or visible
 behavior change must update `README.md`, `docs/FEATURES.md` and the affected topic
