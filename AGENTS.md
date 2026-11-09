@@ -12,6 +12,19 @@ For model-independent takeover, read [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md).
 It summarizes the current state and takes precedence over superseded historical
 sections; preserve newer owner instructions and verify current code.
 
+## Feature documentation is part of implementation
+
+Every new feature or user-visible behavior change must update `README.md`,
+`docs/FEATURES.md` and the affected topic/runbook in the same pull request.
+Document the final behavior, role permissions and delivery-time rechecks, data
+and price dependencies, freshness/failure/concurrency/privacy behavior, affected
+commands/APIs/workflows/schedules, validation evidence and recovery impact. Keep
+the documentation map current. A feature is not complete until a future maintainer
+can understand and operate it from GitHub without the original chat. Never publish
+secret values, private holdings or prices, user IDs, raw workbook data or private
+runtime records. A purely internal refactor may state that the feature catalog is
+unchanged when that is accurate.
+
 ## Non-negotiable controls
 
 1. **OneDrive `Trading Journal.xlsm` is authoritative for 23 assets**; the bot's private Vercel Blob snapshot is only a cache. Retrieve a fresh OneDrive version before calling holdings current. Workbook is **read-only**: never change/save/re-upload it.
