@@ -12,7 +12,7 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS = ['docs/AI_HANDOFF.md', 'AGENTS.md', 'docs/CODEX_RECOVERY.md',
+DOCS = ['docs/AI_HANDOFF.md', 'docs/FEATURES.md', 'AGENTS.md', 'docs/CODEX_RECOVERY.md',
         'docs/CODEX_HANDOFF.md', 'docs/LATEST_ALLOCATION.md', 'docs/BOT_MENU.md',
         'docs/ADMIN_DASHBOARD.md', 'docs/ECOCOACH_PRICING.md',
         'docs/ONEDRIVE_VERIFICATION.md', 'docs/GOLD_HISTORY.md']

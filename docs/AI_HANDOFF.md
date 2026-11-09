@@ -61,6 +61,14 @@ work already done; do not re-create apps/tokens/schedulers just because this is 
 new session. Keep project decisions in versioned documentation after each change.
 The starter prompt lets the owner restate authorization for the new assistant.
 
+Feature documentation is part of implementation. Every new feature or visible
+behavior change must update `README.md`, `docs/FEATURES.md` and the affected topic
+or runbook in the same pull request. Record final behavior, permissions, data and
+price dependencies, failure/freshness/concurrency/privacy behavior, affected
+interfaces and automation, validation evidence and recovery impact. Keep private
+financial and identity data out of public documentation. A feature is incomplete
+until a future maintainer can understand and operate it without the original chat.
+
 Never edit/save/re-upload the source workbook; source retrieval is read-only.
 Never print credentials, private balances, transaction dates, owner quote inputs,
 raw source workbook or private user IDs into public logs/issues. Do not leak
