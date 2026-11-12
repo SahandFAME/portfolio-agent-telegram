@@ -123,7 +123,22 @@ def authorize():
         if export and 'files.readwrite' not in scopes:
             raise ConsentError('report_write_scope_missing')
         if not export and 'files.readwrite' in result.get('scope','').lower():
-            raise ConsentError('unexpected_write_scope')
+            # Personal accounts can return the app's existing export consent.
+            # Use the same explicit narrow refresh as the source worker before
+            # accepting or persisting this authorization. Never use the broad
+            # access token for Graph, and never change the export secret.
+            narrowed = oauth('token', {'client_id':client,
+                'grant_type':'refresh_token', 'refresh_token':result['refresh_token'],
+                'scope':'https://graph.microsoft.com/Files.Read'})
+            narrow_scopes = {s.rsplit('/',1)[-1].lower() for s in narrowed.get('scope','').split()}
+            if 'files.readwrite' in narrowed.get('scope','').lower():
+                raise ConsentError('unexpected_write_scope')
+            if not narrowed.get('access_token') or not narrow_scopes or not narrow_scopes <= {'files.read','offline_access','openid','profile','email','user.read'} or 'files.read' not in narrow_scopes:
+                raise ConsentError('read_only_scope_not_verified')
+            result = {**narrowed, 'refresh_token':narrowed.get('refresh_token') or result['refresh_token']}
+            scopes = narrow_scopes
+        if not export and 'files.read' not in scopes:
+            raise ConsentError('read_only_scope_not_verified')
         outcome = subprocess.run(['gh','secret','set',secret,'--repo',repo],
                                  input=result['refresh_token'].encode(),
                                  stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

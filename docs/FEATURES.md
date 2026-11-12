@@ -16,6 +16,9 @@ documents linked from the README.
 - The sync worker verifies workbook identity, all 23 expected assets, finite and
   nonnegative quantities, timestamps, authenticated production writes and exact
   protected readback. A failed refresh cannot silently fall back to old quantities.
+- Source reauthorization explicitly exchanges inherited export consent for a
+  `Files.Read` access token and verifies the returned scopes before saving it.
+  Failed or still-broad exchanges cannot replace source credentials.
 - Report callbacks are tied to an opaque request, synchronized snapshot and user.
   Replayed, stale or superseded callbacks cannot deliver a report. If an EcoCoach
   price is entered later, the bot synchronizes quantities and prices again.

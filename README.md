@@ -137,6 +137,8 @@ See [docs/ADMIN_DASHBOARD.md](docs/ADMIN_DASHBOARD.md).
   Administrators cannot bypass the rule; force pushes and deletion are blocked.
 - The source workbook credential is read-only. Report publication uses a separate
   write credential and is restricted to the managed report.
+  Reauthorization explicitly narrows inherited exporter consent to `Files.Read`
+  and rejects unverified or write-capable access before saving the source token.
 - Production writes require authenticated callbacks and exact protected readback.
 - Public workflow output contains aggregate diagnostics rather than holdings,
   prices, user identifiers or credentials.
