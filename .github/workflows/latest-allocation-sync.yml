@@ -7,6 +7,7 @@ on:
         description: Public Microsoft application client ID
         type: string
         required: true
+        default: dbff9cdd-2ee1-489b-ac50-71a2021b18e2
       request_id:
         description: Bot request UUID; leave empty for an authorized sync trial without Telegram messages
         type: string

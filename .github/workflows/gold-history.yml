@@ -33,7 +33,7 @@ jobs:
       - name: Record and export private history
         env:
           HISTORY_ACTION: ${{ inputs.action || 'capture' }}
-          MS_GRAPH_CLIENT_ID: 04a73ec3-340a-4cb6-a087-7fdc4dfd93e0
+          MS_GRAPH_CLIENT_ID: dbff9cdd-2ee1-489b-ac50-71a2021b18e2
           MS_GRAPH_TENANT_ID: consumers
           MS_GRAPH_AUTH_MODE: delegated
           MS_GRAPH_DRIVE_ID: daef687b3c624f3

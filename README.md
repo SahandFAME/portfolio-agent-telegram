@@ -136,7 +136,7 @@ See [docs/ADMIN_DASHBOARD.md](docs/ADMIN_DASHBOARD.md).
   up-to-date passing `test` check, resolved conversations and linear history.
   Administrators cannot bypass the rule; force pushes and deletion are blocked.
 - The source workbook credential is read-only. Report publication uses a separate
-  write credential and is restricted to the managed report.
+  Microsoft app and write credential and is restricted to the managed report.
   Reauthorization explicitly narrows inherited exporter consent to `Files.Read`
   and rejects unverified or write-capable access before saving the source token.
 - Production writes require authenticated callbacks and exact protected readback.

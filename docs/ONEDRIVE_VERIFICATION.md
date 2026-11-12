@@ -2,7 +2,7 @@
 
 ## Reauthorization after export consent
 
-The source reader and report exporter currently share a Microsoft app registration
+The source reader and report exporter previously shared a Microsoft app registration
 with separate refresh-token secrets. Personal-account device sign-in can return
 the previously consented `Files.ReadWrite` scope even for a read-only request.
 `authorize_microsoft.py` now exchanges such a result with an explicit `Files.Read`
@@ -18,6 +18,23 @@ separate read-only app registration may be required. A successful sign-in alone
 does not prove live workbook access: rerun the sync and verify exact readback.
 Unit tests cover narrowing, rotated-token persistence, rejected write scopes,
 missing/invalid responses, unchanged export behavior and absence of secret logs.
+
+## Dedicated reader app (2026-11-12)
+
+Explicit narrowing still returned write scope in the owner's real sign-in. The
+owner created reader app `dbff9cdd-2ee1-489b-ac50-71a2021b18e2`, requesting only
+delegated Files.Read with public client flows enabled. Bot dispatch, scheduled
+history reads, audit reads and manual reader defaults now use this app. Source
+consent still saves only `MS_GRAPH_REFRESH_TOKEN`; it requires fresh owner sign-in.
+
+The exporter stays on `04a73ec3-340a-4cb6-a087-7fdc4dfd93e0` with
+`MS_GRAPH_EXPORT_REFRESH_TOKEN`. Never revoke that app or change its credential
+as part of source recovery. The consent workflow selects an app by purpose when
+client_id is empty. Override stale cloud `MS_GRAPH_CLIENT_ID` settings with the
+reader ID for source operations; exporter operations must use the export app.
+Configuration alone does not establish restored access. Confirm successful
+consent, then all 23 quantities and exact production readback before reporting
+recovery or completing any valuation based on fresh quantities.
 
 Microsoft personal-account consent completed successfully on 2026-10-10.
 The refresh token is stored only in the repository Actions secret

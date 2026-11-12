@@ -19,6 +19,9 @@ documents linked from the README.
 - Source reauthorization explicitly exchanges inherited export consent for a
   `Files.Read` access token and verifies the returned scopes before saving it.
   Failed or still-broad exchanges cannot replace source credentials.
+- The source reader now uses a dedicated Microsoft app, separate from the report
+  exporter, to prevent export consent from contaminating source reauthorization.
+  Consent selects the appropriate app by purpose; live sync must verify new grants.
 - Report callbacks are tied to an opaque request, synchronized snapshot and user.
   Replayed, stale or superseded callbacks cannot deliver a report. If an EcoCoach
   price is entered later, the bot synchronizes quantities and prices again.

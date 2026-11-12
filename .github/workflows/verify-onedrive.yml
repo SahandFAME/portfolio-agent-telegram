@@ -6,6 +6,7 @@ on:
         description: Microsoft application client ID (public identifier)
         required: true
         type: string
+        default: dbff9cdd-2ee1-489b-ac50-71a2021b18e2
 permissions:
   contents: read
   statuses: write
