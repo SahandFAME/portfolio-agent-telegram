@@ -1,5 +1,24 @@
 # Independent read-only OneDrive verification
 
+## Reauthorization after export consent
+
+The source reader and report exporter currently share a Microsoft app registration
+with separate refresh-token secrets. Personal-account device sign-in can return
+the previously consented `Files.ReadWrite` scope even for a read-only request.
+`authorize_microsoft.py` now exchanges such a result with an explicit `Files.Read`
+refresh request and requires a returned access token with verified read-only
+scopes before saving the source secret. It never uses the broad token for Graph
+or changes the exporter secret. Every source-worker refresh independently requests
+`Files.Read` and continues to reject write scopes. This narrows access tokens; it
+does not revoke the app's existing export grant or make its refresh token incapable
+of requesting other already-consented scopes.
+
+If narrowing fails or still returns write permission, consent fails closed; a
+separate read-only app registration may be required. A successful sign-in alone
+does not prove live workbook access: rerun the sync and verify exact readback.
+Unit tests cover narrowing, rotated-token persistence, rejected write scopes,
+missing/invalid responses, unchanged export behavior and absence of secret logs.
+
 Microsoft personal-account consent completed successfully on 2026-10-10.
 The refresh token is stored only in the repository Actions secret
 `MS_GRAPH_REFRESH_TOKEN`. The dedicated secret-writer credential is proven

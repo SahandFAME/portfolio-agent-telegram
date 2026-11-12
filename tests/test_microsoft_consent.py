@@ -51,11 +51,29 @@ class ConsentTests(unittest.TestCase):
 
     def test_write_scope_rejected(self):
         with patch.object(consent.subprocess,'run',return_value=Mock(returncode=0)) as run, \
-             patch.object(consent,'oauth',side_effect=[self.device,{'refresh_token':'fixture','scope':'Files.ReadWrite'}]), \
+             patch.object(consent,'oauth',side_effect=[self.device,{'refresh_token':'fixture','scope':'Files.ReadWrite'}, {'access_token':'broad','scope':'Files.ReadWrite'}]), \
              patch.object(consent.time,'sleep'),contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(consent.ConsentError,'unexpected_write_scope'):
                 consent.authorize()
             self.assertEqual(run.call_count,1)
+
+    def test_existing_export_consent_is_narrowed_before_source_secret_is_saved(self):
+        output=io.StringIO()
+        with patch.object(consent.subprocess,'run',return_value=Mock(returncode=0)) as run, patch.object(consent,'oauth',side_effect=[self.device,
+            {'refresh_token':'broad-refresh','scope':'Files.ReadWrite'},
+            {'access_token':'narrow-access','refresh_token':'rotated-read-refresh','scope':'https://graph.microsoft.com/Files.Read'}]) as oauth, patch.object(consent.time,'sleep'),contextlib.redirect_stdout(output):
+            consent.authorize()
+            self.assertEqual(oauth.call_args.args[1],{'client_id':os.environ['MS_GRAPH_CLIENT_ID'],'grant_type':'refresh_token','refresh_token':'broad-refresh','scope':'https://graph.microsoft.com/Files.Read'})
+            self.assertEqual(run.call_args.kwargs['input'],b'rotated-read-refresh')
+            self.assertIn('MS_GRAPH_REFRESH_TOKEN',run.call_args.args[0])
+            self.assertNotIn('MS_GRAPH_EXPORT_REFRESH_TOKEN',run.call_args.args[0])
+            for secret in ('broad-refresh','narrow-access','rotated-read-refresh'):self.assertNotIn(secret,output.getvalue())
+
+    def test_failed_or_unverified_narrowing_never_persists_credentials(self):
+        for result in ({'error':'invalid_grant'}, {'access_token':'fixture'}, {'access_token':'fixture','scope':'User.Read'}, {'access_token':'fixture','scope':'Files.Read Sites.ReadWrite.All'}):
+            with self.subTest(result=result),patch.object(consent.subprocess,'run',return_value=Mock(returncode=0)) as run,patch.object(consent,'oauth',side_effect=[self.device,{'refresh_token':'fixture','scope':'Files.ReadWrite'},result]),patch.object(consent.time,'sleep'),contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(consent.ConsentError,'read_only_scope_not_verified'):consent.authorize()
+                self.assertEqual(run.call_count,1)
 
     def test_wrong_repository_rejected(self):
         with patch.dict(os.environ,{'GITHUB_REPOSITORY':'another/repo'}):
