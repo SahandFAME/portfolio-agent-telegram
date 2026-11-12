@@ -322,6 +322,10 @@ cannot be retrieved via its API. OAuth refresh tokens rotate; prefer managed
 current consent or re-consent to stale copied tokens. Do not assume a cloud
 credential marked ready proves Vercel administration permissions or other scopes.
 Direct Graph consent remains distinct from a ChatGPT OneDrive connector.
+Source access now uses dedicated reader app `dbff9cdd-2ee1-489b-ac50-71a2021b18e2`;
+the exporter retains `04a73ec3-340a-4cb6-a087-7fdc4dfd93e0`. Older shared-app
+instructions are superseded. See `docs/ONEDRIVE_VERIFICATION.md` for consent and
+readback requirements; never assume a successful app configuration proves access.
 
 The private Blob store contains access state, snapshots, owner prices, price
 archives, monthly records and export metadata. Keep it attached. Its full encrypted

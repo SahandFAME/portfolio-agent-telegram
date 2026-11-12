@@ -5,7 +5,7 @@ import { Resvg } from "@resvg/resvg-js";
 import path from "path";
 import {calculateGoldWeek,mergeGoldWeeks,goldHistorySvg,goldHistorySummary,historyCalendarBase,MONTHLY_CALENDAR as HISTORY_CALENDAR,LAST_KNOWN_POLICY,validateHistoryPriceInputs,applyHistoryPriceFallbacks,collectHistoryPriceEvidence,solarMonthEnd,isSolarMonthEnd} from "../lib/gold-history.js";
 
-const ONEDRIVE_CLIENT_ID = '04a73ec3-340a-4cb6-a087-7fdc4dfd93e0';
+const ONEDRIVE_CLIENT_ID = 'dbff9cdd-2ee1-489b-ac50-71a2021b18e2';
 const SNAPSHOT = "portfolio/latest.json";
 const ACCESS_STATE = "portfolio/access-control.json";
 // Compressed Blob downloads have weak representation ETags that cannot be used

@@ -3,10 +3,10 @@ on:
   workflow_dispatch:
     inputs:
       client_id:
-        description: Application (client) ID from the dedicated Microsoft app Overview
-        required: true
+        description: Optional override; leave empty to use the app assigned to the selected purpose
+        required: false
         type: string
-        default: 04a73ec3-340a-4cb6-a087-7fdc4dfd93e0
+        default: ''
       purpose:
         description: Read-only workbook sync or separate OneDrive report export
         type: choice
@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      MS_GRAPH_CLIENT_ID: ${{ inputs.client_id }}
+      MS_GRAPH_CLIENT_ID: ${{ inputs.client_id || (inputs.purpose == 'report_export' && '04a73ec3-340a-4cb6-a087-7fdc4dfd93e0' || 'dbff9cdd-2ee1-489b-ac50-71a2021b18e2') }}
       MICROSOFT_CONSENT_PURPOSE: ${{ inputs.purpose || 'read_only' }}
       MICROSOFT_SIGNIN_PUBLIC_KEY: ${{ inputs.signin_public_key }}
       CONSENT_CHECK_TOKEN: ${{ github.token }}
