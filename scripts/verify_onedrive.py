@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import random
+import re
 import subprocess
 import time
 from urllib import error, parse, request
@@ -197,12 +198,48 @@ def graph_token():
     return token['access_token']
 
 
+def checked_stage(stage, call):
+    """Expose only the operation and numeric HTTP status, never service bodies."""
+    try:
+        return call()
+    except SyncError as exc:
+        if re.fullmatch(r'http_\d{3}', str(exc)):
+            raise SyncError(stage + '_' + str(exc)) from None
+        raise
+
+
+def fresh_content(graph_url, headers):
+    """Ask Graph for a fresh content redirect without forwarding its bearer."""
+    class NoRedirect(request.HTTPRedirectHandler):
+        def redirect_request(self, *args):
+            return None
+    opener = request.build_opener(NoRedirect)
+    try:
+        with opener.open(request.Request(graph_url + '/content', headers=headers), timeout=30) as response:
+            content = response.read(MAX_BYTES + 1)
+            if len(content) > MAX_BYTES:
+                raise SyncError('response_too_large')
+            return content
+    except error.HTTPError as exc:
+        status = exc.code
+        location = exc.headers.get('Location', '') if status == 302 else ''
+        exc.close()
+        if status != 302:
+            raise SyncError('graph_content_http_' + str(status)) from None
+        target = parse.urlsplit(location)
+        if target.scheme != 'https' or not target.hostname or target.username or target.password:
+            raise SyncError('invalid_content_redirect') from None
+        return checked_stage('fresh_workbook_download', lambda: http(location))
+    except (error.URLError, TimeoutError, OSError):
+        raise SyncError('graph_content_network_failure') from None
+
+
 def download_workbook(token):
     drive = parse.quote(required('MS_GRAPH_DRIVE_ID'), safe='')
     item = parse.quote(required('MS_GRAPH_ITEM_ID'), safe='')
     url = f'https://graph.microsoft.com/v1.0/drives/{drive}/items/{item}'
     headers = {'Authorization': 'Bearer ' + token}
-    metadata = json_request(url + '?$select=id,name,lastModifiedDateTime,eTag,file', headers=headers)
+    metadata = checked_stage('graph_metadata', lambda: json_request(url + '?$select=id,name,lastModifiedDateTime,eTag,file', headers=headers))
     if metadata.get('name') != 'Trading Journal.xlsm' or not metadata.get('file') or not metadata.get('eTag'):
         raise SyncError('workbook_identity_not_verified')
     iso(metadata.get('lastModifiedDateTime'))
@@ -210,11 +247,16 @@ def download_workbook(token):
         raise SyncError('future_workbook_timestamp')
     # /content redirects to a preauthorized file URL. Never forward Graph auth to it.
     # Fetch that URL from metadata without Authorization and never log it.
-    download = json_request(url, headers=headers).get('@microsoft.graph.downloadUrl')
+    download = checked_stage('graph_download_url', lambda: json_request(url, headers=headers)).get('@microsoft.graph.downloadUrl')
     if not download or parse.urlsplit(download).scheme != 'https':
         raise SyncError('workbook_download_url_unavailable')
-    content = http(download)
-    after = json_request(url + '?$select=eTag', headers=headers)
+    try:
+        content = checked_stage('workbook_download', lambda: http(download))
+    except SyncError as exc:
+        if str(exc) != 'workbook_download_http_401':
+            raise
+        content = fresh_content(url, headers)
+    after = checked_stage('graph_recheck', lambda: json_request(url + '?$select=eTag', headers=headers))
     if after.get('eTag') != metadata['eTag']:
         raise SyncError('workbook_changed_during_read')
     return content, metadata['lastModifiedDateTime']

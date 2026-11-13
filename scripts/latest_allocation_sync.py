@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from verify_onedrive import (SyncError, required, graph_token, download_workbook,
                             extract_quantities, read_snapshot, json_request, iso,
-                            utcnow, validate_assets)
+                            utcnow, validate_assets, checked_stage)
 
 ENDPOINT = 'https://portfolio-agent-telegram.vercel.app/api/telegram'
 
@@ -20,8 +20,9 @@ def synchronize():
     report_type = os.environ.get('PORTFOLIO_REPORT_TYPE', 'standard')
     if report_type not in ('standard', 'history'):
         raise SyncError('invalid_report_type')
-    previous = read_snapshot(ENDPOINT, secret)  # Unreadable prior state blocks writes.
-    content, modified = download_workbook(graph_token())
+    previous = checked_stage('production_prior_read', lambda: read_snapshot(ENDPOINT, secret))
+    token = checked_stage('microsoft_token', graph_token)
+    content, modified = download_workbook(token)
     assets = extract_quantities(content)
     validate_assets(assets)
     if iso(modified) < iso(previous.get('workbook_updated_at') or previous['updated_at']):
