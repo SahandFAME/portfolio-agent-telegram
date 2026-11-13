@@ -143,6 +143,7 @@ See [docs/ADMIN_DASHBOARD.md](docs/ADMIN_DASHBOARD.md).
 - Public workflow output contains aggregate diagnostics rather than holdings,
   prices, user identifiers or credentials.
   Source HTTP failures identify the failing read/download stage and status code.
+  Rejected temporary file links get one fresh Graph content-link attempt.
 
 Production service: `https://portfolio-agent-telegram.vercel.app/api/telegram`
 

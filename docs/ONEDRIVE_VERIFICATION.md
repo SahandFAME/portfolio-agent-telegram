@@ -46,6 +46,13 @@ tokens. Existing validation errors remain unchanged. Diagnose the failing stage
 before requesting a new sign-in; successful consent alone does not prove Graph
 file retrieval or production readback.
 
+If the metadata download URL returns 401, the reader requests a new redirect from
+the same item's Graph `/content` endpoint once. Automatic redirects are disabled
+on that authenticated request. Only an HTTPS URL without embedded credentials is
+accepted, and its download carries no Graph Authorization header. The original
+workbook identity and before/after eTag checks still apply. Graph-content failures
+and fresh-download failures remain distinct errors; no workbook writes occur.
+
 Microsoft personal-account consent completed successfully on 2026-10-10.
 The refresh token is stored only in the repository Actions secret
 `MS_GRAPH_REFRESH_TOKEN`. The dedicated secret-writer credential is proven

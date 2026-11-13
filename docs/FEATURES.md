@@ -18,6 +18,8 @@ documents linked from the README.
   protected readback. A failed refresh cannot silently fall back to old quantities.
 - HTTP failures in prior-state reads, token refresh, Graph metadata and workbook
   downloads identify their stage without logging response bodies or credentials.
+- A rejected temporary workbook URL receives one fresh-link attempt through Graph
+  `/content`, without forwarding the bearer token or relaxing workbook eTag checks.
 - Source reauthorization explicitly exchanges inherited export consent for a
   `Files.Read` access token and verifies the returned scopes before saving it.
   Failed or still-broad exchanges cannot replace source credentials.
