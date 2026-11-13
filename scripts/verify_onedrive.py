@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import random
+import re
 import subprocess
 import time
 from urllib import error, parse, request
@@ -197,12 +198,22 @@ def graph_token():
     return token['access_token']
 
 
+def checked_stage(stage, call):
+    """Expose only the operation and numeric HTTP status, never service bodies."""
+    try:
+        return call()
+    except SyncError as exc:
+        if re.fullmatch(r'http_\d{3}', str(exc)):
+            raise SyncError(stage + '_' + str(exc)) from None
+        raise
+
+
 def download_workbook(token):
     drive = parse.quote(required('MS_GRAPH_DRIVE_ID'), safe='')
     item = parse.quote(required('MS_GRAPH_ITEM_ID'), safe='')
     url = f'https://graph.microsoft.com/v1.0/drives/{drive}/items/{item}'
     headers = {'Authorization': 'Bearer ' + token}
-    metadata = json_request(url + '?$select=id,name,lastModifiedDateTime,eTag,file', headers=headers)
+    metadata = checked_stage('graph_metadata', lambda: json_request(url + '?$select=id,name,lastModifiedDateTime,eTag,file', headers=headers))
     if metadata.get('name') != 'Trading Journal.xlsm' or not metadata.get('file') or not metadata.get('eTag'):
         raise SyncError('workbook_identity_not_verified')
     iso(metadata.get('lastModifiedDateTime'))
@@ -210,11 +221,11 @@ def download_workbook(token):
         raise SyncError('future_workbook_timestamp')
     # /content redirects to a preauthorized file URL. Never forward Graph auth to it.
     # Fetch that URL from metadata without Authorization and never log it.
-    download = json_request(url, headers=headers).get('@microsoft.graph.downloadUrl')
+    download = checked_stage('graph_download_url', lambda: json_request(url, headers=headers)).get('@microsoft.graph.downloadUrl')
     if not download or parse.urlsplit(download).scheme != 'https':
         raise SyncError('workbook_download_url_unavailable')
-    content = http(download)
-    after = json_request(url + '?$select=eTag', headers=headers)
+    content = checked_stage('workbook_download', lambda: http(download))
+    after = checked_stage('graph_recheck', lambda: json_request(url + '?$select=eTag', headers=headers))
     if after.get('eTag') != metadata['eTag']:
         raise SyncError('workbook_changed_during_read')
     return content, metadata['lastModifiedDateTime']
