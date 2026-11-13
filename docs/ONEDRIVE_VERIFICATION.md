@@ -60,6 +60,19 @@ at `workbook_download_http_401`. A fresh `/content` redirect was also rejected a
 as token expiry, retry consent as the default remedy or substitute the old cache.
 Check normal owner-session file download and investigate file delivery separately.
 
+A subsequent encrypted diagnostic downloaded the same workbook successfully from
+the API after requesting metadata with `Cache-Control: no-cache`. Source metadata
+and eTag reads now request cache revalidation. This is consistent with stale link
+metadata, but is not proof of Microsoft's internal cache behavior; verify full
+sync/readback before claiming recovery. No bearer is sent to the file host.
+
+The full trial with revalidated metadata subsequently succeeded: workflow run
+43391529047 verified all 23 quantities, production storage and exact readback at
+2026-11-13T08:13:35.494567Z. Dedicated-reader consent had already succeeded in run
+43389287030. This verifies the source-access and sync paths for those runs;
+future executions still require normal validation. No live Telegram test message
+was sent. The temporary download diagnostic published only encrypted responses.
+
 Microsoft personal-account consent completed successfully on 2026-10-10.
 The refresh token is stored only in the repository Actions secret
 `MS_GRAPH_REFRESH_TOKEN`. The dedicated secret-writer credential is proven
