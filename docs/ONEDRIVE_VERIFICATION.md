@@ -36,6 +36,16 @@ Configuration alone does not establish restored access. Confirm successful
 consent, then all 23 quantities and exact production readback before reporting
 recovery or completing any valuation based on fresh quantities.
 
+## HTTP failure diagnostics
+
+Do not infer expired Microsoft consent from a generic `http_401`. Source sync now
+prefixes HTTP codes with `production_prior_read`, `microsoft_token`,
+`graph_metadata`, `graph_download_url`, `workbook_download` or `graph_recheck`
+as applicable. These labels contain no response bodies, URLs, identity fields or
+tokens. Existing validation errors remain unchanged. Diagnose the failing stage
+before requesting a new sign-in; successful consent alone does not prove Graph
+file retrieval or production readback.
+
 Microsoft personal-account consent completed successfully on 2026-10-10.
 The refresh token is stored only in the repository Actions secret
 `MS_GRAPH_REFRESH_TOKEN`. The dedicated secret-writer credential is proven

@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from xml.etree import ElementTree as ET
 import zipfile
 
@@ -15,6 +15,22 @@ SPEC = importlib.util.spec_from_file_location('portfolio_sync', Path(__file__).p
 sync = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(sync)
 NS = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+
+
+class StageDiagnosticTests(unittest.TestCase):
+    def test_http_rejection_identifies_stage_without_exception_chain(self):
+        def rejected():
+            raise sync.SyncError('http_401')
+        with self.assertRaisesRegex(sync.SyncError, '^graph_metadata_http_401$') as caught:
+            sync.checked_stage('graph_metadata', rejected)
+        self.assertTrue(caught.exception.__suppress_context__)
+
+    def test_validation_errors_and_success_are_preserved(self):
+        self.assertEqual(sync.checked_stage('graph_metadata', lambda: {'ok':True}), {'ok':True})
+        def rejected():
+            raise sync.SyncError('workbook_identity_not_verified')
+        with self.assertRaisesRegex(sync.SyncError, '^workbook_identity_not_verified$'):
+            sync.checked_stage('graph_metadata', rejected)
 
 
 def workbook(*, formula_cache=True, no_totals=False, omit=False):
@@ -87,6 +103,27 @@ class ExtractionTests(unittest.TestCase):
 
 
 class GraphTests(unittest.TestCase):
+
+    def test_fresh_content_redirect_never_forwards_graph_bearer(self):
+        opener=Mock()
+        opener.open.side_effect=sync.error.HTTPError('https://graph.microsoft.com/content',302,'redirect',{'Location':'https://file.fixture.invalid/fresh'},None)
+        with patch.object(sync.request,'build_opener',return_value=opener),patch.object(sync,'http',return_value=b'fixture') as download:
+            self.assertEqual(sync.fresh_content('https://graph.microsoft.com/v1.0/me/drive/items/fixture',{'Authorization':'Bearer fixture'}),b'fixture')
+            self.assertEqual(opener.open.call_args.args[0].get_header('Authorization'),'Bearer fixture')
+            download.assert_called_once_with('https://file.fixture.invalid/fresh')
+
+    def test_fresh_content_rejects_insecure_redirect_and_graph_auth_failure(self):
+        for status,location,code in [(302,'http://file.fixture.invalid','invalid_content_redirect'),(302,'https://user:password@file.fixture.invalid','invalid_content_redirect'),(401,'','graph_content_http_401')]:
+            opener=Mock();opener.open.side_effect=sync.error.HTTPError('https://graph.microsoft.com/content',status,'error',{'Location':location},None)
+            with self.subTest(status=status,location=location),patch.object(sync.request,'build_opener',return_value=opener),patch.object(sync,'http') as download:
+                with self.assertRaisesRegex(sync.SyncError,code):sync.fresh_content('https://graph.microsoft.com/v1.0/me/drive/items/fixture',{'Authorization':'Bearer fixture'})
+                download.assert_not_called()
+
+    def test_expired_download_refreshes_once_and_still_checks_workbook_etag(self):
+        metadata={'name':'Trading Journal.xlsm','file':{'mimeType':'fixture'},'eTag':'first','lastModifiedDateTime':'2026-01-01T00:00:00Z'}
+        with patch.dict(os.environ,{'MS_GRAPH_DRIVE_ID':'fixture','MS_GRAPH_ITEM_ID':'fixture'}),patch.object(sync,'json_request',side_effect=[metadata,{'@microsoft.graph.downloadUrl':'https://file.fixture.invalid/old'},{'eTag':'changed'}]),patch.object(sync,'http',side_effect=sync.SyncError('http_401')),patch.object(sync,'fresh_content',return_value=b'fixture') as fresh:
+            with self.assertRaisesRegex(sync.SyncError,'workbook_changed_during_read'):sync.download_workbook('fixture')
+            fresh.assert_called_once()
 
     def setUp(self):
         self.assets = dict.fromkeys(sync.MAPPING, 0)

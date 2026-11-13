@@ -142,6 +142,7 @@ See [docs/ADMIN_DASHBOARD.md](docs/ADMIN_DASHBOARD.md).
 - Production writes require authenticated callbacks and exact protected readback.
 - Public workflow output contains aggregate diagnostics rather than holdings,
   prices, user identifiers or credentials.
+  Source HTTP failures identify the failing read/download stage and status code.
 
 Production service: `https://portfolio-agent-telegram.vercel.app/api/telegram`
 
