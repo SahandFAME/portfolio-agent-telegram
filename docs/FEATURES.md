@@ -20,6 +20,8 @@ documents linked from the README.
   downloads identify their stage without logging response bodies or credentials.
 - A rejected temporary workbook URL receives one fresh-link attempt through Graph
   `/content`, without forwarding the bearer token or relaxing workbook eTag checks.
+  Graph metadata requests use `Cache-Control: no-cache` to revalidate responses
+  containing short-lived file links.
 - Source reauthorization explicitly exchanges inherited export consent for a
   `Files.Read` access token and verifies the returned scopes before saving it.
   Failed or still-broad exchanges cannot replace source credentials.
