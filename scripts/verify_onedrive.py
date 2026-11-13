@@ -238,7 +238,7 @@ def download_workbook(token):
     drive = parse.quote(required('MS_GRAPH_DRIVE_ID'), safe='')
     item = parse.quote(required('MS_GRAPH_ITEM_ID'), safe='')
     url = f'https://graph.microsoft.com/v1.0/drives/{drive}/items/{item}'
-    headers = {'Authorization': 'Bearer ' + token}
+    headers = {'Authorization': 'Bearer ' + token, 'Cache-Control': 'no-cache'}
     metadata = checked_stage('graph_metadata', lambda: json_request(url + '?$select=id,name,lastModifiedDateTime,eTag,file', headers=headers))
     if metadata.get('name') != 'Trading Journal.xlsm' or not metadata.get('file') or not metadata.get('eTag'):
         raise SyncError('workbook_identity_not_verified')
