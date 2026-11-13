@@ -53,6 +53,13 @@ accepted, and its download carries no Graph Authorization header. The original
 workbook identity and before/after eTag checks still apply. Graph-content failures
 and fresh-download failures remain distinct errors; no workbook writes occur.
 
+Live verification on 2026-11-13: dedicated-reader consent succeeded. Source sync
+passed prior production read, token refresh and Graph metadata lookup, but failed
+at `workbook_download_http_401`. A fresh `/content` redirect was also rejected at
+`fresh_workbook_download_http_401`. Recovery is not verified. Do not describe this
+as token expiry, retry consent as the default remedy or substitute the old cache.
+Check normal owner-session file download and investigate file delivery separately.
+
 Microsoft personal-account consent completed successfully on 2026-10-10.
 The refresh token is stored only in the repository Actions secret
 `MS_GRAPH_REFRESH_TOKEN`. The dedicated secret-writer credential is proven
